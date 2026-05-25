@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>OrgChart Pro - Agent Profile</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#137fec",
+                        "background-light": "#f6f7f8",
+                        "background-dark": "#101922",
+                    },
+                    fontFamily: {
+                        "display": ["Inter", "sans-serif"]
+                    },
+                    borderRadius: {"DEFAULT": "0.5rem", "lg": "1rem", "xl": "1.5rem", "full": "9999px"},
+                },
+            },
+        }
+    </script>
+<style>
+        body { font-family: 'Inter', sans-serif; }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+        }
+    </style>
+<style>
+    .edit-mode-active .view-mode-hidden { display: block !important; }
+    .edit-mode-active .edit-mode-hidden { display: none !important; }
+    .view-mode-hidden { display: none; }
+    
+    .apple-input {
+        @apply w-full bg-white/50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 transition-all focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none;
+    }
+    .apple-select {
+        @apply bg-white/50 border border-slate-200 rounded-lg px-2 py-1 text-xs font-semibold text-slate-700 transition-all focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none appearance-none cursor-pointer;
+    }
+</style></head>
+<body class="bg-background-light dark:bg-background-dark overflow-hidden">
+<!-- Main Org Chart Background (Blurred) -->
+<div class="fixed inset-0 z-0 flex flex-col blur-sm opacity-50">
+<header class="flex items-center justify-between border-b border-primary/10 bg-white/50 px-10 py-3">
+<div class="flex items-center gap-8">
+<div class="flex items-center gap-4 text-slate-900">
+<span class="material-symbols-outlined text-primary">account_tree</span>
+<h2 class="text-lg font-bold">OrgChart Pro</h2>
+</div>
+</div>
+</header>
+<main class="flex-1 p-10 flex flex-col items-center gap-12 overflow-hidden">
+<!-- CEO Level -->
+<div class="flex flex-col items-center gap-4">
+<div class="w-48 h-24 bg-white rounded-xl shadow-sm border border-slate-200 flex items-center p-4 gap-3">
+<div class="w-12 h-12 rounded-full bg-slate-200"></div>
+<div><div class="h-4 w-20 bg-slate-200 rounded"></div><div class="h-3 w-16 bg-slate-100 mt-2 rounded"></div></div>
+</div>
+<div class="w-0.5 h-12 bg-slate-200"></div>
+</div>
+<!-- Management Level -->
+<div class="flex gap-16 relative">
+<div class="absolute top-[-1px] left-1/4 right-1/4 h-0.5 bg-slate-200"></div>
+<div class="w-48 h-24 bg-white rounded-xl shadow-sm border border-slate-200 flex items-center p-4 gap-3"></div>
+<div class="w-48 h-24 bg-white rounded-xl shadow-sm border border-slate-200 flex items-center p-4 gap-3"></div>
+<div class="w-48 h-24 bg-white rounded-xl shadow-sm border border-slate-200 flex items-center p-4 gap-3"></div>
+</div>
+</main>
+</div>
+<!-- Overlay / Dimmer -->
+<div class="fixed inset-0 bg-slate-900/10 z-10"></div>
+<!-- Side Panel (Apple Style Slide-over) -->
+<div class="fixed top-0 right-0 h-full w-full max-w-md z-20 shadow-2xl transform transition-transform glass-panel border-l border-white/40 flex flex-col" id="side-panel">
+<!-- Header Actions -->
+<div class="flex items-center justify-between p-6">
+<button class="w-10 h-10 flex items-center justify-center rounded-full bg-slate-200/50 hover:bg-slate-200 transition-colors text-slate-700">
+<span class="material-symbols-outlined">close</span>
+</button>
+<div class="flex gap-2">
+<button class="flex items-center gap-2 px-4 py-2 rounded-full bg-white border border-slate-200 text-sm font-semibold text-slate-700 hover:shadow-sm transition-all" onclick="document.getElementById('side-panel').classList.toggle('edit-mode-active')">
+<span class="material-symbols-outlined text-sm">edit</span>
+                    Edit
+                </button>
+<button class="flex items-center gap-2 px-4 py-2 rounded-full bg-primary text-white text-sm font-semibold hover:bg-primary/90 transition-all">
+<span class="material-symbols-outlined text-sm">mail</span>
+                    Message
+                </button>
+</div>
+</div>
+<!-- Scrollable Content -->
+<div class="flex-1 overflow-y-auto px-8 pb-12 custom-scrollbar">
+<!-- Profile Hero -->
+<div class="flex flex-col items-center mb-8">
+<div class="relative mb-6">
+<div class="w-32 h-32 rounded-full bg-cover bg-center border-4 border-white shadow-xl" data-alt="Professional portrait of a male executive smiling" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuBTa90rOe20qOmZwzEUtScXlKkN25wsGjFvztQupUbkmeZsIr_qdvjezQPda0bCi216cQB8w3t1b9ZbJnNezyn-uXFkns152YNlJzVgpO0Flj64LUez3o1r6IX-Konlk-Ybn3WpkT-0hR2sKYuIeclLMs2kFn9TPr8DkaFz_yiIJ5TdNDk1ds8zU7_gV9xNdlHMC4VaFbxB6LM9qV3gMk3WDaYMpAomu4kBhfjY5wfq8rDWXcxMR3ngljyyymBIStUvfoUHHA1M-52o')">
+</div>
+<div class="absolute bottom-1 right-1 w-6 h-6 bg-green-500 border-2 border-white rounded-full"></div>
+<button class="view-mode-hidden absolute inset-0 flex items-center justify-center bg-black/40 rounded-full text-white text-xs font-bold transition-opacity hover:bg-black/50">
+<span class="material-symbols-outlined mr-1 text-sm">photo_camera</span>
+    Change
+</button></div>
+<div>
+<h1 class="text-2xl font-bold text-slate-900 font-display edit-mode-hidden">Alex Rivers</h1>
+<input class="view-mode-hidden apple-input text-center text-xl font-bold mb-2" type="text" value="Alex Rivers"/>
+</div>
+<div>
+<p class="text-slate-500 font-medium edit-mode-hidden">Senior Product Designer</p>
+<input class="view-mode-hidden apple-input text-center text-sm font-medium text-slate-500" type="text" value="Senior Product Designer"/>
+</div>
+<div class="flex gap-2 mt-4"><div class="edit-mode-hidden flex gap-2">
+<span class="px-3 py-1 bg-primary/10 text-primary text-xs font-bold rounded-full uppercase tracking-wider">Direction</span>
+<span class="px-3 py-1 bg-green-100 text-green-700 text-xs font-bold rounded-full uppercase tracking-wider">Active</span>
+</div>
+<div class="view-mode-hidden flex gap-2">
+<select class="apple-select">
+<option selected="">Direction</option>
+<option>Execution</option>
+<option>Strategy</option>
+</select>
+<select class="apple-select">
+<option selected="">Active</option>
+<option>On Leave</option>
+<option>Contract</option>
+</select>
+</div></div>
+</div>
+<!-- Stats Grid -->
+<div class="grid grid-cols-2 gap-4 mb-10">
+<div class="p-4 bg-white/40 rounded-xl border border-white/60">
+<p class="text-[10px] uppercase tracking-widest text-slate-400 font-bold mb-1">Tenure</p>
+<p class="text-lg font-semibold text-slate-800">4.2 Years</p>
+</div>
+<div class="p-4 bg-white/40 rounded-xl border border-white/60">
+<p class="text-[10px] uppercase tracking-widest text-slate-400 font-bold mb-1">Direct Reports</p>
+<p class="text-lg font-semibold text-slate-800">8 People</p>
+</div>
+</div>
+<!-- Information Sections -->
+<div class="space-y-8">
+<!-- Personal Info -->
+<section>
+<h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Personal Information</h3>
+<div class="space-y-4"><div class="flex justify-between items-center py-2 border-b border-slate-100">
+<span class="text-sm text-slate-500">Department</span>
+<span class="text-sm font-semibold text-slate-800 edit-mode-hidden">Product Design</span>
+<select class="view-mode-hidden apple-select w-40 text-right font-semibold">
+<option selected="">Product Design</option>
+<option>Engineering</option>
+<option>Marketing</option>
+</select>
+</div>
+<div class="flex justify-between items-center py-2 border-b border-slate-100">
+<span class="text-sm text-slate-500">Location</span>
+<span class="text-sm font-semibold text-slate-800 edit-mode-hidden">San Francisco, CA</span>
+<input class="view-mode-hidden apple-input w-40 text-right" type="text" value="San Francisco, CA"/>
+</div>
+<div class="flex justify-between items-center py-2 border-b border-slate-100">
+<span class="text-sm text-slate-500">Employee ID</span>
+<span class="text-sm font-semibold text-slate-800 edit-mode-hidden">#OCP-4829</span>
+<input class="view-mode-hidden apple-input w-40 text-right" type="text" value="#OCP-4829"/>
+</div></div>
+</section>
+<!-- Contact -->
+<section>
+<h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Contact Details</h3>
+<div class="space-y-3"><div class="space-y-3">
+<div class="edit-mode-hidden space-y-3">
+<a class="flex items-center gap-3 p-3 bg-white/60 rounded-xl hover:bg-white transition-colors group" href="#">
+<div class="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center text-slate-500 group-hover:text-primary transition-colors"><span class="material-symbols-outlined text-lg">alternate_email</span></div>
+<span class="text-sm font-medium text-slate-700">alex.rivers@orgchart.pro</span>
+</a>
+<a class="flex items-center gap-3 p-3 bg-white/60 rounded-xl hover:bg-white transition-colors group" href="#">
+<div class="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center text-slate-500 group-hover:text-primary transition-colors"><span class="material-symbols-outlined text-lg">call</span></div>
+<span class="text-sm font-medium text-slate-700">+1 (555) 012-3456</span>
+</a>
+</div>
+<div class="view-mode-hidden space-y-3">
+<div class="flex items-center gap-3 p-2 bg-white/60 rounded-xl">
+<span class="material-symbols-outlined text-slate-400 text-lg ml-2">alternate_email</span>
+<input class="apple-input bg-transparent border-none p-0 focus:ring-0" type="email" value="alex.rivers@orgchart.pro"/>
+</div>
+<div class="flex items-center gap-3 p-2 bg-white/60 rounded-xl">
+<span class="material-symbols-outlined text-slate-400 text-lg ml-2">call</span>
+<input class="apple-input bg-transparent border-none p-0 focus:ring-0" type="text" value="+1 (555) 012-3456"/>
+</div>
+</div>
+</div></div>
+</section>
+<!-- Reports To -->
+<section>
+<h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Reports To</h3>
+<div class="p-4 bg-primary/5 border border-primary/10 rounded-2xl flex items-center gap-4">
+<div class="w-12 h-12 rounded-full bg-cover bg-center" data-alt="Avatar of Sarah Jenkins, Design Director" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuCnxNPenNVDOMQ2PiK71UnSWO5ZbVXNoNt3h0_qu-vtOctOxQZJZmsp-m3476GKMFWv16FZbThMOTq3HIuDZbmYmfGocIU833MbjCfnHW6jWLG3DInWtC_AjnxmjvXac7lswPlALmffQitds7tE5WAAkLp3pM--7rdNKWCWBbmivUpChfSTlkrT4shuRowSNRtaz3QPV3Ppm2qG3ratKoK4TdsF-QiGWvhMLJVoxbgxT6K9ZRbjcXIryBTSo7mUFeom_XFsrjQiJfcK')">
+</div>
+<div class="flex-1">
+<h4 class="text-sm font-bold text-slate-900">Sarah Jenkins</h4>
+<p class="text-xs text-slate-500">Design Director</p>
+</div>
+<button class="w-8 h-8 rounded-full bg-white flex items-center justify-center text-slate-400 hover:text-primary shadow-sm">
+<span class="material-symbols-outlined text-lg">chevron_right</span>
+</button>
+</div>
+</section>
+<!-- Bio -->
+<section>
+<h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">About</h3>
+<p class="text-sm text-slate-600 leading-relaxed">
+                        Leading the design systems and user experience strategy for our core enterprise products. Focused on creating seamless, accessible design patterns across all platforms.
+                    </p>
+</section>
+</div>
+</div>
+<!-- Bottom Action -->
+<div class="p-6 border-t border-white/40 glass-panel"><div class="edit-mode-hidden">
+<button class="w-full py-4 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800 transition-colors shadow-lg">
+        View Full Career Timeline
+    </button>
+</div>
+<div class="view-mode-hidden flex gap-3">
+<button class="flex-1 py-4 bg-white border border-slate-200 text-slate-700 rounded-xl font-bold hover:bg-slate-50 transition-colors" onclick="document.getElementById('side-panel').classList.remove('edit-mode-active')">
+        Cancel
+    </button>
+<button class="flex-1 py-4 bg-primary text-white rounded-xl font-bold hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20" onclick="document.getElementById('side-panel').classList.remove('edit-mode-active')">
+        Save Changes
+    </button>
+</div></div>
+</div>
+</body></html>

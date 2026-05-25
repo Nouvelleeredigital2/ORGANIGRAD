@@ -1,0 +1,853 @@
+/* ============================================================================
+ * Organigrad — Design Tokens
+ *
+ * Aesthetic: Apple-style refinement. Off-white pages, true-white surfaces with
+ * hairline borders (not heavy shadows). One accent color (system blue) used
+ * sparingly. Type carries the weight at LIGHT weights, not bold/black.
+ *
+ * Three node archetypes (HUMAN / AGENT_IA / SOFTWARE_MCP) are differentiated
+ * by GLYPH and FINISH, not by saturated card backgrounds:
+ *   - HUMAN          → soft circular photo, filled disc, graphite ink
+ *   - AGENT_IA       → hollow ring with center pip, accent blue ink
+ *   - SOFTWARE_MCP   → square rounded chiclet, cool graphite ink
+ *
+ * Source: built on top of the foundations in ORGANIGRAD/src/design/tokens.ts
+ * but with the visual identity refined for premium feel.
+ * ========================================================================= */
+
+/* Inter + Inter Display from Google Fonts (closest free substitute for SF Pro).
+   If you license SF Pro, swap the family names — the rest of the system
+   is unchanged. */
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
+
+:root {
+    /* ---------------------------------------------------------------------- */
+    /* TYPE FAMILIES                                                          */
+    /* ---------------------------------------------------------------------- */
+    /* Inter handles both UI and Display at this scale. The system-ui fallback
+       gives us actual SF Pro on macOS / iOS without licensing. */
+    --font-display: "SF Pro Display", "Inter", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    --font-text:    "SF Pro Text",    "Inter", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    --font-sans:    var(--font-text);
+    --font-mono:    "SF Mono", "JetBrains Mono", ui-monospace, Menlo, monospace;
+
+    /* font-feature settings: SF/Inter give nice variants by default. */
+    --font-features: "cv11", "ss03", "ss01";    /* slashed-zero, alt-a, alt-l */
+    --font-features-display: "ss03", "cv11";
+
+    /* ---------------------------------------------------------------------- */
+    /* TYPE SCALE — Apple-style proportions.                                  */
+    /* Display weights are LIGHT (300-500). Heading weights are MEDIUM (500). */
+    /* Letter-spacing is tighter at large sizes, looser at small ALL-CAPS.    */
+    /* ---------------------------------------------------------------------- */
+    --text-hero:    clamp(56px, 7vw, 88px);   /* keynote-style page lead */
+    --text-display: 56px;                     /* big "Tableau de Bord." */
+    --text-h1:      40px;
+    --text-h2:      28px;
+    --text-h3:      22px;
+    --text-h4:      17px;
+    --text-body:    15px;                     /* body — Apple body size */
+    --text-callout: 14px;
+    --text-meta:    13px;
+    --text-caption: 12px;
+    --text-eyebrow: 11px;                     /* uppercase kickers */
+
+    --leading-display: 1.05;
+    --leading-tight:   1.15;
+    --leading-snug:    1.3;
+    --leading-normal:  1.5;
+    --leading-relaxed: 1.65;
+
+    /* Apple uses slightly-negative tracking at every size above 17px. */
+    --tracking-display:  -0.026em;   /* 56px+ */
+    --tracking-h1:       -0.022em;
+    --tracking-h2:       -0.018em;
+    --tracking-h3:       -0.012em;
+    --tracking-body:     -0.005em;
+    --tracking-eyebrow:   0.14em;    /* uppercase eyebrows */
+    --tracking-eyebrow-wide: 0.22em; /* very small / very dense kickers */
+
+    --weight-light:    300;
+    --weight-regular:  400;
+    --weight-medium:   500;
+    --weight-semibold: 600;
+    --weight-bold:     700;
+
+    /* ---------------------------------------------------------------------- */
+    /* COLOR — Apple-style grayscale (the ENTIRE chrome lives here)           */
+    /* These are sampled from apple.com — `--label*` map to SF Symbols labels.*/
+    /* ---------------------------------------------------------------------- */
+    --bg-page:          #fbfbfd;     /* exact apple.com bg */
+    --bg-secondary:     #f5f5f7;     /* sectioned bg */
+    --bg-tertiary:      #ebebed;
+    --surface:          #ffffff;     /* cards */
+    --surface-tint:     rgba(255, 255, 255, 0.72);   /* glass tint over photos */
+
+    --ink-1:            #1d1d1f;     /* label primary  — Apple primary text */
+    --ink-2:            #424245;     /* label secondary */
+    --ink-3:            #6e6e73;     /* label tertiary */
+    --ink-4:            #86868b;     /* label quaternary — Apple captions */
+    --ink-5:            #b7b7bb;     /* placeholder */
+
+    --hairline:         rgba(0, 0, 0, 0.08);
+    --hairline-strong:  rgba(0, 0, 0, 0.13);
+    --hairline-on-dark: rgba(255, 255, 255, 0.18);
+    --separator:        #d2d2d7;
+
+    /* ---------------------------------------------------------------------- */
+    /* COLOR — Single brand accent. Used SPARINGLY.                           */
+    /* Apple's "system blue" — for links, focus rings, primary buttons.       */
+    /* ---------------------------------------------------------------------- */
+    --accent:           #0071e3;
+    --accent-hover:     #0077ed;
+    --accent-press:     #006edb;
+    --accent-soft:      rgba(0, 113, 227, 0.08);
+    --accent-tint:      #e8f1ff;     /* very pale chip bg */
+
+    /* ---------------------------------------------------------------------- */
+    /* COLOR — System semantic, used ONLY for state                           */
+    /* ---------------------------------------------------------------------- */
+    --system-red:       #ff3b30;     /* destructive */
+    --system-green:     #34c759;     /* success */
+    --system-yellow:    #ff9f0a;     /* warning / waiting */
+    --system-indigo:    #5856d6;     /* AI control state */
+
+    /* ---------------------------------------------------------------------- */
+    /* COLOR — Three archetype "inks" (NOT card backgrounds — just glyph tone)*/
+    /* ---------------------------------------------------------------------- */
+    --human-ink:        var(--ink-1);          /* warm graphite */
+    --human-fill:       #f5f1ec;               /* very subtle sand wash */
+
+    --ai-ink:           var(--accent);         /* the one place blue appears */
+    --ai-fill:          var(--accent-tint);
+
+    --software-ink:     #6e6e73;               /* cool graphite */
+    --software-fill:    #f0f0f2;               /* very subtle silver wash */
+
+    /* ---------------------------------------------------------------------- */
+    /* COLOR — Status (single-channel, low-saturation)                        */
+    /* Replaces the rainbow status palette from tokens.ts.                    */
+    /* ---------------------------------------------------------------------- */
+    --status-idle:               var(--ink-5);
+    --status-executing:          var(--system-green);
+    --status-control-ia:         var(--system-indigo);
+    --status-waiting-human:      var(--system-yellow);
+    --status-error:              var(--system-red);
+
+    /* ---------------------------------------------------------------------- */
+    /* SEMANTIC ROLES                                                         */
+    /* ---------------------------------------------------------------------- */
+    --fg-1: var(--ink-1);
+    --fg-2: var(--ink-2);
+    --fg-3: var(--ink-3);
+    --fg-4: var(--ink-4);
+    --fg-on-accent: #ffffff;
+
+    --border-1: var(--hairline);
+    --border-2: var(--hairline-strong);
+
+    /* ---------------------------------------------------------------------- */
+    /* RADII — softer, more restrained                                        */
+    /* ---------------------------------------------------------------------- */
+    --radius-xs:   6px;
+    --radius-sm:   10px;
+    --radius-md:   14px;
+    --radius-lg:   18px;          /* default card */
+    --radius-xl:   22px;
+    --radius-2xl:  28px;          /* hero card */
+    --radius-3xl:  34px;
+    --radius-pill: 9999px;
+
+    /* ---------------------------------------------------------------------- */
+    /* ELEVATION                                                              */
+    /* Apple uses ALMOST NO shadows. Hairlines do 90% of the depth work.      */
+    /* Reserve shadow for floating elements only (modal, popover, dropdown).  */
+    /* ---------------------------------------------------------------------- */
+    --shadow-hairline:  inset 0 0 0 1px var(--hairline);
+    --shadow-flat:      0 1px 2px rgba(0, 0, 0, 0.04);
+    --shadow-card:      0 1px 3px rgba(0, 0, 0, 0.05), 0 8px 24px -10px rgba(0, 0, 0, 0.08);
+    --shadow-raised:    0 4px 12px rgba(0, 0, 0, 0.06), 0 16px 40px -12px rgba(0, 0, 0, 0.12);
+    --shadow-floating:  0 24px 60px -16px rgba(0, 0, 0, 0.22), 0 8px 20px rgba(0, 0, 0, 0.08);
+    --shadow-focus:     0 0 0 4px rgba(0, 113, 227, 0.2);
+
+    /* ---------------------------------------------------------------------- */
+    /* SPACING — 8pt grid                                                     */
+    /* ---------------------------------------------------------------------- */
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 20px;
+    --space-6: 24px;
+    --space-8: 32px;
+    --space-10: 40px;
+    --space-12: 48px;
+    --space-16: 64px;
+    --space-20: 80px;
+
+    /* ---------------------------------------------------------------------- */
+    /* MOTION — Apple-style "spring out"                                      */
+    /* ---------------------------------------------------------------------- */
+    --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);     /* material-ish */
+    --ease-soft:     cubic-bezier(0.25, 0.1, 0.25, 1); /* default css ease */
+    --ease-emphatic: cubic-bezier(0.32, 0.72, 0, 1);   /* Apple "spring" */
+
+    --duration-instant: 100ms;
+    --duration-fast:    200ms;
+    --duration-base:    300ms;
+    --duration-slow:    500ms;
+
+    /* ---------------------------------------------------------------------- */
+    /* BACKDROPS                                                              */
+    /* Apple "vibrancy": high blur + saturation                               */
+    /* ---------------------------------------------------------------------- */
+    --blur-toolbar: 30px;
+    --blur-chrome:  40px;
+    --saturate:     180%;
+}
+
+/* ============================================================================
+ * RESETS & BASE
+ * ========================================================================= */
+html {
+    background: var(--bg-page);
+}
+html, body {
+    font-family: var(--font-text);
+    font-feature-settings: var(--font-features);
+    color: var(--fg-1);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+}
+
+/* ============================================================================
+ * SEMANTIC TYPE — drop these classes on elements for instant Apple voice.
+ * ========================================================================= */
+
+.eyebrow,
+.kicker {
+    font-family: var(--font-text);
+    font-size: var(--text-eyebrow);
+    font-weight: var(--weight-semibold);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-eyebrow);
+    color: var(--accent);          /* Apple kickers are almost always accent blue */
+    line-height: 1;
+}
+.eyebrow-quiet,
+.kicker-quiet {
+    font-family: var(--font-text);
+    font-size: var(--text-eyebrow);
+    font-weight: var(--weight-semibold);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-eyebrow-wide);
+    color: var(--fg-4);
+    line-height: 1;
+}
+
+.t-hero {
+    font-family: var(--font-display);
+    font-feature-settings: var(--font-features-display);
+    font-size: var(--text-hero);
+    font-weight: var(--weight-semibold);
+    letter-spacing: var(--tracking-display);
+    line-height: var(--leading-display);
+    color: var(--fg-1);
+}
+.t-display {
+    font-family: var(--font-display);
+    font-feature-settings: var(--font-features-display);
+    font-size: var(--text-display);
+    font-weight: var(--weight-semibold);
+    letter-spacing: var(--tracking-display);
+    line-height: var(--leading-display);
+    color: var(--fg-1);
+}
+.t-h1 {
+    font-family: var(--font-display);
+    font-feature-settings: var(--font-features-display);
+    font-size: var(--text-h1);
+    font-weight: var(--weight-semibold);
+    letter-spacing: var(--tracking-h1);
+    line-height: var(--leading-tight);
+    color: var(--fg-1);
+}
+.t-h2 {
+    font-family: var(--font-display);
+    font-size: var(--text-h2);
+    font-weight: var(--weight-semibold);
+    letter-spacing: var(--tracking-h2);
+    line-height: var(--leading-tight);
+    color: var(--fg-1);
+}
+.t-h3 {
+    font-family: var(--font-display);
+    font-size: var(--text-h3);
+    font-weight: var(--weight-medium);
+    letter-spacing: var(--tracking-h3);
+    line-height: var(--leading-snug);
+    color: var(--fg-1);
+}
+.t-h4 {
+    font-family: var(--font-text);
+    font-size: var(--text-h4);
+    font-weight: var(--weight-semibold);
+    letter-spacing: 0;
+    line-height: var(--leading-snug);
+    color: var(--fg-1);
+}
+.t-body {
+    font-family: var(--font-text);
+    font-size: var(--text-body);
+    font-weight: var(--weight-regular);
+    letter-spacing: var(--tracking-body);
+    line-height: var(--leading-relaxed);
+    color: var(--fg-2);
+}
+.t-body-quiet {
+    font-family: var(--font-text);
+    font-size: var(--text-body);
+    font-weight: var(--weight-regular);
+    line-height: var(--leading-relaxed);
+    color: var(--fg-3);
+}
+.t-meta {
+    font-family: var(--font-text);
+    font-size: var(--text-meta);
+    font-weight: var(--weight-regular);
+    color: var(--fg-3);
+}
+.t-caption {
+    font-family: var(--font-text);
+    font-size: var(--text-caption);
+    font-weight: var(--weight-regular);
+    color: var(--fg-4);
+}
+.t-mono {
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
+    font-weight: var(--weight-regular);
+    color: var(--fg-3);
+    font-feature-settings: "tnum", "ss01";
+}
+
+/* Hero numbers — used on the dashboard. Tabular figures so columns line up. */
+.t-number {
+    font-family: var(--font-display);
+    font-size: 64px;
+    font-weight: var(--weight-medium);
+    letter-spacing: -0.03em;
+    line-height: 1;
+    color: var(--fg-1);
+    font-variant-numeric: tabular-nums;
+}
+
+/* ============================================================================
+ * SURFACES & MOTIFS
+ * ========================================================================= */
+
+.page { background: var(--bg-page); }
+.surface-section { background: var(--bg-secondary); }
+.surface-card {
+    background: var(--surface);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-hairline), var(--shadow-flat);
+}
+.surface-card-elev {
+    background: var(--surface);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-hairline), var(--shadow-card);
+}
+.surface-glass {
+    background: rgba(255, 255, 255, 0.72);
+    -webkit-backdrop-filter: saturate(var(--saturate)) blur(var(--blur-chrome));
+    backdrop-filter:        saturate(var(--saturate)) blur(var(--blur-chrome));
+    box-shadow: var(--shadow-hairline);
+}
+
+.divider-hairline { height: 1px; background: var(--hairline); }
+
+/* Focus ring — used on any interactive element */
+.focus-ring:focus-visible {
+    outline: none;
+    box-shadow: var(--shadow-focus);
+}
+
+/* ============================================================================
+ * UTILITY ANIMATIONS
+ * ========================================================================= */
+
+@keyframes pulse-soft {
+    0%, 100% { opacity: 0.5; transform: scale(1); }
+    50%      { opacity: 1;   transform: scale(1.15); }
+}
+@keyframes ring-out {
+    0%   { opacity: 0.5; transform: scale(0.8); }
+    100% { opacity: 0;   transform: scale(2.2); }
+}
+@keyframes shimmer-x {
+    0%   { transform: translateX(-110%); }
+    100% { transform: translateX(220%);  }
+}
+
+/* ============================================================================
+ * v2 (bundle ExyDH/...) — Validation Center slide-in, Profile modal refonte
+ * ========================================================================= */
+
+@keyframes fade-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+@keyframes pop-in {
+    from { opacity: 0; transform: translateY(-4px) scale(0.99); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes slide-in-right {
+    from { transform: translateX(100%); }
+    to   { transform: translateX(0); }
+}
+
+/* Modal — surface centrée pour ProfileModal & co (Apple-style) */
+.dsm-modal-overlay {
+    position: fixed; inset: 0;
+    background: rgba(29, 29, 31, 0.32);
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
+    z-index: 90;
+    display: flex; align-items: center; justify-content: center;
+    animation: fade-in 200ms var(--ease-standard) both;
+    padding: 24px;
+    overflow-y: auto;
+}
+.dsm-modal {
+    width: 640px; max-width: 92vw;
+    background: var(--surface);
+    border-radius: var(--radius-2xl);
+    box-shadow: 0 24px 60px -16px rgba(0,0,0,0.32), 0 8px 20px rgba(0,0,0,0.1);
+    padding: 32px;
+    animation: pop-in 280ms var(--ease-emphatic) both;
+}
+.dsm-modal .head { display: flex; gap: 16px; align-items: center; margin-bottom: 24px; }
+.dsm-modal .avatar {
+    width: 72px; height: 72px; border-radius: 50%;
+    background: var(--bg-secondary); color: var(--fg-3);
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+}
+.dsm-modal .avatar svg { width: 32px; height: 32px; stroke-width: 1.5; }
+.dsm-modal .name {
+    font-family: var(--font-display);
+    font-size: 22px; font-weight: 600;
+    letter-spacing: -0.022em;
+    color: var(--fg-1); line-height: 1.15;
+}
+.dsm-modal .name .sn { font-weight: 500; text-transform: uppercase; letter-spacing: -0.005em; }
+.dsm-modal .role { font-size: 13px; font-weight: 500; color: var(--fg-2); margin-top: 4px; }
+.dsm-modal .close {
+    margin-left: auto;
+    width: 30px; height: 30px;
+    border-radius: 50%;
+    background: var(--bg-secondary); color: var(--fg-2);
+    border: none;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    transition: all 200ms var(--ease-standard);
+}
+.dsm-modal .close:hover { background: rgba(0,0,0,0.07); color: var(--fg-1); }
+.dsm-modal .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px 22px; }
+@media (max-width: 540px) {
+    .dsm-modal .grid { grid-template-columns: 1fr; gap: 14px; }
+}
+.dsm-modal .field .k {
+    font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.12em;
+    color: var(--fg-4);
+    margin-bottom: 4px;
+}
+.dsm-modal .field .v {
+    font-size: 14px; font-weight: 500;
+    color: var(--fg-1);
+    letter-spacing: -0.005em;
+}
+.dsm-modal .footer-row {
+    display: flex; gap: 10px; justify-content: flex-end;
+    margin-top: 24px; padding-top: 20px;
+    border-top: 1px solid var(--hairline);
+    flex-wrap: wrap;
+}
+.dsm-modal .chip {
+    padding: 2px 8px;
+    background: var(--bg-secondary);
+    border-radius: 999px;
+    font-size: 10px; font-weight: 500;
+    color: var(--fg-3);
+    letter-spacing: 0.02em;
+}
+
+/* Validation Center — panneau coulissant à droite (KB §3.D) */
+.dsm-vc-overlay {
+    position: fixed; inset: 0;
+    background: rgba(29, 29, 31, 0.32);
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
+    z-index: 90;
+    display: flex; justify-content: flex-end;
+    animation: fade-in 200ms var(--ease-standard) both;
+}
+.dsm-vc-panel {
+    width: 460px; max-width: 96vw;
+    height: 100%;
+    background: var(--surface);
+    box-shadow: -16px 0 60px -16px rgba(0,0,0,0.22), -4px 0 12px rgba(0,0,0,0.08);
+    padding: 28px 26px 22px;
+    display: flex; flex-direction: column;
+    animation: slide-in-right 320ms var(--ease-emphatic) both;
+}
+.dsm-vc-head {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    margin-bottom: 22px;
+}
+.dsm-vc-eyebrow {
+    font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.14em;
+    color: var(--accent);
+    margin-bottom: 6px;
+}
+.dsm-vc-title {
+    font-family: var(--font-display);
+    font-size: 22px; font-weight: 600;
+    letter-spacing: -0.022em;
+    color: var(--fg-1);
+    line-height: 1.15;
+}
+.dsm-vc-close {
+    width: 30px; height: 30px;
+    border-radius: 50%;
+    background: var(--bg-secondary); color: var(--fg-2);
+    border: none;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    transition: all 200ms var(--ease-standard);
+}
+.dsm-vc-close:hover { background: rgba(0,0,0,0.07); color: var(--fg-1); }
+
+.dsm-vc-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; margin: 0 -8px; padding: 0 8px; }
+.dsm-vc-item {
+    display: grid;
+    grid-template-columns: 36px 1fr auto;
+    gap: 12px;
+    align-items: start;
+    padding: 14px 14px;
+    background: var(--bg-page);
+    border-radius: var(--radius-md);
+    transition: background 150ms var(--ease-standard);
+}
+.dsm-vc-item:hover { background: var(--bg-secondary); }
+
+.dsm-vc-glyph { width: 36px; height: 36px; flex-shrink: 0; position: relative; display: flex; align-items: center; justify-content: center; }
+.dsm-vc-glyph.human { background: var(--human-fill); border-radius: 50%; }
+.dsm-vc-glyph.human::after { content:""; width: 12px; height: 12px; border-radius: 50%; background: var(--human-ink); }
+.dsm-vc-glyph.ai { border: 1.5px solid var(--ai-ink); border-radius: 50%; }
+.dsm-vc-glyph.ai::after { content:""; width: 5px; height: 5px; border-radius: 50%; background: var(--ai-ink); }
+.dsm-vc-glyph.mcp { background: var(--software-fill); border-radius: 10px; }
+.dsm-vc-glyph.mcp::after { content:""; width: 12px; height: 12px; background: var(--software-ink); border-radius: 3px; }
+
+.dsm-vc-body { min-width: 0; }
+.dsm-vc-who {
+    font-size: 10px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.12em;
+    color: var(--fg-4);
+    margin-bottom: 4px;
+}
+.dsm-vc-what {
+    font-family: var(--font-display);
+    font-size: 14px; font-weight: 600;
+    letter-spacing: -0.012em;
+    color: var(--fg-1);
+    line-height: 1.25;
+}
+.dsm-vc-detail { font-size: 12px; color: var(--fg-3); margin-top: 3px; line-height: 1.4; }
+.dsm-vc-when   { font-size: 11px; color: var(--fg-4); margin-top: 6px; }
+.dsm-vc-actions { display: flex; flex-direction: column; gap: 6px; align-self: stretch; justify-content: flex-end; }
+
+.dsm-vc-foot {
+    margin-top: 18px;
+    padding-top: 16px;
+    border-top: 1px solid var(--hairline);
+    font-size: 12px;
+    color: var(--fg-4);
+    line-height: 1.5;
+}
+
+/* Pastille trigger dans la topbar / l'app */
+.dsm-vc-trigger {
+    position: relative;
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 12px 6px 10px;
+    background: rgba(255, 159, 10, 0.10);
+    color: #b46c00;
+    border-radius: 9999px;
+    font-size: 12px; font-weight: 500;
+    cursor: pointer;
+    border: none;
+    transition: background 200ms var(--ease-standard);
+    letter-spacing: -0.005em;
+}
+.dsm-vc-trigger:hover { background: rgba(255, 159, 10, 0.18); }
+.dsm-vc-trigger .n {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+/* ============================================================================
+ * Print Export View — aperçu A3 paysage avant export PDF
+ * CSS rédigée d'après la structure du JSX du bundle v2 + description chat.
+ * Page A3 paysage = 1120 × 792 (à l'échelle de l'aperçu navigateur).
+ * ========================================================================= */
+
+@keyframes scale-pop {
+    from { opacity: 0; transform: scale(0.94); }
+    to   { opacity: 1; transform: scale(1); }
+}
+
+.dsm-print-overlay {
+    position: fixed; inset: 0;
+    background: rgba(29, 29, 31, 0.62);
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
+    z-index: 95;
+    display: flex; align-items: center; justify-content: center;
+    overflow: auto;
+    padding: 80px 24px 24px;
+    animation: fade-in 220ms var(--ease-standard) both;
+}
+.dsm-print-stage {
+    position: relative;
+    animation: scale-pop 320ms var(--ease-emphatic) both;
+}
+
+/* Toolbar flottante (HORS de la page A3) */
+.dsm-print-toolbar {
+    position: absolute;
+    top: -60px; left: 0; right: 0;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 16px;
+}
+.dsm-print-toolbar .pt-label { color: white; min-width: 0; }
+.dsm-print-toolbar .pt-eyebrow {
+    font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.14em;
+    color: rgba(255,255,255,0.55);
+    margin-bottom: 4px;
+}
+.dsm-print-toolbar .pt-title {
+    font-family: var(--font-display);
+    font-size: 15px; font-weight: 600;
+    color: white; letter-spacing: -0.012em;
+}
+.dsm-print-toolbar .toolbar-actions { display: flex; gap: 8px; flex-shrink: 0; }
+
+/* Page A3 paysage — toile blanche, grille subtile, ombre profonde */
+.dsm-print-page {
+    width: 1120px; max-width: 100%;
+    height: 792px;
+    background: white;
+    border-radius: 4px;
+    box-shadow: 0 32px 80px -16px rgba(0,0,0,0.45), 0 8px 24px rgba(0,0,0,0.18);
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    grid-template-columns: 1fr 280px;
+    grid-template-areas:
+        "head head"
+        "body index"
+        "foot foot";
+    background-image: linear-gradient(rgba(0,0,0,0.03) 1px, transparent 1px),
+                      linear-gradient(90deg, rgba(0,0,0,0.03) 1px, transparent 1px);
+    background-size: 36px 36px;
+    overflow: hidden;
+}
+
+/* En-tête */
+.dsm-print-page .pp-head {
+    grid-area: head;
+    display: flex; align-items: flex-start; justify-content: space-between;
+    padding: 28px 36px 16px;
+    border-bottom: 1px solid var(--hairline);
+    background: white;
+}
+.pp-brand { display: flex; align-items: center; gap: 14px; }
+.pp-mark {
+    width: 40px; height: 40px;
+    border-radius: 10px;
+    background: var(--ink-1); color: white;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-display);
+    font-weight: 600; font-size: 22px;
+    letter-spacing: -0.06em;
+    flex-shrink: 0;
+}
+.pp-product {
+    font-family: var(--font-display);
+    font-size: 18px; font-weight: 600;
+    color: var(--fg-1);
+    letter-spacing: -0.018em;
+    line-height: 1.1;
+}
+.pp-city {
+    font-size: 12px; color: var(--fg-3);
+    margin-top: 2px;
+    letter-spacing: 0.02em;
+}
+.pp-meta { text-align: right; }
+.pp-pole-label {
+    font-size: 10px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.22em;
+    color: var(--fg-4);
+    margin-bottom: 4px;
+}
+.pp-pole {
+    font-family: var(--font-display);
+    font-size: 18px; font-weight: 600;
+    color: var(--fg-1);
+    letter-spacing: -0.018em;
+}
+.pp-stamp {
+    margin-top: 8px;
+    display: flex; align-items: center; justify-content: flex-end; gap: 10px;
+    font-size: 11px; color: var(--fg-4);
+}
+.pp-dot { width: 3px; height: 3px; border-radius: 50%; background: var(--fg-4); display: inline-block; }
+
+/* Corps — organigramme imprimable */
+.dsm-print-page .pp-body {
+    grid-area: body;
+    padding: 24px 24px 16px 36px;
+    overflow: hidden;
+    position: relative;
+}
+.pp-tree {
+    display: flex; flex-direction: column; align-items: center;
+    gap: 18px;
+}
+.pp-branch { display: flex; flex-direction: column; align-items: center; gap: 14px; position: relative; }
+.pp-branch::before {
+    /* Trait de raccord vertical au-dessus de chaque enfant */
+    content: "";
+    position: absolute;
+    top: -14px; left: 50%;
+    width: 1px; height: 14px;
+    background: var(--hairline);
+}
+.pp-tree > .pp-branch::before { display: none; }
+.pp-children {
+    display: flex; gap: 14px; flex-wrap: wrap; justify-content: center;
+    position: relative;
+}
+.pp-children::before {
+    /* Trait horizontal reliant les enfants */
+    content: "";
+    position: absolute;
+    top: -7px; left: 10%; right: 10%;
+    height: 1px;
+    background: var(--hairline);
+}
+.pp-card {
+    width: 180px;
+    background: white;
+    border-radius: var(--radius-sm);
+    box-shadow: inset 0 0 0 1px var(--hairline);
+    padding: 10px 12px 11px;
+    position: relative;
+    text-align: center;
+}
+.pp-card.dir {
+    width: 220px;
+    box-shadow: inset 0 0 0 1.5px var(--hairline-strong);
+    padding: 14px 14px 13px;
+}
+.pp-card.vacant {
+    background: transparent;
+    box-shadow: inset 0 0 0 1px transparent;
+    border: 1px dashed var(--ink-5);
+}
+.pp-grade {
+    position: absolute;
+    top: -8px; left: 50%; transform: translateX(-50%);
+    background: white;
+    padding: 1px 8px;
+    border-radius: 999px;
+    box-shadow: inset 0 0 0 1px var(--hairline);
+    font-size: 9px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.14em;
+    color: var(--fg-3);
+}
+.pp-card.dir .pp-grade { color: var(--fg-1); }
+.pp-name {
+    font-family: var(--font-display);
+    font-size: 12px; font-weight: 600;
+    color: var(--fg-1);
+    letter-spacing: -0.012em;
+    line-height: 1.2;
+    margin-top: 2px;
+}
+.pp-name .sn { font-weight: 500; text-transform: uppercase; letter-spacing: 0; }
+.pp-card.dir .pp-name { font-size: 14px; }
+.pp-card.vacant .pp-name { font-style: italic; color: var(--fg-4); font-weight: 400; }
+.pp-fonction {
+    font-size: 10px; color: var(--fg-2); margin-top: 3px;
+    font-weight: 500;
+}
+.pp-service {
+    font-size: 9px; color: var(--fg-4);
+    margin-top: 2px;
+    letter-spacing: 0.04em;
+}
+
+/* Colonne Annuaire à droite */
+.dsm-print-page .pp-index {
+    grid-area: index;
+    padding: 28px 28px 16px 18px;
+    border-left: 1px solid var(--hairline);
+    overflow-y: auto;
+    background: rgba(251,251,253,0.6);
+}
+.pp-index-eyebrow {
+    font-size: 10px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.22em;
+    color: var(--fg-4);
+    margin-bottom: 12px;
+}
+.pp-index-list { display: flex; flex-direction: column; }
+.pp-index-row {
+    display: flex; flex-direction: column;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--hairline);
+    font-size: 11px;
+}
+.pp-index-row:last-child { border-bottom: none; }
+.pp-index-name { color: var(--fg-1); font-weight: 400; }
+.pp-index-name b { font-weight: 500; text-transform: uppercase; letter-spacing: 0; }
+.pp-index-role {
+    color: var(--fg-3);
+    font-size: 10px;
+    margin-top: 1px;
+}
+
+/* Pied de page */
+.dsm-print-page .pp-foot {
+    grid-area: foot;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 36px;
+    border-top: 1px solid var(--hairline);
+    font-size: 10px; color: var(--fg-4);
+    letter-spacing: 0.04em;
+    background: white;
+}
+
+/* Responsive : sous 1180 px on autorise le scroll horizontal */
+@media (max-width: 1180px) {
+    .dsm-print-overlay { align-items: flex-start; padding-top: 100px; }
+    .dsm-print-page { transform-origin: top left; }
+}

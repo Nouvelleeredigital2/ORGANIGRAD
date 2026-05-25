@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>OrgChart Pro - High-End Management</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#137fec",
+                        "background-light": "#f6f7f8",
+                        "background-dark": "#101922",
+                    },
+                    fontFamily: {
+                        "display": ["Inter", "sans-serif"]
+                    },
+                    borderRadius: {
+                        "DEFAULT": "0.5rem",
+                        "lg": "1rem",
+                        "xl": "1.5rem",
+                        "2xl": "2rem",
+                        "full": "9999px"
+                    },
+                },
+            },
+        }
+    </script>
+<style>
+        body { font-family: 'Inter', sans-serif; }
+        .chart-line {
+            stroke: #cbd5e1;
+            stroke-width: 2;
+            fill: none;
+        }
+        .glass-effect {
+            backdrop-filter: blur(12px);
+            background-color: rgba(255, 255, 255, 0.8);
+        }
+    </style>
+</head>
+<body class="bg-background-light dark:bg-background-dark text-slate-900 dark:text-slate-100 font-display overflow-hidden">
+<div class="relative flex h-screen w-full flex-col overflow-hidden">
+<header class="flex h-16 items-center justify-between border-b border-slate-200 dark:border-slate-800 bg-white/70 dark:bg-slate-900/70 px-8 glass-effect z-50">
+<div class="flex items-center gap-3">
+<div class="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-white shadow-lg shadow-primary/20">
+<span class="material-symbols-outlined">account_tree</span>
+</div>
+<h2 class="text-xl font-bold tracking-tight text-slate-900 dark:text-white">OrgChart <span class="text-primary">Pro</span></h2>
+</div>
+<div class="flex flex-1 justify-center px-12">
+<div class="relative w-full max-w-md">
+<div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+<span class="material-symbols-outlined text-slate-400" data-icon="search">search</span>
+</div>
+<input class="block w-full rounded-full border-none bg-slate-100 dark:bg-slate-800 py-2 pl-10 pr-4 text-sm focus:ring-2 focus:ring-primary/50 transition-all" placeholder="Search team members, roles, or departments..." type="text"/>
+</div>
+</div>
+<div class="flex items-center gap-3">
+<button class="flex items-center gap-2 rounded-xl bg-slate-100 dark:bg-slate-800 px-4 py-2 text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-200 transition-colors">
+<span class="material-symbols-outlined text-[20px]">cloud_download</span>
+                    Import CSV
+                </button>
+<button class="flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-bold text-white shadow-lg shadow-primary/25 hover:opacity-90 transition-all">
+<span class="material-symbols-outlined text-[20px]" data-icon="download">picture_as_pdf</span>
+                    Export PDF
+                </button>
+</div>
+</header>
+<main class="relative flex flex-1 overflow-hidden">
+<aside class="absolute left-6 top-6 bottom-6 w-72 z-40">
+<div class="flex h-full flex-col rounded-2xl border border-slate-200/50 bg-white/80 p-6 shadow-xl shadow-slate-200/50 dark:border-slate-800 dark:bg-slate-900/80 dark:shadow-none glass-effect">
+<div class="mb-6">
+<h3 class="text-xs font-bold uppercase tracking-widest text-slate-400">Main Workspace</h3>
+<p class="text-lg font-semibold text-slate-800 dark:text-slate-100">Enterprise Edition</p>
+</div>
+<nav class="flex flex-1 flex-col gap-2">
+<a class="flex items-center gap-3 rounded-xl bg-primary/10 px-4 py-3 text-primary transition-all" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+<span class="font-medium">Dashboard</span>
+</a>
+<a class="flex items-center gap-3 rounded-xl px-4 py-3 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all" href="#">
+<span class="material-symbols-outlined">groups</span>
+<span class="font-medium">Teams</span>
+</a>
+<a class="flex items-center gap-3 rounded-xl px-4 py-3 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all" href="#">
+<span class="material-symbols-outlined">schema</span>
+<span class="font-medium">Departments</span>
+</a>
+<a class="flex items-center gap-3 rounded-xl px-4 py-3 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all" href="#">
+<span class="material-symbols-outlined">settings</span>
+<span class="font-medium">Settings</span>
+</a>
+</nav>
+<div class="mt-auto pt-6 border-t border-slate-100 dark:border-slate-800">
+<div class="rounded-xl bg-slate-50 dark:bg-slate-800 p-4">
+<p class="text-[11px] font-bold uppercase text-slate-400 mb-2">Google Sheets Sync</p>
+<input class="mb-3 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-xs focus:ring-1 focus:ring-primary" placeholder="CSV URL..." type="text"/>
+<button class="w-full rounded-lg bg-primary py-2 text-xs font-bold text-white">Sync Now</button>
+</div>
+</div>
+</div>
+</aside>
+<div class="relative flex-1 bg-slate-50 dark:bg-background-dark p-20 overflow-auto scrollbar-hide">
+<div class="absolute inset-0 opacity-[0.03] dark:opacity-[0.05]" style="background-image: radial-gradient(#137fec 1px, transparent 1px); background-size: 32px 32px;"></div>
+<div class="relative min-w-[1200px] flex flex-col items-center">
+<div class="relative mb-24 z-10">
+<div class="agent-card group flex w-80 flex-col items-center rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl transition-all hover:-translate-y-1 dark:border-slate-800 dark:bg-slate-900">
+<div class="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-amber-400 px-4 py-0.5 text-[10px] font-black uppercase tracking-widest text-white shadow-lg">Director</div>
+<div class="mb-4 h-24 w-24 overflow-hidden rounded-full ring-4 ring-slate-50 dark:ring-slate-800 shadow-xl">
+<img class="h-full w-full object-cover" data-alt="Professional headshot of a senior executive male" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBLHA9m6d1gYqRL3bZpdUY8KZV3Uc-59zU4T1LrC7zF5kBEyksu_tGsR6RqC6mhLMWTULcKUN4SNNRMg9yHsm1itmliP5iszklllQJJ9q4OJ4amsAyjSmYabb9dH6d1e-99yERnmVKvhV7ziEv1270kdVhMcMityNc-0fx8ZKjvp52nXWIj6n7ARAytVXCnhyHwtX1u0TTouHrUOZqrUrSLjoOlq13VkfTNaKW-ybpDrHJiDqWWSwMgMIAcjBUHdESZIvPdFw5Aujd8"/>
+</div>
+<h3 class="text-xl font-bold text-slate-900 dark:text-white">Jean Dupont</h3>
+<p class="text-sm font-medium text-primary uppercase tracking-tighter">Direction Générale</p>
+<div class="mt-4 flex gap-2">
+<button class="rounded-lg bg-slate-100 dark:bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">Profile</button>
+<button class="rounded-lg bg-slate-100 dark:bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">Contact</button>
+</div>
+</div>
+<svg class="absolute left-1/2 top-full h-24 w-[800px] -translate-x-1/2 overflow-visible">
+<path class="chart-line stroke-slate-300 dark:stroke-slate-700" d="M 400 0 L 400 40 Q 400 60 380 60 L 20 60 Q 0 60 0 80 L 0 100"></path>
+<path class="chart-line stroke-slate-300 dark:stroke-slate-700" d="M 400 0 L 400 40 Q 400 60 420 60 L 780 60 Q 800 60 800 80 L 800 100"></path>
+<path class="chart-line stroke-slate-300 dark:stroke-slate-700" d="M 400 0 L 400 100"></path>
+</svg>
+</div>
+<div class="flex justify-between w-[1000px] gap-8">
+<div class="flex flex-col items-center gap-20">
+<div class="agent-card relative flex w-72 flex-col items-center rounded-2xl border border-slate-200 bg-white p-5 shadow-xl dark:border-slate-800 dark:bg-slate-900">
+<div class="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-slate-300 px-4 py-0.5 text-[10px] font-black uppercase tracking-widest text-slate-700 shadow-md">Manager</div>
+<div class="mb-3 h-16 w-16 overflow-hidden rounded-full ring-2 ring-slate-100 dark:ring-slate-800 shadow-md">
+<img class="h-full w-full object-cover" data-alt="Headshot of a mid-career female professional" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDi3kcBx0Rt8hfUN-DFVX2Hs07ZRfNrEaVwJKyXP-Y3Ff-VCiLONaZa4gjUchzTkscTb3EJR9hj9InVmTjWPs6UBYBPQekMt8XD2daYTF2dEOMxYhsS4Nl4Z77SVMmPs0jXCuHghpiFeSE1Z_3yBmm-99Z4nZfbBlpVZAb7uw1jAjC2lkCOyVETUhjyRpKhB6b6NAxB0WUCgh2T97z6_oKH552UlSPXygSGCoeOqqoiC3eK779Ie1l6XtjsTXB4QA7jCRLkRzqZnuwW"/>
+</div>
+<h4 class="font-bold text-slate-900 dark:text-white">Marie Claire</h4>
+<p class="text-xs font-semibold text-slate-400 uppercase">Responsable Marketing</p>
+<svg class="absolute left-1/2 top-full h-12 w-2 overflow-visible">
+<path class="chart-line stroke-slate-300 dark:stroke-slate-700" d="M 1 0 L 1 50"></path>
+</svg>
+</div>
+<div class="agent-card flex w-64 items-center gap-4 rounded-xl border border-slate-200 bg-white/60 p-3 shadow-md dark:border-slate-800 dark:bg-slate-900/60 glass-effect">
+<div class="h-12 w-12 shrink-0 overflow-hidden rounded-full border-2 border-white dark:border-slate-800">
+<img class="h-full w-full object-cover" data-alt="Portrait of a young creative professional" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAUQCW6tXxwmQdAH-7940n-2TlR2QyA2LWFDurT0U88m27XIUdD9wTegS4x4RgH275VQq8Zjqnw8Zv0g-U9q8VnGCj8UELahXvL296gw8CU1BTvma72POSFQkkaCJnRWCyxzh0AcD6pTbVvkiZZSkcofTjSvZbwH47eyUAUv3y9HJIGVGY-5wk8pJZehnk6tCcmTD5ewoAS32G8W9yi6JUBLMyDny0RsSjYuNjlQboMwiri57R53nUu7-AIiziaaFTIBrcKxorz93P-"/>
+</div>
+<div>
+<h4 class="text-sm font-bold text-slate-800 dark:text-white">Lucie Bernard</h4>
+<p class="text-[10px] text-slate-400 font-medium">Content Specialist</p>
+</div>
+</div>
+</div>
+<div class="flex flex-col items-center gap-20">
+<div class="agent-card relative flex w-72 flex-col items-center rounded-2xl border border-slate-200 bg-white p-5 shadow-xl dark:border-slate-800 dark:bg-slate-900">
+<div class="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-slate-300 px-4 py-0.5 text-[10px] font-black uppercase tracking-widest text-slate-700 shadow-md">Expert</div>
+<div class="mb-3 h-16 w-16 overflow-hidden rounded-full ring-2 ring-slate-100 dark:ring-slate-800 shadow-md">
+<img class="h-full w-full object-cover" data-alt="Headshot of a male technical expert" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBU-it6ROdTQLkIpUjn3m-FU7lzh7O-xORy_JJasD_hrBK9LyFX3Z_1k9d7TlPB0g4eOAGlPXurWFGcN0TJkTbg6Qh_88u_JsXgUbRk0d3qqGr21bnPKSjmuUaggB34OHFpjlQfr1wD4IdlEGhCmjg2D_2i81jIKOZDXoVv7dllGUJBHyTYizrs9MCSaQV6rRp_wJaOOqcIq7ezHzH9XronR_7sDfVpqJELiA2RqJjfz4MhxwOBo906O5TzwBxnl5dasPtpZH6QYmSd"/>
+</div>
+<h4 class="font-bold text-slate-900 dark:text-white">Thomas Miller</h4>
+<p class="text-xs font-semibold text-slate-400 uppercase">Expert Tech</p>
+<svg class="absolute left-1/2 top-full h-12 w-2 overflow-visible">
+<path class="chart-line stroke-slate-300 dark:stroke-slate-700" d="M 1 0 L 1 50"></path>
+</svg>
+</div>
+<div class="agent-card flex w-64 items-center gap-4 rounded-xl border border-slate-200 bg-white/60 p-3 shadow-md dark:border-slate-800 dark:bg-slate-900/60 glass-effect">
+<div class="h-12 w-12 shrink-0 overflow-hidden rounded-full border-2 border-white dark:border-slate-800">
+<img class="h-full w-full object-cover" data-alt="Portrait of a software engineer" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBkFFcfa9IcKGdzzEKdcwdznDGJ_wSQzb4n3_iEX1cFLgdg9MhkbOrbMmeTKu33QZZ51kDTPURDKjvNWyd7bd95uBSE44EALJrt8xkoOGx9XL1NMnK_azkMjMXx7-2pg5HjOC59wp9loekg-kgm4nM3S8lu4sDnr_V7XTImiVahUp4cOg5lSZAij7stBAtcyCEF1VqklnhrQFnub-JP2naB3w2AOojAmLslARJiL0uEg4HASQhgTGeTlF6gO8ljSHbWtWMMpwRwALOy"/>
+</div>
+<div>
+<h4 class="text-sm font-bold text-slate-800 dark:text-white">Kevin Larue</h4>
+<p class="text-[10px] text-slate-400 font-medium">Senior Developer</p>
+</div>
+</div>
+</div>
+<div class="flex flex-col items-center gap-20">
+<div class="agent-card relative flex w-72 flex-col items-center rounded-2xl border border-slate-200 bg-white p-5 shadow-xl dark:border-slate-800 dark:bg-slate-900">
+<div class="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-slate-300 px-4 py-0.5 text-[10px] font-black uppercase tracking-widest text-slate-700 shadow-md">Manager</div>
+<div class="mb-3 h-16 w-16 overflow-hidden rounded-full ring-2 ring-slate-100 dark:ring-slate-800 shadow-md">
+<img class="h-full w-full object-cover" data-alt="Portrait of a senior business woman" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCSsm2k9E69HXvGG4WQWsy1aqZNPOSFHI4qkE-snNi6JccWMxVdJeEM769R52LiDkzCWAfp-wSxFDVu-7Th_GgCovz18KRNPC7FtHCI1T7WVui6TWJmIX6sMI5AoOQmV6Ofpd9v3ZP43RgHdaPqf00BeuCPFc37KB8em-y7Vu_N2VVC_D1CMPonZWc6eVNDXjAFTRIbL_RYPyPrEX7JGBnZHpGdcBemSV5JeDrwUJqQu2Kb3_v8zR-aqplRRqkkDLBYAgdtTw6qHUBh"/>
+</div>
+<h4 class="font-bold text-slate-900 dark:text-white">Sarah Connor</h4>
+<p class="text-xs font-semibold text-slate-400 uppercase">HR Director</p>
+<svg class="absolute left-1/2 top-full h-12 w-2 overflow-visible">
+<path class="chart-line stroke-slate-300 dark:stroke-slate-700" d="M 1 0 L 1 50"></path>
+</svg>
+</div>
+<div class="agent-card flex w-64 items-center gap-4 rounded-xl border border-slate-200 bg-white/60 p-3 shadow-md dark:border-slate-800 dark:bg-slate-900/60 glass-effect">
+<div class="h-12 w-12 shrink-0 overflow-hidden rounded-full border-2 border-white dark:border-slate-800">
+<img class="h-full w-full object-cover" data-alt="Portrait of a professional young man" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDjV2zwIx0TtYYctRY1niRFiXLjcSNidOgJSyhWZFxZ23fecbSFfCwfh3hKybxpRoD6CUAiMq5QHKOfsbmjh7Q_drxEYNxOgTSoCPuc2Z9cqykcYiGtHqeVHfnVah1727ewGweHBK0Z79NwsWilZtqn2ji1xpOsRhO00QTao8xfPj4LZUZpihHnnKzI2PECVWIxmFgjfvj8I_MyWI6Z0uteNF64Yf2iPhLbN59MKc8OdU1FdBfCgBM2kAfTpGTlQe2gmMlEzVFdFgdm"/>
+</div>
+<div>
+<h4 class="text-sm font-bold text-slate-800 dark:text-white">Marc Aubert</h4>
+<p class="text-[10px] text-slate-400 font-medium">Recruiter</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div class="absolute bottom-10 right-10 flex flex-col gap-2 z-50">
+<button class="flex h-12 w-12 items-center justify-center rounded-xl bg-white dark:bg-slate-900 shadow-xl border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 transition-all">
+<span class="material-symbols-outlined">add</span>
+</button>
+<button class="flex h-12 w-12 items-center justify-center rounded-xl bg-white dark:bg-slate-900 shadow-xl border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 transition-all">
+<span class="material-symbols-outlined">remove</span>
+</button>
+<div class="h-px w-full bg-slate-200 dark:bg-slate-800 my-1"></div>
+<button class="flex h-12 w-12 items-center justify-center rounded-xl bg-white dark:bg-slate-900 shadow-xl border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 transition-all">
+<span class="material-symbols-outlined">center_focus_strong</span>
+</button>
+</div>
+</main>
+<div class="pointer-events-none absolute bottom-6 left-1/2 -translate-x-1/2 z-50">
+<div class="pointer-events-auto flex items-center gap-6 rounded-2xl bg-slate-900/90 dark:bg-white/90 px-6 py-3 text-white dark:text-slate-900 shadow-2xl backdrop-blur-lg">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]">pan_tool</span>
+<span class="text-xs font-bold uppercase tracking-tight">Pan Mode</span>
+</div>
+<div class="h-4 w-px bg-white/20 dark:bg-slate-900/20"></div>
+<div class="flex items-center gap-2 opacity-50">
+<span class="material-symbols-outlined text-[18px]">edit</span>
+<span class="text-xs font-bold uppercase tracking-tight">Edit Mode</span>
+</div>
+</div>
+</div>
+</div>
+</body></html>

@@ -1,0 +1,14 @@
+http:
+  routers:
+    orchestrator:
+      rule: "Host(`orchestrator.srv1017182.hstgr.cloud`)"
+      entrypoints:
+        - websecure
+      tls:
+        certresolver: mytlschallenge
+      service: orchestrator-svc
+  services:
+    orchestrator-svc:
+      loadBalancer:
+        servers:
+          - url: "http://host.docker.internal:3001"

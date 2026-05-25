@@ -1,0 +1,58 @@
+@import url('./styles/design-system.css');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  html {
+    font-family: var(--font-text);
+    background: var(--bg-page);
+  }
+
+  body {
+    color: var(--fg-1);
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+    height: 100vh;
+    letter-spacing: -0.005em;
+  }
+}
+
+
+
+/* Dot Grid Background Effect */
+.dot-grid-bg {
+  background-image: radial-gradient(rgba(148, 163, 184, 0.14) 1px, transparent 1px);
+  background-size: 30px 30px;
+}
+
+/* Apple Grain Background Effect */
+.grain-bg {
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-slate-300/80 rounded-full hover:bg-slate-400/90 transition-colors;
+}
+
+@media print {
+  .print-mode {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}

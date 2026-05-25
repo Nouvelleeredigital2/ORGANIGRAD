@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+
+<html class="light" lang="fr"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#137fec",
+                        "background-light": "#f6f7f8",
+                        "background-dark": "#101922",
+                    },
+                    fontFamily: {
+                        "display": ["Inter", "sans-serif"]
+                    },
+                    borderRadius: {"DEFAULT": "0.5rem", "lg": "1rem", "xl": "1.5rem", "full": "9999px"},
+                },
+            },
+        }
+    </script>
+<style>
+        .org-line-h {
+            position: relative;
+        }
+        .org-line-h::before {
+            content: '';
+            position: absolute;
+            left: -20px;
+            top: 50%;
+            width: 20px;
+            height: 2px;
+            background-color: #cbd5e1;
+        }
+        .org-container::after {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background-color: #cbd5e1;
+        }
+    </style>
+</head>
+<body class="bg-background-light dark:bg-background-dark font-display text-slate-900 dark:text-slate-100 antialiased overflow-x-hidden">
+<div class="relative flex h-auto min-h-screen w-full flex-col">
+<div class="layout-container flex h-full grow flex-col">
+<!-- Top Navigation Bar -->
+<header class="flex items-center justify-between whitespace-nowrap border-b border-solid border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-6 lg:px-10 py-3 sticky top-0 z-50">
+<div class="flex items-center gap-8">
+<div class="flex items-center gap-3 text-primary">
+<span class="material-symbols-outlined text-3xl">account_tree</span>
+<h2 class="text-slate-900 dark:text-white text-lg font-bold leading-tight tracking-[-0.015em]">OrgChart Pro</h2>
+</div>
+<div class="hidden md:flex flex-col min-w-64">
+<div class="flex w-full items-stretch rounded-xl h-10 bg-slate-100 dark:bg-slate-800">
+<div class="text-slate-500 flex items-center justify-center pl-4">
+<span class="material-symbols-outlined text-xl">search</span>
+</div>
+<input class="form-input flex w-full border-none bg-transparent focus:outline-0 focus:ring-0 placeholder:text-slate-500 px-4 pl-2 text-sm font-normal" placeholder="Rechercher un collaborateur..." value=""/>
+</div>
+</div>
+</div>
+<div class="flex flex-1 justify-end gap-6 items-center">
+<nav class="hidden lg:flex items-center gap-8">
+<a class="text-slate-700 dark:text-slate-300 text-sm font-medium hover:text-primary transition-colors" href="#">Tableau de bord</a>
+<a class="text-slate-700 dark:text-slate-300 text-sm font-medium hover:text-primary transition-colors" href="#">Annuaire</a>
+<a class="text-primary text-sm font-semibold underline decoration-2 underline-offset-8" href="#">Équipes</a>
+<a class="text-slate-700 dark:text-slate-300 text-sm font-medium hover:text-primary transition-colors" href="#">Rapports</a>
+</nav>
+<div class="flex gap-2">
+<button class="flex items-center justify-center rounded-xl h-10 w-10 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 transition-colors">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+<button class="flex items-center justify-center rounded-xl h-10 w-10 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 transition-colors">
+<span class="material-symbols-outlined">settings</span>
+</button>
+</div>
+<div class="bg-center bg-no-repeat aspect-square bg-cover rounded-full h-10 w-10 border-2 border-primary/20" data-alt="Avatar utilisateur profil administrateur" style='background-image: url("https://lh3.googleusercontent.com/aida-public/AB6AXuBnrnF0i3l6Zm3491neu1sF9IdfYmUZmvn5ZAZ_kZrkNZ1DWn7ZLNCjXj7iCuEjyTso3ywd3HFGWJ46JS5uMlIsLMmiFVq4Oy9kKcu13mYsG-iIAntN-HZP11CdESaVNtis9fvQ6V03FN4M1lV7QsAYdGVhDd-cMypr1mHAkV_qo5Wt2ZTQAftfUGYBGvLHcfcQw4897lfSVenzg-949nn9GOq6CXOY2FB_TXkuQLEtUdas5QsjJVHL5qbF5CMElRGxHrO08SKn9cby");'></div>
+</div>
+</header>
+<div class="flex flex-1">
+<!-- Sidebar Navigation -->
+<aside class="hidden md:flex w-64 flex-col bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 p-4 gap-6">
+<div class="flex flex-col gap-1">
+<h1 class="text-slate-900 dark:text-white text-base font-bold">Entreprise Alpha</h1>
+<p class="text-slate-500 text-xs font-medium uppercase tracking-wider">Édition Enterprise</p>
+</div>
+<div class="flex flex-col gap-1">
+<a class="flex items-center gap-3 px-3 py-2 rounded-xl text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+<p class="text-sm font-medium">Vue d'ensemble</p>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded-xl bg-primary text-white shadow-lg shadow-primary/20" href="#">
+<span class="material-symbols-outlined">account_tree</span>
+<p class="text-sm font-medium">Organigramme</p>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded-xl text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" href="#">
+<span class="material-symbols-outlined">group</span>
+<p class="text-sm font-medium">Collaborateurs</p>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded-xl text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" href="#">
+<span class="material-symbols-outlined">person_add</span>
+<p class="text-sm font-medium">Recrutement</p>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded-xl text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" href="#">
+<span class="material-symbols-outlined">settings</span>
+<p class="text-sm font-medium">Paramètres</p>
+</a>
+</div>
+<div class="mt-auto p-4 bg-primary/5 dark:bg-primary/10 rounded-xl">
+<p class="text-xs font-bold text-primary uppercase mb-1">Stockage</p>
+<div class="w-full bg-slate-200 dark:bg-slate-700 h-1.5 rounded-full overflow-hidden">
+<div class="bg-primary h-full w-[65%]"></div>
+</div>
+<p class="text-[10px] text-slate-500 mt-2">6.5 GB sur 10 GB utilisés</p>
+</div>
+</aside>
+<!-- Main Content -->
+<main class="flex-1 flex flex-col bg-background-light dark:bg-background-dark min-w-0">
+<!-- Toolbar Header -->
+<div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 p-6 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800">
+<div class="flex flex-col gap-1">
+<h2 class="text-slate-900 dark:text-white text-3xl font-black tracking-tight">Organigramme</h2>
+<p class="text-slate-500 text-sm">Visualisation de la structure hiérarchique horizontale</p>
+</div>
+<div class="flex items-center gap-3 self-start lg:self-center">
+<div class="flex h-10 items-center rounded-xl bg-slate-100 dark:bg-slate-800 p-1">
+<button class="flex items-center justify-center rounded-lg px-4 h-full text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 text-xs font-semibold transition-all">
+<span class="material-symbols-outlined text-sm mr-2">south</span>
+                                Verticale
+                            </button>
+<button class="flex items-center justify-center rounded-lg px-4 h-full bg-white dark:bg-slate-700 shadow-sm text-primary text-xs font-bold transition-all">
+<span class="material-symbols-outlined text-sm mr-2">east</span>
+                                Horizontale
+                            </button>
+</div>
+<button class="flex items-center gap-2 px-4 h-10 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-900 dark:text-white text-sm font-bold rounded-xl transition-colors">
+<span class="material-symbols-outlined text-lg">picture_as_pdf</span>
+<span class="hidden sm:inline">Exporter</span>
+</button>
+</div>
+</div>
+<!-- Tree Visualization Area -->
+<div class="flex-1 overflow-auto p-8 bg-slate-50/50 dark:bg-slate-950/20">
+<div class="flex flex-row items-start gap-16 relative">
+<!-- Root Node -->
+<div class="flex flex-col items-center flex-shrink-0">
+<div class="w-64 bg-white dark:bg-slate-900 rounded-xl shadow-md border border-slate-200 dark:border-slate-800 overflow-hidden">
+<div class="bg-primary/10 h-1"></div>
+<div class="p-4 flex flex-col items-center text-center">
+<div class="w-16 h-16 rounded-full border-4 border-white dark:border-slate-800 shadow-sm mb-3 bg-cover bg-center" data-alt="Photo de profil PDG Direction Générale" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuDhjmi7-QGi4T3EMFIQrSwCGyWCG2Rvt79NdlZTAobVnFvRuitUN_Mx5g1S_QGjdcKneV_O720KxqI95GVykx03UmncdAyjxxDFkoe59-OFR0ppDFTnMDvzvc6iKekpTcnjNFASzHxvdd-P9oJT_tqJzJClc742jXyA2mfdS1ZKpYeJ-jc_-DpI7EEwKOe1ZBP-OGh5drG9GZM1VnvZl33alk3z479BaC9Be67-qAuv-K_KHJ7pfZ9nVF897ffshbVtDBxQ-1SiewWB')"></div>
+<h3 class="font-bold text-slate-900 dark:text-white">Jean Dupont</h3>
+<p class="text-xs text-primary font-semibold uppercase tracking-wide">Directeur Général</p>
+<div class="mt-3 flex items-center justify-center gap-2">
+<span class="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 rounded text-[10px] font-bold text-slate-600 dark:text-slate-400">HQ</span>
+<span class="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 rounded text-[10px] font-bold text-slate-600 dark:text-slate-400">8 N-1</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Level 1 Connectors & Children -->
+<div class="flex flex-col gap-8 org-container relative pl-4">
+<!-- Branch 1: Marketing -->
+<div class="flex flex-row items-center gap-16 org-line-h">
+<div class="w-64 bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
+<div class="bg-purple-500 h-1"></div>
+<div class="p-4 flex items-center gap-4">
+<div class="w-12 h-12 rounded-full bg-cover bg-center" data-alt="Photo de profil Directrice Marketing" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuAWxBVzFm1kzTIyrfgdz1pgU_-LahdNdKqv4k9wz5G71lo1CvNWwTiwRxT0DIEpnsN1C76Nxhz-Tc4yecVxe4VyN3B3_V8is68n77FaadWG7ceNGiqR_5kgxZmfgzXUbMRJS8EZK3s12yk-OXAFwWz9vPeiKmfFD-7jOMI6ybVYN85xGrYYvCgCqa1rc0u97OsvITGTQNxnqKCx4j2zZGcCDYwCTGo3kk4rienJAJsVc0asH5sKRk16lxh-4SI0gH2nh4eWyQTWbsnI')"></div>
+<div class="flex flex-col min-w-0">
+<h4 class="font-bold text-sm text-slate-900 dark:text-white truncate">Marie Durand</h4>
+<p class="text-xs text-slate-500 truncate">Marketing &amp; Com</p>
+</div>
+</div>
+</div>
+<!-- Level 2 Marketing -->
+<div class="flex flex-col gap-4 org-container relative pl-4">
+<div class="flex items-center org-line-h">
+<div class="w-56 bg-white dark:bg-slate-900 rounded-lg p-3 shadow-sm border border-slate-200 dark:border-slate-800">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded-full bg-slate-200"></div>
+<div>
+<p class="text-xs font-bold dark:text-white">Sophie Martin</p>
+<p class="text-[10px] text-slate-500">Brand Manager</p>
+</div>
+</div>
+</div>
+</div>
+<div class="flex items-center org-line-h">
+<div class="w-56 bg-white dark:bg-slate-900 rounded-lg p-3 shadow-sm border border-slate-200 dark:border-slate-800">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded-full bg-slate-200"></div>
+<div>
+<p class="text-xs font-bold dark:text-white">Luc Petit</p>
+<p class="text-[10px] text-slate-500">Social Media</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Branch 2: Engineering -->
+<div class="flex flex-row items-center gap-16 org-line-h">
+<div class="w-64 bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
+<div class="bg-primary h-1"></div>
+<div class="p-4 flex items-center gap-4">
+<div class="w-12 h-12 rounded-full bg-cover bg-center" data-alt="Photo de profil Directeur Ingénierie" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuBx0FsAh6pTYjxom7fx5z-lucpkrnUKDzZumdMsNHNyBxfBnk6xNAfBZgVj9CedKdcm9HrHXVHRIMPSi4Q0i4QN6tR3pdcOgkSMY7o4lToHB4mkJyG5Wl0dwH61XodB93dT3pb88CtD4bdond1IsdpDSkMOa0bsLkmonchr5jEqO2z-nV0lFN6fyf3w51__IPkw6skfLctfgbqoS-plDTaXGRo7yGsoTCXYHk9Hgk7ce5ngMk86jtwdhHNOkYWHsnaQEvFbG5TvS-7H')"></div>
+<div class="flex flex-col min-w-0">
+<h4 class="font-bold text-sm text-slate-900 dark:text-white truncate">Thomas Leroy</h4>
+<p class="text-xs text-slate-500 truncate">Ingénierie &amp; IT</p>
+</div>
+</div>
+</div>
+<!-- Level 2 Engineering (Deep Hierarchy focus) -->
+<div class="flex flex-col gap-4 org-container relative pl-4">
+<!-- Dev Backend -->
+<div class="flex flex-row items-center gap-16 org-line-h">
+<div class="w-56 bg-white dark:bg-slate-900 rounded-lg p-3 shadow-sm border border-slate-200 dark:border-slate-800">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded-full bg-slate-200"></div>
+<div>
+<p class="text-xs font-bold dark:text-white">Alex Bernard</p>
+<p class="text-[10px] text-slate-500">Lead Backend</p>
+</div>
+</div>
+</div>
+<!-- Level 3 Backend -->
+<div class="flex flex-col gap-3 org-container relative pl-4">
+<div class="flex items-center org-line-h">
+<div class="w-48 bg-slate-50 dark:bg-slate-800 rounded-lg p-2 border border-slate-200 dark:border-slate-700">
+<p class="text-[11px] font-semibold dark:text-slate-300">Kevin Roux</p>
+<p class="text-[9px] text-slate-500">Go Dev</p>
+</div>
+</div>
+<div class="flex items-center org-line-h">
+<div class="w-48 bg-slate-50 dark:bg-slate-800 rounded-lg p-2 border border-slate-200 dark:border-slate-700">
+<p class="text-[11px] font-semibold dark:text-slate-300">Julie Vasseur</p>
+<p class="text-[9px] text-slate-500">Python Dev</p>
+</div>
+</div>
+</div>
+</div>
+<!-- Dev Frontend -->
+<div class="flex items-center org-line-h">
+<div class="w-56 bg-white dark:bg-slate-900 rounded-lg p-3 shadow-sm border border-slate-200 dark:border-slate-800">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded-full bg-slate-200"></div>
+<div>
+<p class="text-xs font-bold dark:text-white">Chloe Morel</p>
+<p class="text-[10px] text-slate-500">Lead Frontend</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Branch 3: Product -->
+<div class="flex flex-row items-center gap-16 org-line-h">
+<div class="w-64 bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
+<div class="bg-emerald-500 h-1"></div>
+<div class="p-4 flex items-center gap-4">
+<div class="w-12 h-12 rounded-full bg-cover bg-center" data-alt="Photo de profil Directeur Produit" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuCwVRC4BHjlezVNLFSknarZv2io89WJAqZtXIP4lDxuO4aUozHV49hQcGaLKctrUeevy0XkDM3ApywmFiLgX_kITkBm2Wb7_hr9C4K_tqdlF54vlkwm3fektza-RznxCQRDSH7BWMQoJOuLB_Um-jcvtTHx92AY4-d3Ax0Y1tfjwkTrC9x8vTrf9j2cvq2Fn7CHB7UMm6CLmqNd8Mm3iucjRO8TVO1SSntGE8YipyP6HD-t6pf8tApqCoSLVI8V7Krl3Xg3ZOszN6F6')"></div>
+<div class="flex flex-col min-w-0">
+<h4 class="font-bold text-sm text-slate-900 dark:text-white truncate">Nicolas Simon</h4>
+<p class="text-xs text-slate-500 truncate">Produit &amp; Design</p>
+</div>
+</div>
+</div>
+<div class="flex flex-col gap-4 org-container relative pl-4">
+<div class="flex items-center org-line-h">
+<div class="w-56 bg-white dark:bg-slate-900 rounded-lg p-3 shadow-sm border border-slate-200 dark:border-slate-800">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded-full bg-slate-200"></div>
+<div>
+<p class="text-xs font-bold dark:text-white">Emma Laurent</p>
+<p class="text-[10px] text-slate-500">Senior UX Design</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Footer Summary -->
+<footer class="p-4 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 flex justify-between items-center text-xs">
+<div class="flex gap-6 text-slate-500">
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-primary"></span>
+<span>152 Collaborateurs</span>
+</div>
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+<span>4 Niveaux hiérarchiques</span>
+</div>
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-purple-500"></span>
+<span>12 Équipes</span>
+</div>
+</div>
+<div class="text-slate-400">
+                        OrgChart Pro © 2024
+                    </div>
+</footer>
+</main>
+</div>
+</div>
+</div>
+</body></html>

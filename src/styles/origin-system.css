@@ -1,0 +1,82 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Formes & Géométrie */
+    --origin-radius-soft: 12px;
+    --origin-radius-panel: 16px;
+    --origin-angle-tension: 3px;
+
+    /* Antigravity Glass (Light Mode) */
+    --origin-glass-bg: rgba(0, 0, 0, 0.03);
+    --origin-glass-border: rgba(0, 0, 0, 0.08);
+    --origin-glass-blur: 16px;
+    --origin-shadow-soft: 0 8px 32px rgba(0, 0, 0, 0.06);
+    --origin-shadow-float: 0 12px 48px rgba(0, 0, 0, 0.12);
+
+    /* Mouvement */
+    --origin-fast: 150ms;
+    --origin-normal: 250ms;
+    --origin-slow: 400ms;
+    --origin-ease: cubic-bezier(0.16, 1, 0.3, 1);
+
+    /* Dimensions standards */
+    --origin-module-size: 40px;
+    --origin-line-height: 2px;
+  }
+
+  .dark {
+    /* Antigravity Glass (Dark Mode) */
+    --origin-glass-bg: rgba(255, 255, 255, 0.05);
+    --origin-glass-border: rgba(255, 255, 255, 0.1);
+    --origin-shadow-soft: 0 8px 32px rgba(0, 0, 0, 0.2);
+    --origin-shadow-float: 0 12px 48px rgba(0, 0, 0, 0.4);
+  }
+}
+
+@layer components {
+  /* 🧊 L'Effet Antigravity */
+  .origin-glass {
+    background-color: var(--origin-glass-bg);
+    border: 1px solid var(--origin-glass-border);
+    backdrop-filter: blur(var(--origin-glass-blur));
+    -webkit-backdrop-filter: blur(var(--origin-glass-blur));
+    box-shadow: var(--origin-shadow-soft);
+  }
+
+  /* 🔘 Le Bouton Hybride */
+  .origin-button {
+    border-radius: var(--origin-radius-soft) var(--origin-radius-soft) var(--origin-angle-tension) var(--origin-radius-soft);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 500;
+  }
+
+  /* 🎞️ Langage d'Animation */
+  .origin-motion {
+    transition: all var(--origin-normal) var(--origin-ease);
+  }
+  
+  .origin-motion:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--origin-shadow-float);
+  }
+  
+  .origin-motion:active {
+    transform: scale(0.98);
+  }
+}
+
+/* Animations spécifiques pour le Filament et le Loader */
+@keyframes origin-slide-x {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(200%); }
+}
+
+@keyframes origin-pulse-glow {
+  0%, 100% { opacity: 0.8; filter: drop-shadow(0 0 4px currentColor); }
+  50% { opacity: 1; filter: drop-shadow(0 0 8px currentColor); }
+}
