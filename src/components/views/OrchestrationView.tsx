@@ -72,6 +72,7 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
         };
     }, [workspaceId]);
     const [statuses, setStatuses] = useState<Record<string, NodeStatus>>({});
+    const [isRunning, setIsRunning] = useState(false);
     const [validationOpen, setValidationOpen] = useState(false);
     const [editorOpen, setEditorOpen] = useState(false);
     const [editorNode, setEditorNode] = useState<HybridNode | null>(null);
@@ -172,17 +173,21 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
             message: 'Démarrage de la chaîne',
         });
 
+        setIsRunning(true);
+
         if (bridge.connected) {
-            void bridge.runNode(first.id).catch((err) => {
-                console.error('[OrchestrationView] runNode failed', err);
-            });
+            void bridge.runNode(first.id)
+                .catch((err) => {
+                    console.error('[OrchestrationView] runNode failed', err);
+                })
+                .finally(() => setIsRunning(false));
             return;
         }
 
         // --- Simulation locale (sans orchestrateur) ---
         setStatuses({});
         const order = topoSort(allNodes, first.id);
-        if (order.length === 0) return;
+        if (order.length === 0) { setIsRunning(false); return; }
 
         let delay = 0;
         order.forEach((n) => {
@@ -198,6 +203,8 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
             setTimeout(() => setStatusFor(n, 'IDLE'), delay);
             delay += 200;
         });
+        // Fin de simulation : réactive le bouton après le dernier timeout
+        setTimeout(() => setIsRunning(false), delay + 100);
     };
 
     /**
@@ -284,13 +291,23 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
                         </span>
                     </div>
                     <div className="mt-5 flex flex-wrap gap-2">
-                        <Button tone="blue" onClick={runChain} disabled={!hasAnyNode}>
-                            Lancer la chaîne
+                        <Button tone="blue" onClick={runChain} disabled={!hasAnyNode || isRunning}>
+                            {isRunning ? (
+                                <span className="flex items-center gap-2">
+                                    <span
+                                        className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white/30 border-t-white"
+                                        aria-hidden
+                                    />
+                                    En cours…
+                                </span>
+                            ) : (
+                                'Lancer la chaîne'
+                            )}
                         </Button>
                         <Button
                             tone="slate"
                             variant="soft"
-                            onClick={() => setStatuses({})}
+                            onClick={() => { setStatuses({}); setIsRunning(false); }}
                             disabled={!hasAnyNode}
                         >
                             Réinitialiser

@@ -43,11 +43,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ rawAgents, totalAg
     }, [rawAgents]);
 
     return (
-        <div className="w-full h-full overflow-y-auto no-scrollbar px-12 py-12 pb-32">
+        <div className="w-full h-full overflow-y-auto no-scrollbar p-4 pt-16 sm:p-6 lg:p-10 lg:pt-10 pb-32">
             <div className="max-w-6xl mx-auto space-y-8">
-                <div className="mb-12">
-                    <h2 className="text-4xl font-extrabold tracking-[-0.05em] text-slate-900 mb-2">Tableau de Bord</h2>
-                    <p className="text-slate-500 font-medium text-lg">Vue d&apos;ensemble des effectifs de la collectivite.</p>
+                <div className="mb-10">
+                    <p className="eyebrow">Vue d'ensemble</p>
+                    <h1 className="t-display mt-2" style={{ fontSize: 'clamp(32px, 5vw, 48px)' }}>
+                        Tableau de bord.
+                    </h1>
+                    <p className="t-body mt-2">L'effectif d'aujourd'hui, sans détour.</p>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -77,7 +80,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ rawAgents, totalAg
                         <div className="w-14 h-14 bg-slate-600 rounded-[1.45rem] flex items-center justify-center text-white mb-6 shadow-[0_14px_34px_rgba(71,85,105,0.18)]">
                             <Box className="w-6 h-6" />
                         </div>
-                        <p className="text-slate-500 font-bold uppercase tracking-[0.18em] text-xs mb-1">Poles Actifs</p>
+                        <p className="text-slate-500 font-bold uppercase tracking-[0.18em] text-xs mb-1">Pôles Actifs</p>
                         <div className="flex items-baseline gap-2">
                             <span className="text-6xl font-black tracking-tighter text-slate-900">{loading ? '-' : availablePoles.length}</span>
                             <span className="text-slate-400 font-bold">directions</span>
@@ -88,7 +91,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ rawAgents, totalAg
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
                     <div className="bg-white/82 backdrop-blur-xl p-8 rounded-[2.5rem] border border-white shadow-[0_18px_50px_rgba(148,163,184,0.12)]">
                         <h3 className="text-xl font-bold text-slate-900 mb-6 flex items-center gap-2">
-                            <Award className="w-5 h-5 text-slate-400" /> Repartition des Temps
+                            <Award className="w-5 h-5 text-slate-400" /> Répartition des Temps
                         </h3>
                         <div className="h-64 w-full">
                             <ResponsiveContainer width="100%" height={256}>
@@ -115,7 +118,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ rawAgents, totalAg
 
                     <div className="bg-white/82 backdrop-blur-xl p-8 rounded-[2.5rem] border border-white shadow-[0_18px_50px_rgba(148,163,184,0.12)]">
                         <h3 className="text-xl font-bold text-slate-900 mb-6 flex items-center gap-2">
-                            <TrendingUp className="w-5 h-5 text-slate-400" /> Top Poles (Effectifs)
+                            <TrendingUp className="w-5 h-5 text-slate-400" /> Top Pôles (Effectifs)
                         </h3>
                         <div className="h-64 w-full">
                             <ResponsiveContainer width="100%" height={256}>

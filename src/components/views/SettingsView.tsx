@@ -53,11 +53,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
 
     return (
-        <div className="w-full h-full overflow-y-auto no-scrollbar px-12 py-12 pb-32">
+        <div className="w-full h-full overflow-y-auto no-scrollbar p-4 pt-16 sm:p-6 lg:p-10 lg:pt-10 pb-32">
             <div className="max-w-4xl mx-auto space-y-12">
-                <div className="mb-12">
-                    <h2 className="text-4xl font-extrabold tracking-[-0.05em] text-slate-900 mb-2">Parametres</h2>
-                    <p className="text-slate-500 font-medium text-lg">Import local, source distante et gestion de la source active.</p>
+                <div className="mb-10">
+                    <p className="eyebrow">Source &amp; données</p>
+                    <h1 className="t-display mt-2" style={{ fontSize: 'clamp(32px, 5vw, 48px)' }}>
+                        Paramètres.
+                    </h1>
+                    <p className="t-body mt-2">Source de données et réinitialisation des modifications locales.</p>
                 </div>
 
                 <section className="bg-white/82 backdrop-blur-xl p-8 rounded-[2rem] border border-white shadow-[0_18px_50px_rgba(148,163,184,0.14)]">
