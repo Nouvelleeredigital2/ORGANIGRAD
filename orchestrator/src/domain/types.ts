@@ -6,6 +6,21 @@
  * copie alignée (src/types/hybridNode.ts) ; les deux doivent rester synchrones.
  */
 
+/**
+ * Valeur JSON sérialisable — utilisée pour typer les payloads de transition
+ * stockés en `jsonb` (colonne `node_transitions.payload`). Évite tout cast
+ * dangereux (`as never`) au moment de l'INSERT.
+ */
+export type JsonValue =
+    | string
+    | number
+    | boolean
+    | null
+    | JsonValue[]
+    | { [key: string]: JsonValue | undefined };
+
+export type JsonObject = { [key: string]: JsonValue | undefined };
+
 export type NodeType = 'HUMAN' | 'AGENT_IA' | 'SOFTWARE_MCP';
 
 export type NodeStatus =

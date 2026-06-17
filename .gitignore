@@ -42,3 +42,9 @@ lint-results.json
 stitch_assets/
 vite-dev.log
 
+# Archives (peuvent contenir des .env avec des secrets réels — ne jamais committer)
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+

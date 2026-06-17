@@ -1,8 +1,9 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useId } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X } from 'lucide-react';
 import { OriginGlass } from '../origin';
 import { useEscapeClose } from '../hooks/useEscapeClose';
+import { useFocusTrap } from '../hooks/useFocusTrap';
 
 interface BaseModalProps {
     isOpen: boolean;
@@ -14,6 +15,9 @@ interface BaseModalProps {
 export const BaseModal: React.FC<BaseModalProps> = ({ isOpen, onClose, title, children }) => {
     // Fermeture sur Escape via le hook partagé
     useEscapeClose(isOpen, onClose);
+    // Piège + restitution du focus clavier
+    const dialogRef = useFocusTrap<HTMLDivElement>(isOpen);
+    const titleId = useId();
 
     // Scroll-lock du body quand le modal est ouvert
     useEffect(() => {
@@ -40,16 +44,23 @@ export const BaseModal: React.FC<BaseModalProps> = ({ isOpen, onClose, title, ch
 
                     {/* Modal Content */}
                     <OriginGlass
+                        ref={dialogRef}
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby={titleId}
+                        tabIndex={-1}
                         variant="elevated"
                         className="relative w-full max-w-2xl max-h-[90vh] flex flex-col rounded-[2.5rem] border border-white shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-300"
                     >
                         {/* Header */}
                         <div className="px-8 py-6 border-b border-slate-100 flex items-center justify-between">
-                            <h2 className="text-xl font-black tracking-tight text-slate-900 uppercase">
+                            <h2 id={titleId} className="text-xl font-black tracking-tight text-slate-900 uppercase">
                                 {title}
                             </h2>
                             <button
+                                type="button"
                                 onClick={onClose}
+                                aria-label="Fermer"
                                 className="p-2 rounded-xl hover:bg-slate-100 text-slate-400 transition-all"
                             >
                                 <X className="w-6 h-6" />

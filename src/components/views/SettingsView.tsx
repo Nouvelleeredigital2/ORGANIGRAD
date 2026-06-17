@@ -4,6 +4,7 @@ import type { CsvSourceInfo } from '../../utils/csvSource';
 import { hybridNodeStore } from '../../services/hybridNodeStore';
 import { useOrchestratorConfig } from '../../hooks/useOrchestratorConfig';
 import { useFileImport } from '../../hooks/useFileImport';
+import { useWorkspaceContext } from '../../contexts/WorkspaceContext';
 
 interface SettingsViewProps {
     csvUrl: string;
@@ -26,6 +27,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     clearImportedSource,
     isImportedSourceActive,
 }) => {
+    const { activeId: workspaceId } = useWorkspaceContext();
     const [tempUrl, setTempUrl] = useState(csvUrl);
 
     const {
@@ -209,7 +211,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     <button
                         onClick={() => {
                             if (confirm('Supprimer tous les nœuds hybrides créés localement ?')) {
-                                hybridNodeStore.reset();
+                                hybridNodeStore.reset(workspaceId);
                                 window.location.reload();
                             }
                         }}

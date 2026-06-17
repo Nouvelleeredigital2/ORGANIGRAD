@@ -1,29 +1,47 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, lazy, Suspense } from 'react';
 import { AlertCircle, RefreshCw, MapPin } from 'lucide-react';
 import { useOrgChartController } from './hooks/useOrgChartController';
 import { SpotlightSearch } from './components/spotlight/SpotlightSearch';
 import { ProfileModal } from './components/ProfileModal';
 import { ProfileFiche } from './components/ProfileFiche';
-import { PrintExportView } from './components/PrintExportView';
 import { ContactModal } from './components/ContactModal';
 import { AppShell } from './components/layout/AppShell';
-import { DashboardView } from './components/views/DashboardView';
-import { SettingsView } from './components/views/SettingsView';
-import { OrchestrationView } from './components/views/OrchestrationView';
-import { ApiKeysView } from './components/views/ApiKeysView';
-import { MembersView } from './components/views/MembersView';
-import { AcceptInvitation, readPendingInviteToken, clearPendingInviteToken } from './components/auth/AcceptInvitation';
+import { AcceptInvitation } from './components/auth/AcceptInvitation';
+import { readPendingInviteToken, clearPendingInviteToken } from './components/auth/inviteToken';
 import { useWorkspaceContext } from './contexts/WorkspaceContext';
 import { Sidebar } from './components/layout/Sidebar';
 import { Topbar } from './components/layout/Topbar';
-import { PoleOrgChartView } from './components/pole/PoleOrgChartView';
 import type { OrgChartRef } from './components/OrgChart';
+
+// Code-splitting (Priorité 12) : les vues lourdes (recharts, orgchart zoom/pan,
+// export PDF…) sont chargées à la demande, hors du bundle initial.
+const DashboardView = lazy(() =>
+    import('./components/views/DashboardView').then((m) => ({ default: m.DashboardView })),
+);
+const SettingsView = lazy(() =>
+    import('./components/views/SettingsView').then((m) => ({ default: m.SettingsView })),
+);
+const OrchestrationView = lazy(() =>
+    import('./components/views/OrchestrationView').then((m) => ({ default: m.OrchestrationView })),
+);
+const ApiKeysView = lazy(() =>
+    import('./components/views/ApiKeysView').then((m) => ({ default: m.ApiKeysView })),
+);
+const MembersView = lazy(() =>
+    import('./components/views/MembersView').then((m) => ({ default: m.MembersView })),
+);
+const PoleOrgChartView = lazy(() =>
+    import('./components/pole/PoleOrgChartView').then((m) => ({ default: m.PoleOrgChartView })),
+);
+const PrintExportView = lazy(() =>
+    import('./components/PrintExportView').then((m) => ({ default: m.PrintExportView })),
+);
 import type { Agent } from './types/agent';
 import { countVisibleAgents } from './utils/dashboardStats';
 import { OriginProvider, useOrigin, OriginLoader } from './origin';
 import { useSession } from './hooks/useSession';
 import { AuthScreen } from './components/auth/AuthScreen';
-import { WorkspaceProvider } from './contexts/WorkspaceContext';
+import { WorkspaceProvider } from './contexts/WorkspaceProvider';
 import { isSupabaseConfigured } from './lib/supabase';
 
 function AppContent() {
@@ -180,6 +198,7 @@ function AppContent() {
                         id="exportable-org-chart"
                         className={`w-full h-full flex flex-col ${isPdfMode ? 'bg-slate-50 overflow-auto' : ''}`}
                     >
+                        <Suspense fallback={<OriginLoader />}>
                         {activeView === 'dashboard' ? (
                             <DashboardView
                                 rawAgents={rawAgents || []}
@@ -221,6 +240,7 @@ function AppContent() {
                                 onToggleHybridCard={() => setUseHybridCard((v) => !v)}
                             />
                         )}
+                        </Suspense>
 
                         {!isPdfMode && activeView === 'orgchart' && (
                             <div className="absolute top-4 right-4 z-40 print:hidden">
@@ -288,14 +308,16 @@ function AppContent() {
                 onSave={handleUpdateAgent}
             />
 
-            <PrintExportView
-                isOpen={printPreviewOpen}
-                poleLabel={selectedPole?.pole}
-                tree={selectedPole?.tree ?? []}
-                agents={selectedPole?.agents ?? rawAgents}
-                onClose={() => setPrintPreviewOpen(false)}
-                onDownload={handleConfirmExport}
-            />
+            <Suspense fallback={null}>
+                <PrintExportView
+                    isOpen={printPreviewOpen}
+                    poleLabel={selectedPole?.pole}
+                    tree={selectedPole?.tree ?? []}
+                    agents={selectedPole?.agents ?? rawAgents}
+                    onClose={() => setPrintPreviewOpen(false)}
+                    onDownload={handleConfirmExport}
+                />
+            </Suspense>
         </>
     );
 }

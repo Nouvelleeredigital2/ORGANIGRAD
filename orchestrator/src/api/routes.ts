@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { IllegalTransitionError } from '../domain/stateMachine.js';
 import { NodeNotFoundError } from '../state/graphStore.js';
+import { toPublicNodeDTO } from './dto.js';
 import type { ServerDeps } from './server.js';
 
 /**
@@ -15,7 +16,7 @@ import type { ServerDeps } from './server.js';
 export function registerRoutes(app: FastifyInstance, { store, engine }: ServerDeps): void {
     // --- GET /api/graph ----------------------------------------------------
     app.get('/api/graph', async () => {
-        return { nodes: store.snapshot() };
+        return { nodes: store.snapshot().map(toPublicNodeDTO) };
     });
 
     // --- POST /api/nodes/:id/run -------------------------------------------
@@ -33,7 +34,7 @@ export function registerRoutes(app: FastifyInstance, { store, engine }: ServerDe
     app.post<{ Params: { id: string } }>('/api/nodes/:id/approve', async (req, reply) => {
         const { id } = req.params;
         try {
-            engine.approve(id);
+            await engine.approve(id);
             return { ok: true };
         } catch (err) {
             return handleError(reply, err);
@@ -47,7 +48,7 @@ export function registerRoutes(app: FastifyInstance, { store, engine }: ServerDe
             const { id } = req.params;
             const feedback = req.body?.feedback ?? '';
             try {
-                engine.reject(id, feedback);
+                await engine.reject(id, feedback);
                 return { ok: true };
             } catch (err) {
                 return handleError(reply, err);
@@ -59,7 +60,7 @@ export function registerRoutes(app: FastifyInstance, { store, engine }: ServerDe
     app.post<{ Params: { id: string } }>('/api/nodes/:id/reset', async (req, reply) => {
         const { id } = req.params;
         try {
-            engine.reset(id);
+            await engine.reset(id);
             return { ok: true };
         } catch (err) {
             return handleError(reply, err);

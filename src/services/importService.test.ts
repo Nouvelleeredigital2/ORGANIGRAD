@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as XLSX from 'xlsx';
 import { importAgentsFromFile } from './importService';
+import { ImportLimitError } from './sheetSecurity';
 
 describe('importAgentsFromFile', () => {
     it('imports agents from a UTF-8 CSV file', async () => {
@@ -51,5 +52,17 @@ describe('importAgentsFromFile', () => {
             gradeStyle: 'Direction',
             nbi: '25 pts',
         });
+    });
+
+    it('rejette un fichier trop volumineux avant lecture', async () => {
+        const file = new File(['x'], 'huge.csv', { type: 'text/csv' });
+        // Simule une grande taille sans matérialiser 5 Mo en mémoire.
+        Object.defineProperty(file, 'size', { value: 6 * 1024 * 1024 });
+        await expect(importAgentsFromFile(file)).rejects.toBeInstanceOf(ImportLimitError);
+    });
+
+    it('rejette un format de fichier non supporté', async () => {
+        const file = new File(['data'], 'malware.exe', { type: 'application/octet-stream' });
+        await expect(importAgentsFromFile(file)).rejects.toThrow(/non supporté/);
     });
 });

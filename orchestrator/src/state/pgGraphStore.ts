@@ -1,7 +1,7 @@
 import postgres, { type Sql } from 'postgres';
 import { transition, type NodeStatus } from '../domain/stateMachine.js';
-import type { HybridNode, NodeType } from '../domain/types.js';
-import { type TransitionEvent } from './graphStore.js';
+import type { HybridNode, JsonObject, NodeType } from '../domain/types.js';
+import { type GraphStore, type TransitionEvent } from './graphStore.js';
 
 /**
  * GraphStore Postgres-backed — alternative pour la production.
@@ -62,7 +62,7 @@ function rowToNode(r: DbRow): HybridNode {
     };
 }
 
-export class PgGraphStore {
+export class PgGraphStore implements GraphStore {
     private listeners = new Set<TransitionListener>();
 
     constructor(
@@ -111,7 +111,7 @@ export class PgGraphStore {
     async applyTransition(
         nodeId: string,
         to: NodeStatus,
-        payload?: Record<string, unknown>,
+        payload?: JsonObject,
     ): Promise<HybridNode> {
         return this.sql.begin(async (tx) => {
             const before = await tx<DbRow[]>`
@@ -136,7 +136,7 @@ export class PgGraphStore {
                     (workspace_id, node_id, from_status, to_status, payload, actor_kind, actor_id)
                 values
                     (${this.workspaceId}, ${nodeId}, ${from}, ${nextStatus},
-                     ${payload ? this.sql.json(payload as never) : null},
+                     ${payload ? this.sql.json(payload) : null},
                      ${this.actor.kind}, ${this.actor.id ?? null})
             `;
 

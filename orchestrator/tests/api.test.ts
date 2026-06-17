@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { buildServer } from '../src/api/server.js';
 import type { FastifyInstance } from 'fastify';
 import type { HybridNode } from '../src/domain/types.js';
-import { GraphStore } from '../src/state/graphStore.js';
+import { InMemoryGraphStore } from '../src/state/graphStore.js';
 import { OrchestrationEngine } from '../src/orchestration/engine.js';
 
 const SEED: HybridNode[] = [
@@ -28,7 +28,7 @@ const SEED: HybridNode[] = [
 ];
 
 function makeApp() {
-    const store = new GraphStore();
+    const store = new InMemoryGraphStore();
     store.load(SEED);
     const mcp = { runNode: async () => ({ ok: true as const, output: null }) };
     const engine = new OrchestrationEngine(store, mcp);
@@ -37,7 +37,7 @@ function makeApp() {
 
 describe('API REST + SSE', () => {
     let app: FastifyInstance;
-    let store: GraphStore;
+    let store: InMemoryGraphStore;
     let engine: OrchestrationEngine;
 
     beforeEach(() => {
@@ -51,12 +51,27 @@ describe('API REST + SSE', () => {
         await app.close();
     });
 
-    it('GET /api/graph renvoie le graphe complet', async () => {
+    it('GET /api/graph renvoie le graphe (DTO public)', async () => {
         const res = await app.inject({ method: 'GET', url: '/api/graph' });
         expect(res.statusCode).toBe(200);
         const body = res.json();
         expect(body.nodes).toHaveLength(2);
-        expect(body.nodes.map((n: HybridNode) => n.id)).toEqual(['red', 'hum']);
+        expect(body.nodes.map((n: { id: string }) => n.id)).toEqual(['red', 'hum']);
+    });
+
+    it('GET /api/graph N\'EXPOSE PAS les champs sensibles (Priorité 6)', async () => {
+        const res = await app.inject({ method: 'GET', url: '/api/graph' });
+        const raw = res.payload;
+        // Aucune URL MCP interne, prompt système ni secret de notification.
+        expect(raw).not.toContain('serverUrl');
+        expect(raw).not.toContain('mcp://red');
+        expect(raw).not.toContain('systemPrompt');
+        expect(raw).not.toContain('notificationChannels');
+        expect(raw).not.toContain('slackWebhook');
+        // En revanche, l'indicateur non sensible est présent.
+        const red = res.json().nodes.find((n: { id: string }) => n.id === 'red');
+        expect(red.mcp).toEqual({ configured: true, connectedTo: [] });
+        expect(red).not.toHaveProperty('mcpConfig');
     });
 
     it('POST /api/nodes/:id/run lance un nœud (200)', async () => {
@@ -72,11 +87,11 @@ describe('API REST + SSE', () => {
     it('POST /api/nodes/:id/approve sur un nœud WAITING → 200 + statut IDLE', async () => {
         // Lance le flux pour mettre l'humain en WAITING_HUMAN_APPROVAL
         await engine.runFlow('red');
-        expect(store.get('hum').status).toBe('WAITING_HUMAN_APPROVAL');
+        expect((await store.get('hum')).status).toBe('WAITING_HUMAN_APPROVAL');
 
         const res = await app.inject({ method: 'POST', url: '/api/nodes/hum/approve' });
         expect(res.statusCode).toBe(200);
-        expect(store.get('hum').status).toBe('IDLE');
+        expect((await store.get('hum')).status).toBe('IDLE');
     });
 
     it('POST /api/nodes/:id/reject avec feedback → 200 + ERROR', async () => {
@@ -87,16 +102,16 @@ describe('API REST + SSE', () => {
             payload: { feedback: 'KO' },
         });
         expect(res.statusCode).toBe(200);
-        expect(store.get('hum').status).toBe('ERROR');
+        expect((await store.get('hum')).status).toBe('ERROR');
     });
 
     it('POST /api/nodes/:id/reset → 200 + IDLE', async () => {
         await engine.runFlow('red');
-        engine.reject('hum', 'KO');
-        expect(store.get('hum').status).toBe('ERROR');
+        await engine.reject('hum', 'KO');
+        expect((await store.get('hum')).status).toBe('ERROR');
         const res = await app.inject({ method: 'POST', url: '/api/nodes/hum/reset' });
         expect(res.statusCode).toBe(200);
-        expect(store.get('hum').status).toBe('IDLE');
+        expect((await store.get('hum')).status).toBe('IDLE');
     });
 
     it('POST /api/nodes/:id/run sur un id inconnu → 404', async () => {

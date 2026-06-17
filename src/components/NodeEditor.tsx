@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { HybridNode, NodeType } from '../types/hybridNode';
-import { Button, FormField, Input, Select, Surface, Textarea, cx } from '../design/ui';
+import { Button, FormField, Input, Select, Surface, Textarea } from '../design/ui';
+import { cx } from '../design/cx';
 import { ARCHETYPE, TEXT, TONE_CLASSES, Z } from '../design/tokens';
 
 const GLYPH_ICON: Record<'disc' | 'aperture' | 'chiclet', string> = {
@@ -43,12 +44,18 @@ export function NodeEditor({ isOpen, node, availableNodes = [], onClose, onSave 
     const [draft, setDraft] = useState<HybridNode>(() => node ?? emptyNode());
     const [skillsInput, setSkillsInput] = useState<string>((node?.skills ?? []).join(', '));
 
-    useEffect(() => {
+    // Réinitialise le brouillon quand la modale s'ouvre sur un nœud différent —
+    // ajustement d'état PENDANT le rendu (pattern React recommandé) plutôt qu'un
+    // setState synchrone dans un effet.
+    const editorKey = isOpen ? (node?.id ?? '__new__') : '__closed__';
+    const [syncedKey, setSyncedKey] = useState(editorKey);
+    if (editorKey !== syncedKey) {
+        setSyncedKey(editorKey);
         if (isOpen) {
             setDraft(node ?? emptyNode());
             setSkillsInput((node?.skills ?? []).join(', '));
         }
-    }, [isOpen, node]);
+    }
 
     useEscapeClose(isOpen, onClose);
 

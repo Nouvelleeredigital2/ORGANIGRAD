@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { Copy, Key as KeyIcon, Trash2 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useWorkspaceContext } from '../../contexts/WorkspaceContext';
-import { Button, FormField, Input, Surface, cx } from '../../design/ui';
+import { Button, FormField, Input, Surface } from '../../design/ui';
+import { cx } from '../../design/cx';
 
 /**
  * ApiKeysView — gestion des clés API par workspace.
@@ -49,7 +50,15 @@ export function ApiKeysView() {
     }, [activeId]);
 
     useEffect(() => {
-        void refresh();
+        // Chargement initial déféré (les setState de refresh s'exécutent dans un
+        // callback async, pas synchroniquement dans le corps de l'effet).
+        let active = true;
+        void Promise.resolve().then(() => {
+            if (active) void refresh();
+        });
+        return () => {
+            active = false;
+        };
     }, [refresh]);
 
     const handleCreate = async (e: React.FormEvent) => {

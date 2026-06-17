@@ -1,5 +1,5 @@
 import { transition, type NodeStatus } from '../domain/stateMachine.js';
-import type { HybridNode } from '../domain/types.js';
+import type { HybridNode, JsonObject } from '../domain/types.js';
 
 /**
  * Store d'état — source de vérité unique des `HybridNode` et de leur `NodeStatus`.
@@ -22,7 +22,7 @@ export interface TransitionEvent {
     to: NodeStatus;
     timestamp: number;
     /** Payload optionnel transporté avec la transition (livrable, feedback…). */
-    payload?: Record<string, unknown>;
+    payload?: JsonObject;
     /**
      * Snapshot du nœud après transition (statut mis à jour).
      * Toujours défini — évite aux listeners (ex. Notifier) d'appeler store.get()
@@ -33,7 +33,35 @@ export interface TransitionEvent {
 
 type TransitionListener = (evt: TransitionEvent) => void;
 
-export class GraphStore {
+/**
+ * Contrat de store — EXPLICITEMENT asynchrone.
+ *
+ * C'est la seule abstraction sur laquelle s'appuie l'`OrchestrationEngine`. Les
+ * deux implémentations (`InMemoryGraphStore`, `PgGraphStore`) le satisfont, ce
+ * qui supprime tout cast (`as never`) et garantit que le moteur attend
+ * réellement chaque lecture/écriture — y compris les écritures SQL — avant de
+ * poursuivre ou de répondre.
+ */
+export interface GraphStore {
+    get(id: string): Promise<HybridNode>;
+    list(): Promise<readonly HybridNode[]>;
+    applyTransition(
+        nodeId: string,
+        to: NodeStatus,
+        payload?: JsonObject,
+    ): Promise<HybridNode>;
+    onTransition(listener: TransitionListener): () => void;
+}
+
+/**
+ * Implémentation in-memory du contrat `GraphStore` (tests, dev local sans DB).
+ *
+ * Les méthodes sont asynchrones pour respecter le contrat, mais la mutation et
+ * l'émission des événements restent synchrones (aucun `await` avant la boucle
+ * de listeners) : les observateurs (ex. Notifier) sont donc notifiés dans le
+ * même tick, comme avec un store réel.
+ */
+export class InMemoryGraphStore implements GraphStore {
     private nodes = new Map<string, HybridNode>();
     private listeners = new Set<TransitionListener>();
 
@@ -45,21 +73,22 @@ export class GraphStore {
         }
     }
 
-    list(): readonly HybridNode[] {
+    async list(): Promise<readonly HybridNode[]> {
         return [...this.nodes.values()].map((n) => ({ ...n }));
     }
 
+    /** Vue synchrone immuable — pratique interne au store in-memory. */
     snapshot(): HybridNode[] {
         return [...this.nodes.values()].map((n) => ({ ...n }));
     }
 
-    get(id: string): HybridNode {
+    async get(id: string): Promise<HybridNode> {
         const n = this.nodes.get(id);
         if (!n) throw new NodeNotFoundError(id);
         return { ...n };
     }
 
-    has(id: string): boolean {
+    async has(id: string): Promise<boolean> {
         return this.nodes.has(id);
     }
 
@@ -67,11 +96,11 @@ export class GraphStore {
      * Applique une transition légale et met à jour le statut.
      * Lance `IllegalTransitionError` sans muter si la transition est refusée.
      */
-    applyTransition(
+    async applyTransition(
         nodeId: string,
         to: NodeStatus,
-        payload?: Record<string, unknown>,
-    ): HybridNode {
+        payload?: JsonObject,
+    ): Promise<HybridNode> {
         const node = this.nodes.get(nodeId);
         if (!node) throw new NodeNotFoundError(nodeId);
         const from = node.status;

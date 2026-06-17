@@ -1,5 +1,7 @@
 import type { Sql } from 'postgres';
 import type { TransitionEvent } from '../state/graphStore.js';
+import { safeFetch, type SsrfPolicy } from '../net/ssrfGuard.js';
+import { parseEmailNotification, type EmailNotification } from './notificationContract.js';
 
 /**
  * Interface minimale requise par le Notifier — compatible GraphStore et PgGraphStore.
@@ -89,6 +91,17 @@ export interface NotifierOptions {
      * en mode service (bypass RLS). Ne jamais exposer côté client.
      */
     supabaseServiceRoleKey?: string;
+    /**
+     * Workspace propriétaire de ce notifier. Requis pour l'e-mail (le contrat et
+     * l'Edge Function exigent `workspaceId` ; auparavant il manquait toujours).
+     */
+    workspaceId?: string;
+    /**
+     * Politique SSRF appliquée aux webhooks Slack et à l'Edge Function. Permet
+     * notamment de fournir une allowlist d'hôtes. Défaut : https + IP publiques
+     * en production.
+     */
+    ssrfPolicy?: SsrfPolicy;
 }
 
 // ─── Slack Block Kit builders ─────────────────────────────────────────────────
@@ -189,21 +202,37 @@ export function buildFluxBlocks(
 
 // ─── HTTP helper avec 1 retry sur 5xx ─────────────────────────────────────────
 
+export interface PostWithRetryOptions {
+    maxRetries?: number;
+    /** En-têtes additionnels (ex. Authorization pour l'Edge Function). */
+    headers?: Record<string, string>;
+    /** Politique SSRF (allowlist, https-only en prod…). */
+    ssrfPolicy?: SsrfPolicy;
+}
+
 export async function postWithRetry(
     fetchImpl: typeof fetch,
     url: string,
     body: unknown,
-    maxRetries = 1,
+    opts: PostWithRetryOptions = {},
 ): Promise<Response> {
+    const maxRetries = opts.maxRetries ?? 1;
     let lastError: unknown = new Error('pas de tentative');
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
         try {
-            const res = await fetchImpl(url, {
-                method: 'POST',
-                headers: { 'content-type': 'application/json' },
-                body: JSON.stringify(body),
-            });
+            // safeFetch : protection SSRF (les webhooks/URL sont configurables par
+            // l'utilisateur), timeout, taille max et redirections contrôlées.
+            const res = await safeFetch(
+                url,
+                {
+                    method: 'POST',
+                    headers: { 'content-type': 'application/json', ...opts.headers },
+                    body: JSON.stringify(body),
+                },
+                opts.ssrfPolicy ?? {},
+                { fetchImpl },
+            );
 
             // Retry uniquement sur les erreurs serveur 5xx (sauf dernier essai)
             if (res.status >= 500 && attempt < maxRetries) {
@@ -232,6 +261,8 @@ export class Notifier {
     private readonly auditLogger?: AuditLogger;
     private readonly emailEdgeFunctionUrl?: string;
     private readonly supabaseServiceRoleKey?: string;
+    private readonly workspaceId?: string;
+    private readonly ssrfPolicy: SsrfPolicy;
     private offTransition: (() => void) | null = null;
 
     constructor(opts: NotifierOptions) {
@@ -243,6 +274,8 @@ export class Notifier {
         this.auditLogger = opts.auditLogger;
         this.emailEdgeFunctionUrl = opts.emailEdgeFunctionUrl;
         this.supabaseServiceRoleKey = opts.supabaseServiceRoleKey;
+        this.workspaceId = opts.workspaceId;
+        this.ssrfPolicy = opts.ssrfPolicy ?? {};
     }
 
     attach(): void {
@@ -250,7 +283,6 @@ export class Notifier {
         this.offTransition = this.store.onTransition((evt) => {
             void this.emit(evt).catch((err) => {
                 // Sortie seule : un échec webhook ne doit JAMAIS remonter au store.
-                // eslint-disable-next-line no-console
                 console.warn('[notifier] échec émission', err);
             });
         });
@@ -303,7 +335,7 @@ export class Notifier {
         if (node.notificationChannels?.email && this.emailEdgeFunctionUrl) {
             tasks.push(
                 this.sendEmail({
-                    workspaceId: evt.payload?.workspaceId as string | undefined,
+                    workspaceId: this.workspaceId,
                     nodeId: evt.nodeId,
                     to: node.notificationChannels.email,
                     type: 'hitl',
@@ -359,7 +391,7 @@ export class Notifier {
         ) {
             tasks.push(
                 this.sendEmail({
-                    workspaceId: evt.payload?.workspaceId as string | undefined,
+                    workspaceId: this.workspaceId,
                     nodeId: evt.nodeId,
                     to: node.notificationChannels.email,
                     type: 'flux',
@@ -393,21 +425,43 @@ export class Notifier {
     }): Promise<void> {
         if (!this.emailEdgeFunctionUrl) return;
 
-        const headers: Record<string, string> = {
-            'content-type': 'application/json',
+        // Contrat partagé : clé d'idempotence déterministe (stable entre retries
+        // de la MÊME transition) + validation runtime avant tout appel réseau.
+        const candidate: EmailNotification = {
+            workspaceId: payload.workspaceId ?? '',
+            nodeId: payload.nodeId,
+            to: payload.to,
+            type: payload.type,
+            data: payload.data,
+            idempotencyKey: `${payload.workspaceId ?? 'ws'}:${payload.nodeId}:${payload.type}:${String(
+                payload.data.fromStatus ?? '',
+            )}->${String(payload.data.toStatus ?? '')}`,
         };
+        const parsed = parseEmailNotification(candidate);
+        if (!parsed.ok) {
+            console.warn('[notifier] payload email invalide, envoi ignoré', { reason: parsed.error });
+            return;
+        }
+
+        const headers: Record<string, string> = { 'content-type': 'application/json' };
         if (this.supabaseServiceRoleKey) {
             headers['authorization'] = `Bearer ${this.supabaseServiceRoleKey}`;
         }
 
         try {
-            await postWithRetry(
-                this.fetchImpl,
-                this.emailEdgeFunctionUrl,
-                payload,
-            );
+            // En-tête Authorization transmis + protection SSRF + vérification du
+            // statut HTTP réel (un 4xx/5xx n'est PAS un succès).
+            const res = await postWithRetry(this.fetchImpl, this.emailEdgeFunctionUrl, parsed.value, {
+                headers,
+                ssrfPolicy: this.ssrfPolicy,
+            });
+            if (!res.ok) {
+                console.warn('[notifier] Edge Function notify-email a répondu en erreur', {
+                    status: res.status,
+                    to: payload.to,
+                });
+            }
         } catch (err) {
-            // eslint-disable-next-line no-console
             console.warn('[notifier] échec envoi email', {
                 to: payload.to,
                 error: err instanceof Error ? err.message : String(err),
@@ -430,12 +484,19 @@ export class Notifier {
         let sentAt: string | null = null;
 
         try {
-            await postWithRetry(this.fetchImpl, url, payload);
-            sentAt = isoNow();
+            const res = await postWithRetry(this.fetchImpl, url, payload, {
+                ssrfPolicy: this.ssrfPolicy,
+            });
+            // Un statut HTTP non-2xx est un ÉCHEC réel, pas un succès silencieux.
+            if (!res.ok) {
+                auditStatus = 'failed';
+                errorMsg = `HTTP ${res.status}`;
+            } else {
+                sentAt = isoNow();
+            }
         } catch (err) {
             auditStatus = 'failed';
             errorMsg = err instanceof Error ? err.message : String(err);
-            // eslint-disable-next-line no-console
             console.warn('[notifier] échec envoi Slack', { url, error: errorMsg });
         }
 
@@ -452,7 +513,6 @@ export class Notifier {
                 })
                 .catch((e) => {
                     // Ne jamais propager une erreur DB dans le flux d'état
-                    // eslint-disable-next-line no-console
                     console.warn('[notifier] échec audit DB', e);
                 });
         }

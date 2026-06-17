@@ -3,7 +3,8 @@ import { Copy, UserPlus, UserMinus, Mail, X as XIcon } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useSession } from '../../hooks/useSession';
 import { useWorkspaceContext } from '../../contexts/WorkspaceContext';
-import { Button, FormField, Input, Select, Surface, cx } from '../../design/ui';
+import { Button, FormField, Input, Select, Surface } from '../../design/ui';
+import { cx } from '../../design/cx';
 import type { WorkspaceRole } from '../../types/supabase';
 
 /**
@@ -94,7 +95,15 @@ export function MembersView() {
     }, [activeId]);
 
     useEffect(() => {
-        void refresh();
+        // Chargement initial déféré (les setState de refresh s'exécutent dans un
+        // callback async, pas synchroniquement dans le corps de l'effet).
+        let active = true;
+        void Promise.resolve().then(() => {
+            if (active) void refresh();
+        });
+        return () => {
+            active = false;
+        };
     }, [refresh]);
 
     const ownerId = useMemo(

@@ -48,7 +48,7 @@ export function AuthScreen() {
 
     if (!isSupabaseConfigured) {
         return (
-            <div className="flex h-screen items-center justify-center p-4">
+            <div className="flex min-h-[100dvh] items-center justify-center p-4">
                 <Surface className="max-w-md p-8 text-center">
                     <h2 className="t-h2">Supabase non configuré</h2>
                     <p className="t-body-quiet mt-2">
@@ -62,7 +62,7 @@ export function AuthScreen() {
 
     return (
         <div
-            className="flex h-screen items-center justify-center p-4"
+            className="flex min-h-[100dvh] items-center justify-center p-4"
             style={{ background: 'var(--bg-page)' }}
         >
             <Surface className="w-full max-w-md p-8">

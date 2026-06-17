@@ -7,7 +7,7 @@ import {
     type AuditLogger,
     type NotificationAuditEntry,
 } from '../src/observability/notifier.js';
-import { GraphStore } from '../src/state/graphStore.js';
+import { InMemoryGraphStore } from '../src/state/graphStore.js';
 import type { HybridNode } from '../src/domain/types.js';
 
 // Helpers pour accéder aux arguments des appels fetch de manière typée
@@ -43,7 +43,7 @@ const AGENT: HybridNode = {
 };
 
 function makeStore() {
-    const store = new GraphStore();
+    const store = new InMemoryGraphStore();
     store.load([HUMAN, AGENT]);
     return store;
 }
@@ -65,7 +65,7 @@ function makeAudit(): { logger: AuditLogger; rows: NotificationAuditEntry[] } {
 // ─── Tests comportement de routage (contrat originel, inchangé) ────────────────
 
 describe('Notifier — routage', () => {
-    let store: GraphStore;
+    let store: InMemoryGraphStore;
     let fetchMock: ReturnType<typeof vi.fn>;
     let notifier: Notifier;
 
@@ -195,6 +195,7 @@ describe('Notifier — payload Block Kit transmis à fetch', () => {
         const fetchMock = makeFetch();
         const notifier = new Notifier({
             store,
+            workspaceId: 'ws-1',
             fetchImpl: fetchMock as typeof fetch,
             fluxWebhook: 'https://hooks.slack.com/flux',
         });
@@ -220,6 +221,7 @@ describe('Notifier — payload Block Kit transmis à fetch', () => {
         const fetchMock = makeFetch();
         const notifier = new Notifier({
             store,
+            workspaceId: 'ws-1',
             fetchImpl: fetchMock as typeof fetch,
             validationsWebhook: 'https://hooks.slack.com/validations',
         });
@@ -285,6 +287,7 @@ describe('Notifier — audit trail', () => {
         const { logger, rows } = makeAudit();
         const notifier = new Notifier({
             store,
+            workspaceId: 'ws-1',
             fetchImpl: makeFetch(200) as typeof fetch,
             fluxWebhook: 'https://hooks.slack.com/flux',
             auditLogger: logger,
@@ -302,12 +305,34 @@ describe('Notifier — audit trail', () => {
         expect(rows[0]!.sent_at).not.toBeNull();
     });
 
+    it('insère "failed" sur un statut HTTP non-2xx (pas de succès silencieux)', async () => {
+        const store = makeStore();
+        const { logger, rows } = makeAudit();
+        const notifier = new Notifier({
+            store,
+            workspaceId: 'ws-1',
+            fetchImpl: makeFetch(404) as typeof fetch, // webhook répond 404
+            fluxWebhook: 'https://hooks.slack.com/flux',
+            auditLogger: logger,
+        });
+        notifier.attach();
+
+        store.applyTransition('ia', 'EXECUTING');
+        await new Promise((r) => setImmediate(r));
+
+        expect(rows).toHaveLength(1);
+        expect(rows[0]!.status).toBe('failed');
+        expect(rows[0]!.error).toBe('HTTP 404');
+        expect(rows[0]!.sent_at).toBeNull();
+    });
+
     it('insère une entrée "failed" si le webhook est injoignable', async () => {
         const store = makeStore();
         const { logger, rows } = makeAudit();
         const fetchFail = vi.fn().mockRejectedValue(new Error('ECONNREFUSED'));
         const notifier = new Notifier({
             store,
+            workspaceId: 'ws-1',
             fetchImpl: fetchFail as typeof fetch,
             fluxWebhook: 'https://hooks.slack.com/flux',
             auditLogger: logger,
@@ -328,6 +353,7 @@ describe('Notifier — audit trail', () => {
         const { logger, rows } = makeAudit();
         const notifier = new Notifier({
             store,
+            workspaceId: 'ws-1',
             fetchImpl: makeFetch(200) as typeof fetch,
             validationsWebhook: 'https://hooks.slack.com/validations',
             auditLogger: logger,
@@ -354,6 +380,7 @@ describe('Notifier — audit trail', () => {
         };
         const notifier = new Notifier({
             store,
+            workspaceId: 'ws-1',
             fetchImpl: makeFetch(200) as typeof fetch,
             fluxWebhook: 'https://hooks.slack.com/flux',
             auditLogger: brokenLogger,
@@ -370,6 +397,7 @@ describe('Notifier — audit trail', () => {
         const { logger, rows } = makeAudit();
         const notifier = new Notifier({
             store,
+            workspaceId: 'ws-1',
             fetchImpl: makeFetch(200) as typeof fetch,
             fluxWebhook: 'https://hooks.slack.com/flux',
             // auditLogger intentionnellement absent
@@ -395,6 +423,7 @@ describe('Notifier — transport email', () => {
         const fetchMock = makeFetch(200);
         const notifier = new Notifier({
             store,
+            workspaceId: 'ws-1',
             fetchImpl: fetchMock as typeof fetch,
             emailEdgeFunctionUrl: EMAIL_URL,
             supabaseServiceRoleKey: SERVICE_KEY,
@@ -415,6 +444,7 @@ describe('Notifier — transport email', () => {
         const fetchMock = makeFetch(200);
         const notifier = new Notifier({
             store,
+            workspaceId: 'ws-1',
             fetchImpl: fetchMock as typeof fetch,
             emailEdgeFunctionUrl: EMAIL_URL,
         });
@@ -443,6 +473,7 @@ describe('Notifier — transport email', () => {
         const fetchMock = makeFetch(200);
         const notifier = new Notifier({
             store,
+            workspaceId: 'ws-1',
             fetchImpl: fetchMock as typeof fetch,
             emailEdgeFunctionUrl: EMAIL_URL,
         });
@@ -457,7 +488,6 @@ describe('Notifier — transport email', () => {
     });
 
     it('appelle l\'Edge Function pour ERROR avec type=flux', async () => {
-        const store = makeStore();
         const fetchMock = makeFetch(200);
         // Créer un store avec un HUMAN ayant email + forcer ERROR via run → error
         const humanWithError: HybridNode = {
@@ -465,11 +495,12 @@ describe('Notifier — transport email', () => {
             id: 'hum2',
             status: 'EXECUTING', // déjà en EXECUTING pour pouvoir → ERROR
         };
-        const store2 = new GraphStore();
+        const store2 = new InMemoryGraphStore();
         store2.load([humanWithError]);
 
         const notifier = new Notifier({
             store: store2,
+            workspaceId: 'ws-1',
             fetchImpl: fetchMock as typeof fetch,
             emailEdgeFunctionUrl: EMAIL_URL,
         });
@@ -493,6 +524,7 @@ describe('Notifier — transport email', () => {
         const fetchMock = makeFetch(200);
         const notifier = new Notifier({
             store,
+            workspaceId: 'ws-1',
             fetchImpl: fetchMock as typeof fetch,
             // emailEdgeFunctionUrl intentionnellement absent
         });
@@ -513,6 +545,7 @@ describe('Notifier — transport email', () => {
         const fetchFail = vi.fn().mockRejectedValue(new Error('ECONNREFUSED'));
         const notifier = new Notifier({
             store,
+            workspaceId: 'ws-1',
             fetchImpl: fetchFail as typeof fetch,
             emailEdgeFunctionUrl: EMAIL_URL,
         });

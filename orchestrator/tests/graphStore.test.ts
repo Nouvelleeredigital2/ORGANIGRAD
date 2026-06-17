@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { GraphStore, NodeNotFoundError } from '../src/state/graphStore.js';
+import { InMemoryGraphStore, NodeNotFoundError } from '../src/state/graphStore.js';
 import { IllegalTransitionError } from '../src/domain/stateMachine.js';
 import type { HybridNode } from '../src/domain/types.js';
 
@@ -35,54 +35,54 @@ const NODES: HybridNode[] = [
     },
 ];
 
-describe('GraphStore', () => {
-    let store: GraphStore;
+describe('InMemoryGraphStore', () => {
+    let store: InMemoryGraphStore;
 
     beforeEach(() => {
-        store = new GraphStore();
+        store = new InMemoryGraphStore();
         store.load(NODES);
     });
 
-    it('charge un graphe et liste tous les nœuds', () => {
-        expect(store.list()).toHaveLength(3);
+    it('charge un graphe et liste tous les nœuds', async () => {
+        expect(await store.list()).toHaveLength(3);
     });
 
-    it('lit un nœud par id', () => {
-        const n = store.get('redacteur');
+    it('lit un nœud par id', async () => {
+        const n = await store.get('redacteur');
         expect(n.nom).toBe('Rédacteur Campagne');
         expect(n.status).toBe('IDLE');
     });
 
-    it('lève NodeNotFoundError si le nœud n\'existe pas', () => {
-        expect(() => store.get('inexistant')).toThrowError(NodeNotFoundError);
+    it('rejette avec NodeNotFoundError si le nœud n\'existe pas', async () => {
+        await expect(store.get('inexistant')).rejects.toThrowError(NodeNotFoundError);
     });
 
-    it('applique une transition légale et met à jour le statut', () => {
-        const next = store.applyTransition('redacteur', 'EXECUTING');
+    it('applique une transition légale et met à jour le statut', async () => {
+        const next = await store.applyTransition('redacteur', 'EXECUTING');
         expect(next.status).toBe('EXECUTING');
-        expect(store.get('redacteur').status).toBe('EXECUTING');
+        expect((await store.get('redacteur')).status).toBe('EXECUTING');
     });
 
-    it('refuse une transition illégale sans muter l\'état', () => {
-        const before = store.get('redacteur').status;
-        expect(() => store.applyTransition('redacteur', 'WAITING_HUMAN_APPROVAL')).toThrowError(
-            IllegalTransitionError,
-        );
-        expect(store.get('redacteur').status).toBe(before);
+    it('refuse une transition illégale sans muter l\'état', async () => {
+        const before = (await store.get('redacteur')).status;
+        await expect(
+            store.applyTransition('redacteur', 'WAITING_HUMAN_APPROVAL'),
+        ).rejects.toThrowError(IllegalTransitionError);
+        expect((await store.get('redacteur')).status).toBe(before);
     });
 
-    it('lève NodeNotFoundError si on tente une transition sur un nœud inconnu', () => {
-        expect(() => store.applyTransition('inexistant', 'EXECUTING')).toThrowError(
+    it('rejette avec NodeNotFoundError si on tente une transition sur un nœud inconnu', async () => {
+        await expect(store.applyTransition('inexistant', 'EXECUTING')).rejects.toThrowError(
             NodeNotFoundError,
         );
     });
 
-    it('émet un événement à chaque transition légale', () => {
+    it('émet un événement à chaque transition légale', async () => {
         const events: Array<{ nodeId: string; from: string; to: string }> = [];
         store.onTransition((evt) => events.push({ nodeId: evt.nodeId, from: evt.from, to: evt.to }));
 
-        store.applyTransition('redacteur', 'EXECUTING');
-        store.applyTransition('redacteur', 'WAITING_HUMAN_APPROVAL');
+        await store.applyTransition('redacteur', 'EXECUTING');
+        await store.applyTransition('redacteur', 'WAITING_HUMAN_APPROVAL');
 
         expect(events).toEqual([
             { nodeId: 'redacteur', from: 'IDLE', to: 'EXECUTING' },
@@ -90,17 +90,17 @@ describe('GraphStore', () => {
         ]);
     });
 
-    it('n\'émet aucun événement pour une transition illégale', () => {
+    it('n\'émet aucun événement pour une transition illégale', async () => {
         const events: unknown[] = [];
         store.onTransition((e) => events.push(e));
-        expect(() => store.applyTransition('redacteur', 'IDLE')).toThrow();
+        await expect(store.applyTransition('redacteur', 'IDLE')).rejects.toThrow();
         expect(events).toEqual([]);
     });
 
-    it('snapshot() expose une copie immuable du graphe', () => {
+    it('snapshot() expose une copie immuable du graphe', async () => {
         const snap = store.snapshot();
         // Mutation sur la copie ne doit pas impacter le store
         snap[0]!.status = 'ERROR';
-        expect(store.get(snap[0]!.id).status).toBe('IDLE');
+        expect((await store.get(snap[0]!.id)).status).toBe('IDLE');
     });
 });

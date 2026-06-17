@@ -13,6 +13,28 @@
 
 import type { HybridNode, NodeStatus } from '../types/hybridNode';
 
+/**
+ * Vue PUBLIQUE d'un nœud renvoyée par `GET /api/graph` (cf. DTO côté
+ * orchestrateur). Volontairement SANS les champs sensibles (systemPrompt,
+ * mcpConfig.serverUrl, notificationChannels) : seuls des indicateurs booléens
+ * sont exposés. La SPA n'utilise de toute façon que `id` + `status` du flux
+ * orchestrateur ; les données complètes proviennent de Supabase / CSV.
+ */
+export interface OrchestratorGraphNode {
+    id: string;
+    type: HybridNode['type'];
+    nom: string;
+    roleTitre: string;
+    parentID: string | null;
+    gradeId: string;
+    skills: string[];
+    avatarUrl?: string;
+    status: NodeStatus;
+    hasSystemPrompt: boolean;
+    mcp: { configured: boolean; connectedTo: string[] };
+    notifications: { slack: boolean; email: boolean; whatsapp: boolean };
+}
+
 export interface SseStatusEvent {
     type: 'NODE_STATUS_CHANGED';
     nodeId: string;
@@ -59,12 +81,12 @@ export class OrchestratorClient {
         }
     }
 
-    async fetchGraph(): Promise<HybridNode[]> {
+    async fetchGraph(): Promise<OrchestratorGraphNode[]> {
         const res = await this.fetchImpl(`${this.baseUrl}/graph`, {
             headers: this.authHeaders(),
         });
         if (!res.ok) throw new Error(`GET /graph → ${res.status}`);
-        const body = (await res.json()) as { nodes: HybridNode[] };
+        const body = (await res.json()) as { nodes: OrchestratorGraphNode[] };
         return body.nodes;
     }
 
@@ -103,33 +125,82 @@ export class OrchestratorClient {
     }
 
     /**
-     * Ouvre un EventSource sur /api/events. Reconnexion automatique gérée par
-     * le navigateur. Renvoie une fonction de cleanup.
+     * Demande un ticket SSE court à usage unique (auth par Bearer). Le ticket
+     * remplace la clé API permanente dans l'URL du flux (cf. Priorité 7).
+     */
+    private async fetchSseTicket(): Promise<string> {
+        const res = await this.fetchImpl(`${this.baseUrl}/events/ticket`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', ...this.authHeaders() },
+            body: '{}',
+        });
+        if (!res.ok) throw new OrchestratorClientError(`TICKET_${res.status}`, res.status);
+        const body = (await res.json()) as { ticket: string };
+        return body.ticket;
+    }
+
+    /**
+     * Ouvre un flux SSE authentifié par ticket. Comme le ticket est à usage
+     * unique, on ne s'appuie PAS sur la reconnexion auto d'EventSource (qui
+     * réutiliserait un ticket déjà consommé) : on gère nous-mêmes la reconnexion
+     * en redemandant un ticket frais. Renvoie une fonction de cleanup.
      */
     subscribe(onEvent: (evt: SseStatusEvent) => void, onError?: (err: Event) => void): () => void {
         if (!this.eventSourceImpl) {
             // Environnement sans EventSource (Node sans polyfill) → no-op
             return () => {};
         }
-        // EventSource natif n'accepte pas de headers — passer la clé en query.
-        // Le hook auth orchestrateur lit aussi `?key=` (cf. auth.ts côté serveur).
-        const url = this.apiKey
-            ? `${this.baseUrl}/events?key=${encodeURIComponent(this.apiKey)}`
-            : `${this.baseUrl}/events`;
-        const es = new this.eventSourceImpl(url);
+
+        let closed = false;
+        let es: EventSource | null = null;
+        let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
         const handler = (e: MessageEvent) => {
             try {
-                const data = JSON.parse(e.data) as SseStatusEvent;
-                onEvent(data);
+                onEvent(JSON.parse(e.data) as SseStatusEvent);
             } catch {
                 /* paquet non-JSON (heartbeat) — ignore */
             }
         };
-        es.addEventListener('NODE_STATUS_CHANGED', handler as EventListener);
-        if (onError) es.addEventListener('error', onError);
+
+        const connect = async () => {
+            if (closed) return;
+            try {
+                const ticket = await this.fetchSseTicket();
+                if (closed) return;
+                es = new this.eventSourceImpl(
+                    `${this.baseUrl}/events?ticket=${encodeURIComponent(ticket)}`,
+                );
+                es.addEventListener('NODE_STATUS_CHANGED', handler as EventListener);
+                es.addEventListener('error', (ev) => {
+                    onError?.(ev);
+                    // Connexion perdue → on ferme et on reconnecte avec un ticket frais.
+                    if (closed) return;
+                    es?.close();
+                    es = null;
+                    scheduleReconnect();
+                });
+            } catch {
+                onError?.(new Event('error'));
+                scheduleReconnect();
+            }
+        };
+
+        const scheduleReconnect = () => {
+            if (closed || retryTimer) return;
+            retryTimer = setTimeout(() => {
+                retryTimer = null;
+                void connect();
+            }, 3000);
+        };
+
+        void connect();
+
         return () => {
-            es.removeEventListener('NODE_STATUS_CHANGED', handler as EventListener);
-            es.close();
+            closed = true;
+            if (retryTimer) clearTimeout(retryTimer);
+            es?.removeEventListener('NODE_STATUS_CHANGED', handler as EventListener);
+            es?.close();
         };
     }
 }

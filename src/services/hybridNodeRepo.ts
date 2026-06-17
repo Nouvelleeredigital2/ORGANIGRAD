@@ -60,10 +60,23 @@ export interface RepoContext {
     workspaceId: string | null;
 }
 
+/**
+ * Résultat de `list` — expose explicitement l'origine et la fraîcheur des
+ * données pour que l'UI ne présente JAMAIS un cache périmé comme courant
+ * (Priorité 3). `stale: true` ⇒ la lecture distante a échoué et on retombe sur
+ * le cache local du MÊME workspace : l'UI doit le signaler.
+ */
+export interface ListResult {
+    nodes: HybridNode[];
+    source: 'supabase' | 'local';
+    stale: boolean;
+    error?: string;
+}
+
 export const hybridNodeRepo = {
-    async list({ workspaceId }: RepoContext): Promise<HybridNode[]> {
+    async list({ workspaceId }: RepoContext): Promise<ListResult> {
         if (!supabase || !workspaceId) {
-            return hybridNodeStore.list();
+            return { nodes: hybridNodeStore.list(workspaceId), source: 'local', stale: false };
         }
         const { data, error } = await supabase
             .from('hybrid_nodes')
@@ -71,22 +84,28 @@ export const hybridNodeRepo = {
             .eq('workspace_id', workspaceId)
             .order('created_at', { ascending: true });
         if (error) {
-            // En cas d'erreur réseau, on retombe sur le cache local
-            console.warn('[hybridNodeRepo] list failed, fallback local:', error.message);
-            return hybridNodeStore.list();
+            // Erreur réseau : on retombe sur le cache local DU MÊME workspace,
+            // mais on le signale comme périmé (stale) — pas de fausse fraîcheur.
+            console.warn('[hybridNodeRepo] list failed, fallback local (stale):', error.message);
+            return {
+                nodes: hybridNodeStore.list(workspaceId),
+                source: 'local',
+                stale: true,
+                error: error.message,
+            };
         }
         const list = (data ?? []).map(rowToNode);
-        // Synchronise le cache local pour fallback
-        hybridNodeStore.save(list);
-        return list;
+        // Synchronise le cache local NAMESPACÉ pour le fallback offline.
+        hybridNodeStore.save(workspaceId, list);
+        return { nodes: list, source: 'supabase', stale: false };
     },
 
     async upsert(node: HybridNode, ctx: RepoContext): Promise<HybridNode> {
         if (!supabase || !ctx.workspaceId) {
-            const current = hybridNodeStore.list();
+            const current = hybridNodeStore.list(ctx.workspaceId);
             const idx = current.findIndex((n) => n.id === node.id);
             const next = idx === -1 ? [...current, node] : current.map((n, i) => (i === idx ? node : n));
-            hybridNodeStore.save(next);
+            hybridNodeStore.save(ctx.workspaceId, next);
             return node;
         }
         const payload = nodeToInsert(node, ctx.workspaceId);
@@ -101,7 +120,10 @@ export const hybridNodeRepo = {
 
     async remove(id: string, ctx: RepoContext): Promise<void> {
         if (!supabase || !ctx.workspaceId) {
-            hybridNodeStore.save(hybridNodeStore.list().filter((n) => n.id !== id));
+            hybridNodeStore.save(
+                ctx.workspaceId,
+                hybridNodeStore.list(ctx.workspaceId).filter((n) => n.id !== id),
+            );
             return;
         }
         const { error } = await supabase

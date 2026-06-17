@@ -7,7 +7,6 @@
  *  - whatsappId    → no-op (canal déclaré, aucune API configurée)
  */
 import type { HybridNode, NotificationChannels } from '../types/hybridNode';
-import { supabase } from '../lib/supabase';
 
 export type NotificationChannelKey = keyof NotificationChannels;
 
@@ -46,23 +45,17 @@ const drivers: Record<NotificationChannelKey, NotificationDriver> = {
     },
 
     /**
-     * Email via la Supabase Edge Function `notify-email`.
-     * Requiert que la fonction soit déployée sur le projet Supabase.
+     * Email — envoyé CÔTÉ SERVEUR par l'orchestrateur (Edge Function `notify-email`).
+     *
+     * Le SPA n'appelle plus directement la fonction : celle-ci exige désormais la
+     * clé service_role (que le navigateur ne doit jamais détenir) et restreint le
+     * destinataire au workflow (anti-relais, Priorité 5). L'e-mail part donc lors
+     * de la transition d'état traitée par l'orchestrateur, pas depuis le client.
      */
-    email: async (to, { node, message }) => {
-        if (!to) return;
-        if (!supabase) {
-            console.warn('[notify:email] Supabase non configuré — email ignoré');
-            return;
-        }
-        const { error } = await supabase.functions.invoke('notify-email', {
-            body: {
-                to,
-                subject: `[Organigrad] Action requise — ${node.nom}`,
-                text: `${message}\n\nNœud : ${node.nom} (${node.id})\nRôle : ${node.roleTitre}`,
-            },
-        });
-        if (error) throw error;
+    email: (_to, { node }) => {
+        console.info(
+            `[notify:email] e-mail délégué à l'orchestrateur (serveur) pour le nœud ${node.id}`,
+        );
     },
 
     /** WhatsApp Business — canal déclaré dans le schéma, aucune API configurée. */

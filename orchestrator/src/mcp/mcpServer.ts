@@ -4,6 +4,8 @@ import { OrchestrationEngine } from '../orchestration/engine.js';
 import { McpClient } from './mcpClient.js';
 import { IllegalTransitionError } from '../domain/stateMachine.js';
 import { NodeNotFoundError } from '../state/pgGraphStore.js';
+import { assertScope, MissingScopeError, SCOPES } from '../api/scopes.js';
+import { toPublicNodeDTO } from '../api/dto.js';
 
 /**
  * MCP Server — expose le graphe et les transitions de l'orchestrateur en
@@ -95,13 +97,8 @@ export const SERVER_INFO = {
 export const PROTOCOL_VERSION = '2024-11-05';
 
 // --- JSON-RPC types --------------------------------------------------------
-
-interface JsonRpcRequest {
-    jsonrpc: '2.0';
-    id?: string | number | null;
-    method: string;
-    params?: unknown;
-}
+// La requête entrante est typée `Record<string, unknown>` puis narrowée dans
+// `dispatchMcpRequest` (corps non fiable) — pas d'interface d'entrée figée.
 
 interface JsonRpcResponse {
     jsonrpc: '2.0';
@@ -118,6 +115,7 @@ const ERROR_CODES = {
     INTERNAL_ERROR: -32603,
     NODE_NOT_FOUND: -32001,
     ILLEGAL_TRANSITION: -32002,
+    FORBIDDEN: -32003,
 } as const;
 
 // --- Dispatcher ------------------------------------------------------------
@@ -126,19 +124,24 @@ export interface McpDispatchContext {
     sql: Sql;
     workspaceId: string;
     apiKeyId?: string;
+    scopes?: string[];
     mcpClient?: McpClient;
 }
 
 export async function dispatchMcpRequest(
-    req: JsonRpcRequest,
+    req: Record<string, unknown>,
     ctx: McpDispatchContext,
 ): Promise<JsonRpcResponse | null> {
+    // Narrowing défensif du JSON-RPC entrant (corps non fiable) — sans cast forcé.
+    const method = typeof req.method === 'string' ? req.method : '';
+    const rawId = req.id;
+    const id: string | number | null =
+        typeof rawId === 'string' || typeof rawId === 'number' ? rawId : null;
     // Notification (pas d'id) → pas de réponse
-    const isNotification = req.id === undefined;
-    const id = req.id ?? null;
+    const isNotification = rawId === undefined;
 
     try {
-        switch (req.method) {
+        switch (method) {
             case 'initialize':
                 return reply(id, {
                     protocolVersion: PROTOCOL_VERSION,
@@ -165,10 +168,13 @@ export async function dispatchMcpRequest(
 
             default:
                 if (isNotification) return null;
-                return errorReply(id, ERROR_CODES.METHOD_NOT_FOUND, `Méthode inconnue : ${req.method}`);
+                return errorReply(id, ERROR_CODES.METHOD_NOT_FOUND, `Méthode inconnue : ${method}`);
         }
     } catch (err) {
         if (isNotification) return null;
+        if (err instanceof MissingScopeError) {
+            return errorReply(id, ERROR_CODES.FORBIDDEN, err.message, { required: err.required });
+        }
         if (err instanceof NodeNotFoundError) {
             return errorReply(id, ERROR_CODES.NODE_NOT_FOUND, err.message, { nodeId: err.nodeId });
         }
@@ -193,27 +199,32 @@ async function callTool(
         id: ctx.apiKeyId,
     });
     const mcp = ctx.mcpClient ?? new McpClient({ timeoutMs: 30_000 });
-    const engine = new OrchestrationEngine(store as never, mcp);
+    const engine = new OrchestrationEngine(store, mcp);
 
     switch (name) {
         case 'list_nodes': {
+            assertScope(ctx.scopes, SCOPES.graphRead);
             const nodes = await store.list();
-            return contentJson({ nodes });
+            return contentJson({ nodes: nodes.map(toPublicNodeDTO) });
         }
 
         case 'run_node': {
+            assertScope(ctx.scopes, SCOPES.nodeRun);
             const id = requireString(args, 'node_id');
             await engine.runNode(id);
             return contentJson({ ok: true, node_id: id });
         }
 
         case 'approve_node': {
+            // Validation humaine — refusée aux clés techniques (pas de scope human:approve).
+            assertScope(ctx.scopes, SCOPES.humanApprove);
             const id = requireString(args, 'node_id');
             await store.applyTransition(id, 'IDLE');
             return contentJson({ ok: true, node_id: id, status: 'IDLE' });
         }
 
         case 'reject_node': {
+            assertScope(ctx.scopes, SCOPES.humanReject);
             const id = requireString(args, 'node_id');
             const feedback = requireString(args, 'feedback');
             await store.applyTransition(id, 'ERROR', { feedback });
@@ -221,6 +232,7 @@ async function callTool(
         }
 
         case 'reset_node': {
+            assertScope(ctx.scopes, SCOPES.nodeReset);
             const id = requireString(args, 'node_id');
             await store.applyTransition(id, 'IDLE');
             return contentJson({ ok: true, node_id: id, status: 'IDLE' });

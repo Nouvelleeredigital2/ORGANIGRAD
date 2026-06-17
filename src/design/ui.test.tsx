@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { Button, Pill, StatusDot, cx } from './ui';
+import { Button, Pill, StatusDot } from './ui';
+import { cx } from './cx';
 
 describe('design/ui primitives', () => {
     it('cx concatène en ignorant les falsy', () => {

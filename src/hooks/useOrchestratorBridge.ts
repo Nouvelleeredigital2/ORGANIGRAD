@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import type { HybridNode, NodeStatus } from '../types/hybridNode';
-import { OrchestratorClient, type SseStatusEvent } from '../services/orchestratorService';
+import type { NodeStatus } from '../types/hybridNode';
+import {
+    OrchestratorClient,
+    type SseStatusEvent,
+    type OrchestratorGraphNode,
+} from '../services/orchestratorService';
 import { useOrchestratorConfig } from './useOrchestratorConfig';
 
 /**
@@ -16,7 +20,7 @@ import { useOrchestratorConfig } from './useOrchestratorConfig';
  */
 export interface OrchestratorBridge {
     connected: boolean;
-    nodes: HybridNode[];
+    nodes: OrchestratorGraphNode[];
     runNode: (id: string) => Promise<void>;
     approve: (id: string) => Promise<void>;
     reject: (id: string, feedback: string) => Promise<void>;
@@ -36,33 +40,36 @@ export function useOrchestratorBridge(
     opts: UseOrchestratorBridgeOptions = {},
 ): OrchestratorBridge {
     const [connected, setConnected] = useState(false);
-    const [nodes, setNodes] = useState<HybridNode[]>([]);
+    const [nodes, setNodes] = useState<OrchestratorGraphNode[]>([]);
     const clientRef = useRef<OrchestratorClient | null>(null);
 
     // Configuration persistée (Paramètres). Les options explicites priment.
     const { config, isConfigured } = useOrchestratorConfig();
     const baseUrl = opts.baseUrl ?? config.baseUrl;
     const apiKey = opts.apiKey ?? config.apiKey;
+    const { clientFactory, enabled } = opts;
 
     useEffect(() => {
-        if (opts.enabled === false) {
-            setConnected(false);
-            return;
-        }
-        // Sans config ni clientFactory de test → pas de tentative
-        if (!opts.clientFactory && !(baseUrl && (apiKey || !isConfigured))) {
-            setConnected(false);
-            return;
-        }
-        const client = opts.clientFactory
-            ? opts.clientFactory()
-            : new OrchestratorClient({ baseUrl, apiKey });
-        clientRef.current = client;
+        const disabled =
+            enabled === false ||
+            // Sans config ni clientFactory de test → pas de tentative
+            (!clientFactory && !(baseUrl && (apiKey || !isConfigured)));
 
         let cancelled = false;
         let unsubscribe = () => {};
 
+        // Tous les setState se font dans ce callback async (jamais de setState
+        // synchrone dans le corps de l'effet).
         (async () => {
+            if (disabled) {
+                setConnected(false);
+                return;
+            }
+            const client = clientFactory
+                ? clientFactory()
+                : new OrchestratorClient({ baseUrl, apiKey });
+            clientRef.current = client;
+
             const reachable = await client.isReachable();
             if (cancelled) return;
             if (!reachable) {
@@ -86,7 +93,7 @@ export function useOrchestratorBridge(
             cancelled = true;
             unsubscribe();
         };
-    }, [baseUrl, apiKey, opts.clientFactory, opts.enabled, isConfigured]);
+    }, [baseUrl, apiKey, clientFactory, enabled, isConfigured]);
 
     return {
         connected,
@@ -106,7 +113,10 @@ export function useOrchestratorBridge(
     };
 }
 
-function applyTransitionPatch(prev: HybridNode[], evt: SseStatusEvent): HybridNode[] {
+function applyTransitionPatch(
+    prev: OrchestratorGraphNode[],
+    evt: SseStatusEvent,
+): OrchestratorGraphNode[] {
     return prev.map((n) =>
         n.id === evt.nodeId ? { ...n, status: evt.to as NodeStatus } : n,
     );

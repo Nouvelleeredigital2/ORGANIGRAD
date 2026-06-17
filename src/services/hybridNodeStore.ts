@@ -1,16 +1,25 @@
 /**
  * Store local pour les HybridNode non-humains (IA + serveurs MCP).
  *
- * Persistance localStorage. Aucun seed simulé : l'application démarre vierge.
- * L'utilisateur crée ses nœuds via le NodeEditor, puis ils sont persistés.
+ * Persistance localStorage, NAMESPACÉE PAR WORKSPACE (Priorité 3 — cloisonnement
+ * multi-tenant). Chaque workspace possède sa propre clé : aucune fuite de nœuds
+ * d'un workspace vers un autre via le cache local. Le mode offline (sans
+ * workspace) utilise un espace dédié `local`.
+ *
+ * Aucun seed simulé : l'application démarre vierge.
  */
 import type { HybridNode } from '../types/hybridNode';
 
-const STORAGE_KEY = 'organigrad_hybrid_nodes_v1';
+const BASE_KEY = 'organigrad_hybrid_nodes_v1';
 
-function load(): HybridNode[] {
+/** Clé localStorage propre à un workspace (ou à l'espace offline). */
+function keyFor(workspaceId: string | null | undefined): string {
+    return `${BASE_KEY}::${workspaceId ?? 'local'}`;
+}
+
+function load(workspaceId: string | null | undefined): HybridNode[] {
     try {
-        const raw = localStorage.getItem(STORAGE_KEY);
+        const raw = localStorage.getItem(keyFor(workspaceId));
         if (!raw) return [];
         const parsed = JSON.parse(raw) as HybridNode[];
         return Array.isArray(parsed) ? parsed : [];
@@ -19,9 +28,9 @@ function load(): HybridNode[] {
     }
 }
 
-function save(nodes: HybridNode[]): void {
+function save(workspaceId: string | null | undefined, nodes: HybridNode[]): void {
     try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(nodes));
+        localStorage.setItem(keyFor(workspaceId), JSON.stringify(nodes));
     } catch {
         /* quota / SSR — silently ignore */
     }
@@ -30,9 +39,9 @@ function save(nodes: HybridNode[]): void {
 export const hybridNodeStore = {
     list: load,
     save,
-    reset: () => {
+    reset: (workspaceId: string | null | undefined) => {
         try {
-            localStorage.removeItem(STORAGE_KEY);
+            localStorage.removeItem(keyFor(workspaceId));
         } catch {
             /* ignore */
         }

@@ -1,7 +1,8 @@
 import { X, Check, XCircle } from 'lucide-react';
 import { useState } from 'react';
 import type { HybridNode } from '../types/hybridNode';
-import { Button, cx } from '../design/ui';
+import { Button } from '../design/ui';
+import { cx } from '../design/cx';
 import { ARCHETYPE } from '../design/tokens';
 import { useEscapeClose } from '../hooks/useEscapeClose';
 

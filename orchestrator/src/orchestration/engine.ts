@@ -1,5 +1,5 @@
 import type { GraphStore } from '../state/graphStore.js';
-import type { HybridNode } from '../domain/types.js';
+import type { HybridNode, JsonObject } from '../domain/types.js';
 import type { RunResult } from '../mcp/mcpClient.js';
 
 /**
@@ -33,50 +33,45 @@ export class OrchestrationEngine {
      *   - le résultat MCP est ok (sinon ERROR + stop)
      */
     async runFlow(rootId: string): Promise<void> {
-        let current: HybridNode | null = this.store.get(rootId);
+        let current: HybridNode | null = await this.store.get(rootId);
 
         while (current) {
             if (current.type === 'HUMAN') {
                 // Atteint le garant humain — passage par EXECUTING (state machine)
                 // puis fige en WAITING_HUMAN_APPROVAL en attendant l'action HITL.
-                this.store.applyTransition(current.id, 'EXECUTING');
-                this.store.applyTransition(current.id, 'WAITING_HUMAN_APPROVAL');
+                await this.store.applyTransition(current.id, 'EXECUTING');
+                await this.store.applyTransition(current.id, 'WAITING_HUMAN_APPROVAL');
                 return;
             }
 
             // Exécute le nœud (AGENT_IA ou SOFTWARE_MCP) via MCP
-            this.store.applyTransition(current.id, 'EXECUTING');
+            await this.store.applyTransition(current.id, 'EXECUTING');
             const result = await this.mcp.runNode(current);
 
             if (!result.ok) {
-                // Échec → ERROR, stop du flux
-                this.store.applyTransition(current.id, 'ERROR', { error: result.error });
+                // Échec → ERROR, stop du flux. L'écriture est attendue pour
+                // garantir que l'état d'échec est persisté avant tout retour.
+                await this.store.applyTransition(current.id, 'ERROR', { error: result.error });
                 return;
             }
 
             // Quel est le nœud aval ?
-            const next = this.findDownstream(current.id);
+            const next = await this.findDownstream(current.id);
 
             if (!next) {
                 // Plus rien en aval → retour à IDLE (fin de flux)
-                this.store.applyTransition(current.id, 'WAITING_HUMAN_APPROVAL');
+                await this.store.applyTransition(current.id, 'WAITING_HUMAN_APPROVAL');
                 // Auto-approve serait illégitime — un flux sans humain final passe par IDLE
                 // mais WAITING_HUMAN_APPROVAL → IDLE est légal seulement via approve().
                 // On modélise : pas d'humain en aval → on remet en IDLE directement.
-                this.store.applyTransition(current.id, 'IDLE');
+                await this.store.applyTransition(current.id, 'IDLE');
                 return;
             }
 
-            if (next.type === 'HUMAN') {
-                // Le prochain est humain : le nœud courant a terminé son rôle,
-                // le passage à l'humain se fait par la branche du loop suivant.
-                this.store.applyTransition(current.id, 'WAITING_HUMAN_APPROVAL');
-                this.store.applyTransition(current.id, 'IDLE');
-            } else {
-                // Suite agent/logiciel : le courant retourne à IDLE, on chaîne
-                this.store.applyTransition(current.id, 'WAITING_HUMAN_APPROVAL');
-                this.store.applyTransition(current.id, 'IDLE');
-            }
+            // Le nœud courant a terminé son rôle : il repasse en IDLE puis on
+            // chaîne vers l'aval (qu'il soit humain ou agent/logiciel).
+            await this.store.applyTransition(current.id, 'WAITING_HUMAN_APPROVAL');
+            await this.store.applyTransition(current.id, 'IDLE');
 
             current = next;
         }
@@ -84,39 +79,40 @@ export class OrchestrationEngine {
 
     /** Lance un nœud isolé (bouton ⚡ Run) — pas de chaînage. */
     async runNode(nodeId: string): Promise<RunResult> {
-        const node = this.store.get(nodeId);
+        const node = await this.store.get(nodeId);
         if (node.type === 'HUMAN') {
             throw new Error("Un nœud HUMAN ne s'exécute pas via runNode");
         }
-        this.store.applyTransition(nodeId, 'EXECUTING');
+        await this.store.applyTransition(nodeId, 'EXECUTING');
         const result = await this.mcp.runNode(node);
         if (!result.ok) {
-            this.store.applyTransition(nodeId, 'ERROR', { error: result.error });
+            await this.store.applyTransition(nodeId, 'ERROR', { error: result.error });
         } else {
-            this.store.applyTransition(nodeId, 'WAITING_HUMAN_APPROVAL');
-            this.store.applyTransition(nodeId, 'IDLE');
+            await this.store.applyTransition(nodeId, 'WAITING_HUMAN_APPROVAL');
+            await this.store.applyTransition(nodeId, 'IDLE');
         }
         return result;
     }
 
     /** L'humain approuve — sortie de WAITING_HUMAN_APPROVAL vers IDLE. */
-    approve(nodeId: string, payload?: Record<string, unknown>): void {
-        this.store.applyTransition(nodeId, 'IDLE', payload);
+    async approve(nodeId: string, payload?: JsonObject): Promise<void> {
+        await this.store.applyTransition(nodeId, 'IDLE', payload);
     }
 
     /** L'humain rejette avec feedback — passe en ERROR. */
-    reject(nodeId: string, feedback: string): void {
-        this.store.applyTransition(nodeId, 'ERROR', { feedback });
+    async reject(nodeId: string, feedback: string): Promise<void> {
+        await this.store.applyTransition(nodeId, 'ERROR', { feedback });
     }
 
     /** Reset d'un nœud en ERROR après correction. */
-    reset(nodeId: string): void {
-        this.store.applyTransition(nodeId, 'IDLE');
+    async reset(nodeId: string): Promise<void> {
+        await this.store.applyTransition(nodeId, 'IDLE');
     }
 
-    private findDownstream(parentId: string): HybridNode | null {
+    private async findDownstream(parentId: string): Promise<HybridNode | null> {
         // Le nœud aval est celui dont `parentID === parentId`.
-        const children = this.store.list().filter((n) => n.parentID === parentId);
+        const nodes = await this.store.list();
+        const children = nodes.filter((n) => n.parentID === parentId);
         if (children.length === 0) return null;
         // Pour le cas Campagne Marketing : un seul enfant. Pour les graphes
         // plus complexes (fan-out), on prendrait le premier — l'orchestration

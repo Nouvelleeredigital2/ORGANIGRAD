@@ -12,10 +12,9 @@ export function useSession(): { session: Session | null; loading: boolean } {
     const [loading, setLoading] = useState(isSupabaseConfigured);
 
     useEffect(() => {
-        if (!supabase) {
-            setLoading(false);
-            return;
-        }
+        // `loading` est initialisé à `isSupabaseConfigured` : si Supabase n'est pas
+        // configuré, il vaut déjà `false` — aucun setState synchrone nécessaire.
+        if (!supabase) return;
         let active = true;
         supabase.auth
             .getSession()
