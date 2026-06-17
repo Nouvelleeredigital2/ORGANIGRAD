@@ -3,10 +3,10 @@
  *   - SUPABASE_DB_URL défini  → mode Postgres + auth API key (production)
  *   - sinon                    → mode in-memory (tests, dev local sans DB)
  */
-import { GraphStore } from '../state/graphStore.js';
+import { InMemoryGraphStore } from '../state/graphStore.js';
 import { OrchestrationEngine } from '../orchestration/engine.js';
 import { McpClient } from '../mcp/mcpClient.js';
-import { Notifier, PgAuditLogger } from '../observability/notifier.js';
+import { Notifier } from '../observability/notifier.js';
 import { buildServer } from './server.js';
 import { buildPgServer } from './pgServer.js';
 import { getSql } from '../state/pgGraphStore.js';
@@ -34,7 +34,7 @@ export async function startOrchestrator(port = Number(process.env.PORT ?? 3001))
     }
 
     // Mode in-memory (test/dev) — pas d'auth, store en RAM.
-    const store = new GraphStore();
+    const store = new InMemoryGraphStore();
     store.load([]);
 
     const mcpClient = new McpClient({ timeoutMs: 30_000 });

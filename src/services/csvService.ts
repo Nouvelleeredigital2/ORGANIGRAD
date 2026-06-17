@@ -1,6 +1,7 @@
 import Papa from 'papaparse';
 import type { Agent } from '../types/agent';
 import type { TreeNode } from '../types/orgchart';
+import { sanitizeRowsForCsv } from './sheetSecurity';
 
 const flattenTree = (viewTree: TreeNode[]): Agent[] => {
     const allAgents: Agent[] = [];
@@ -20,7 +21,9 @@ const flattenTree = (viewTree: TreeNode[]): Agent[] => {
 
 export const exportToCsv = (data: TreeNode[] | Agent[]) => {
     const allAgents = data.length > 0 && 'children' in data[0] ? flattenTree(data as TreeNode[]) : (data as Agent[]);
-    const csv = Papa.unparse(allAgents);
+    // Neutralise l'injection de formules avant sérialisation (Priorité 10).
+    const safeAgents = sanitizeRowsForCsv(allAgents as unknown as Array<Record<string, unknown>>);
+    const csv = Papa.unparse(safeAgents);
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);

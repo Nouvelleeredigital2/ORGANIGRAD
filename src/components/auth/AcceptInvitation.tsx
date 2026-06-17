@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { Button, Surface } from '../../design/ui';
+import { clearPendingInviteToken } from './inviteToken';
 
 /**
  * AcceptInvitation — écran intercepteur quand l'URL contient `?invite=token`.
@@ -11,29 +12,9 @@ import { Button, Surface } from '../../design/ui';
  *   - Connecté    → on demande confirmation puis on appelle
  *     `accept_workspace_invitation(token)`. Succès → on refresh la liste des
  *     workspaces et on bascule sur le nouveau.
+ *
+ * Les helpers de token (read/clear) vivent dans `inviteToken.ts` (Fast Refresh).
  */
-
-const PENDING_TOKEN_KEY = 'organigrad_pending_invite_token';
-
-export function readPendingInviteToken(): string | null {
-    // 1. URL ?invite=xxx
-    const params = new URLSearchParams(window.location.search);
-    const fromUrl = params.get('invite');
-    if (fromUrl) {
-        localStorage.setItem(PENDING_TOKEN_KEY, fromUrl);
-        // Nettoie l'URL pour ne pas re-traiter le token après refresh
-        const url = new URL(window.location.href);
-        url.searchParams.delete('invite');
-        window.history.replaceState({}, '', url.toString());
-        return fromUrl;
-    }
-    // 2. localStorage (cas où le user vient juste de s'authentifier)
-    return localStorage.getItem(PENDING_TOKEN_KEY);
-}
-
-export function clearPendingInviteToken() {
-    localStorage.removeItem(PENDING_TOKEN_KEY);
-}
 
 interface AcceptInvitationProps {
     token: string;
@@ -89,7 +70,7 @@ export function AcceptInvitation({ token, onAccepted, onSkip }: AcceptInvitation
 
     return (
         <div
-            className="flex h-screen items-center justify-center p-4"
+            className="flex min-h-[100dvh] items-center justify-center p-4"
             style={{ background: 'var(--bg-page)' }}
         >
             <Surface className="w-full max-w-md p-8">

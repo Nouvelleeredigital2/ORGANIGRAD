@@ -2,15 +2,15 @@ import React from 'react';
 import { TONE_CLASSES, STATUS, SURFACE, RADIUS, MOTION, FOCUS, TEXT } from './tokens';
 import type { Tone } from './tokens';
 import type { NodeStatus } from '../types/hybridNode';
+import { cx } from './cx';
 
 /**
  * Primitives UI Organigrad — chaque composant tire ses styles des tokens.
  * Aucune classe utilitaire de couleur ne doit être hardcodée hors d'ici.
+ *
+ * `cx` est défini dans `./cx` (réexport ici interdit par react-refresh) — les
+ * consommateurs externes doivent l'importer depuis `../design/cx`.
  */
-
-export function cx(...parts: Array<string | false | null | undefined>): string {
-    return parts.filter(Boolean).join(' ');
-}
 
 // --- Button -----------------------------------------------------------------
 
@@ -24,7 +24,7 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-    ({ tone = 'slate', variant = 'solid', size = 'md', className, children, ...props }, ref) => {
+    ({ tone = 'slate', variant = 'solid', size = 'md', type = 'button', className, children, ...props }, ref) => {
         const t = TONE_CLASSES[tone];
         const base = cx(
             'inline-flex items-center justify-center gap-2 font-semibold active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none',
@@ -42,7 +42,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
                     ? cx('bg-white', t.text, 'ring-1', t.ring, t.softHover)
                     : cx(t.text, t.softHover);
         return (
-            <button ref={ref} className={cx(base, styles, className)} {...props}>
+            <button ref={ref} type={type} className={cx(base, styles, className)} {...props}>
                 {children}
             </button>
         );
@@ -221,29 +221,25 @@ Select.displayName = 'Select';
 
 interface FormFieldProps {
     label: string;
-    htmlFor?: string;
     hint?: string;
     error?: string;
     children: React.ReactNode;
     className?: string;
 }
 
-export function FormField({ label, htmlFor, hint, error, children, className }: FormFieldProps) {
+export function FormField({ label, hint, error, children, className }: FormFieldProps) {
+    // Le contrôle est imbriqué DANS le <label> → association implicite (a11y),
+    // sans avoir à câbler un id sur chaque champ.
     return (
-        <div className={cx('block', className)}>
-            <label
-                htmlFor={htmlFor}
-                className={cx('mb-1 block text-slate-400', TEXT.kicker)}
-            >
-                {label}
-            </label>
+        <label className={cx('block', className)}>
+            <span className={cx('mb-1 block text-slate-400', TEXT.kicker)}>{label}</span>
             {children}
             {error ? (
                 <p className="mt-1 text-[11px] font-medium text-rose-600">{error}</p>
             ) : hint ? (
                 <p className="mt-1 text-[11px] text-slate-500">{hint}</p>
             ) : null}
-        </div>
+        </label>
     );
 }
 

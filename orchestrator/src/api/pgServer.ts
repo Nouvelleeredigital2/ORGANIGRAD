@@ -7,6 +7,9 @@ import { OrchestrationEngine } from '../orchestration/engine.js';
 import { IllegalTransitionError } from '../domain/stateMachine.js';
 import { NodeNotFoundError } from '../state/pgGraphStore.js';
 import { buildAuthHook } from './auth.js';
+import { assertScope, MissingScopeError, SCOPES } from './scopes.js';
+import { toPublicNodeDTO } from './dto.js';
+import { SseTicketStore } from './sseTickets.js';
 import { dispatchMcpRequest } from '../mcp/mcpServer.js';
 import { Notifier, PgAuditLogger } from '../observability/notifier.js';
 
@@ -33,26 +36,72 @@ export interface PgServerDeps {
     sql: Sql;
     mcpClient?: McpClient;
     notifierOptions?: PgNotifierConfig;
+    /**
+     * Allowlist CORS. Origines autorisées à appeler l'API depuis un navigateur.
+     * Si absent, lue depuis `CORS_ALLOWED_ORIGINS` (séparées par des virgules).
+     * Jamais de wildcard `*` : on renvoie l'origine seulement si elle matche.
+     */
+    allowedOrigins?: string[];
+}
+
+const PUBLIC_PATHS = new Set(['/healthz']);
+/** Le flux SSE s'authentifie par ticket (query), pas par Bearer. */
+function isSseStreamPath(url: string): boolean {
+    return url.split('?')[0] === '/api/events';
 }
 
 export function buildPgServer(deps: PgServerDeps): FastifyInstance {
     const app = Fastify({ logger: false });
     const mcp = deps.mcpClient ?? new McpClient({ timeoutMs: 30_000 });
+    const sseTickets = new SseTicketStore();
 
+    const allowedOrigins =
+        deps.allowedOrigins ??
+        (process.env.CORS_ALLOWED_ORIGINS ?? '')
+            .split(',')
+            .map((o) => o.trim())
+            .filter(Boolean);
+
+    // CORS par allowlist explicite — jamais `*`. credentials activés seulement
+    // si une allowlist est fournie (impossible avec une origine wildcard).
     void app.register(cors, {
-        origin: true,
-        credentials: false,
+        origin: (origin, cb) => {
+            // Requêtes sans Origin (curl, server-to-server) : autorisées.
+            if (!origin) return cb(null, true);
+            if (allowedOrigins.includes(origin)) return cb(null, true);
+            return cb(null, false);
+        },
+        credentials: allowedOrigins.length > 0,
         methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
         allowedHeaders: ['authorization', 'content-type'],
     });
 
     app.get('/healthz', async () => ({ ok: true }));
 
-    // Auth hook sur les routes /api/* ET /mcp
+    // Auth hook par Bearer sur /api/* et /mcp — SAUF le flux SSE (ticket) et les
+    // chemins publics.
     const authHook = buildAuthHook({ sql: deps.sql });
     app.addHook('onRequest', async (req, reply) => {
+        const path = req.url.split('?')[0]!;
+        if (PUBLIC_PATHS.has(path)) return;
+        if (isSseStreamPath(req.url)) return; // authentifié par ticket dans le handler
         if (!req.url.startsWith('/api/') && !req.url.startsWith('/mcp')) return;
         await authHook(req, reply);
+    });
+
+    // --- POST /api/events/ticket — émet un ticket SSE court à usage unique ----
+    app.post('/api/events/ticket', async (req, reply) => {
+        try {
+            assertScope(req.scopes, SCOPES.executionRead);
+            const ticket = sseTickets.issue({
+                workspaceId: req.workspaceId!,
+                apiKeyId: req.apiKeyId,
+                scopes: req.scopes ?? [],
+            });
+            return { ticket, expiresInMs: 30_000 };
+        } catch (err) {
+            return handleError(reply, err);
+        }
     });
 
     // --- POST /mcp — JSON-RPC 2.0 / Streamable HTTP (MCP) -----------------
@@ -65,11 +114,12 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
         const responses = await Promise.all(
             requests.map((r) =>
                 dispatchMcpRequest(
-                    r as never,
+                    r,
                     {
                         sql: deps.sql,
                         workspaceId: req.workspaceId!,
                         apiKeyId: req.apiKeyId,
+                        scopes: req.scopes,
                         mcpClient: mcp,
                     },
                 ),
@@ -92,12 +142,15 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
     const storeFor = (workspaceId: string, apiKeyId?: string) => {
         const store = new PgGraphStore(deps.sql, workspaceId, { kind: 'api_key', id: apiKeyId });
         const nc = deps.notifierOptions;
-        if (nc && (nc.validationsWebhook || nc.fluxWebhook)) {
+        // Le notifier doit aussi s'attacher quand SEUL l'e-mail est configuré
+        // (auparavant : attaché uniquement si un webhook Slack était présent).
+        if (nc && (nc.validationsWebhook || nc.fluxWebhook || nc.emailEdgeFunctionUrl)) {
             const auditLogger = nc.sqlForAudit
                 ? new PgAuditLogger(nc.sqlForAudit, workspaceId)
                 : undefined;
             const notifier = new Notifier({
                 store,
+                workspaceId,
                 validationsWebhook: nc.validationsWebhook,
                 fluxWebhook: nc.fluxWebhook,
                 appUrl: nc.appUrl,
@@ -111,17 +164,23 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
     };
 
     // --- GET /api/graph -----------------------------------------------------
-    app.get('/api/graph', async (req) => {
-        const store = storeFor(req.workspaceId!, req.apiKeyId);
-        const nodes = await store.list();
-        return { nodes };
+    app.get('/api/graph', async (req, reply) => {
+        try {
+            assertScope(req.scopes, SCOPES.graphRead);
+            const store = storeFor(req.workspaceId!, req.apiKeyId);
+            const nodes = await store.list();
+            return { nodes: nodes.map(toPublicNodeDTO) };
+        } catch (err) {
+            return handleError(reply, err);
+        }
     });
 
     // --- POST /api/nodes/:id/run -------------------------------------------
     app.post<{ Params: { id: string } }>('/api/nodes/:id/run', async (req, reply) => {
-        const store = storeFor(req.workspaceId!, req.apiKeyId);
-        const engine = new OrchestrationEngine(store as never, mcp);
         try {
+            assertScope(req.scopes, SCOPES.nodeRun);
+            const store = storeFor(req.workspaceId!, req.apiKeyId);
+            const engine = new OrchestrationEngine(store, mcp);
             await engine.runNode(req.params.id);
             return { ok: true };
         } catch (err) {
@@ -130,9 +189,12 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
     });
 
     // --- POST /api/nodes/:id/approve ---------------------------------------
+    // Validation HUMAINE : exige le scope human:approve, qu'une clé technique
+    // ne peut pas obtenir (cf. create_workspace_api_key).
     app.post<{ Params: { id: string } }>('/api/nodes/:id/approve', async (req, reply) => {
-        const store = storeFor(req.workspaceId!, req.apiKeyId);
         try {
+            assertScope(req.scopes, SCOPES.humanApprove);
+            const store = storeFor(req.workspaceId!, req.apiKeyId);
             await store.applyTransition(req.params.id, 'IDLE');
             return { ok: true };
         } catch (err) {
@@ -144,8 +206,9 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
     app.post<{ Params: { id: string }; Body: { feedback?: string } }>(
         '/api/nodes/:id/reject',
         async (req, reply) => {
-            const store = storeFor(req.workspaceId!, req.apiKeyId);
             try {
+                assertScope(req.scopes, SCOPES.humanReject);
+                const store = storeFor(req.workspaceId!, req.apiKeyId);
                 await store.applyTransition(req.params.id, 'ERROR', {
                     feedback: req.body?.feedback ?? '',
                 });
@@ -158,8 +221,9 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
 
     // --- POST /api/nodes/:id/reset -----------------------------------------
     app.post<{ Params: { id: string } }>('/api/nodes/:id/reset', async (req, reply) => {
-        const store = storeFor(req.workspaceId!, req.apiKeyId);
         try {
+            assertScope(req.scopes, SCOPES.nodeReset);
+            const store = storeFor(req.workspaceId!, req.apiKeyId);
             await store.applyTransition(req.params.id, 'IDLE');
             return { ok: true };
         } catch (err) {
@@ -169,7 +233,18 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
 
     // --- GET /api/events (SSE) ---------------------------------------------
     // SSE branché sur LISTEN/NOTIFY Postgres → toutes les transitions du workspace.
-    app.get('/api/events', async (req, reply) => {
+    app.get<{ Querystring: { ticket?: string } }>('/api/events', async (req, reply) => {
+        // Authentification par TICKET court à usage unique (pas de clé permanente
+        // dans l'URL). Le ticket porte le workspace et les scopes.
+        const ticketData = sseTickets.consume(req.query?.ticket);
+        if (!ticketData) {
+            return reply.code(401).send({ error: 'INVALID_OR_EXPIRED_TICKET' });
+        }
+        if (!ticketData.scopes.includes(SCOPES.executionRead)) {
+            return reply.code(403).send({ error: 'INSUFFICIENT_SCOPE', required: SCOPES.executionRead });
+        }
+        const workspaceId = ticketData.workspaceId;
+
         reply.raw.writeHead(200, {
             'content-type': 'text/event-stream',
             'cache-control': 'no-cache',
@@ -178,7 +253,6 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
         });
         reply.raw.write(': connected\n\n');
 
-        const workspaceId = req.workspaceId!;
         let lastSeen = new Date().toISOString();
 
         // Polling 1.5s du journal — simple, fiable, pas de LISTEN/NOTIFY à câbler.
@@ -235,6 +309,9 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
 }
 
 function handleError(reply: import('fastify').FastifyReply, err: unknown) {
+    if (err instanceof MissingScopeError) {
+        return reply.code(403).send({ error: 'INSUFFICIENT_SCOPE', required: err.required });
+    }
     if (err instanceof NodeNotFoundError) {
         return reply.code(404).send({ error: 'NODE_NOT_FOUND', nodeId: err.nodeId });
     }

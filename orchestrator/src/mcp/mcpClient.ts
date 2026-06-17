@@ -1,4 +1,5 @@
 import type { HybridNode } from '../domain/types.js';
+import { safeFetch, SsrfError, type SsrfPolicy } from '../net/ssrfGuard.js';
 
 /**
  * Client MCP — l'orchestrateur joue le rôle de client face aux serveurs MCP
@@ -28,6 +29,10 @@ export type RunResult =
 export interface McpClientOptions {
     fetchImpl?: typeof fetch;
     timeoutMs?: number;
+    /** Politique SSRF (override). Par défaut : https + IP publiques en production. */
+    ssrfPolicy?: SsrfPolicy;
+    /** Taille maximale d'une réponse MCP (octets). Défaut : 2 Mo. */
+    maxResponseBytes?: number;
 }
 
 interface McpBlockText {
@@ -47,10 +52,14 @@ interface McpResponseBody {
 export class McpClient {
     private readonly fetchImpl: typeof fetch;
     private readonly timeoutMs: number;
+    private readonly ssrfPolicy: SsrfPolicy;
+    private readonly maxResponseBytes: number;
 
     constructor(opts: McpClientOptions = {}) {
         this.fetchImpl = opts.fetchImpl ?? fetch;
         this.timeoutMs = opts.timeoutMs ?? 30_000;
+        this.ssrfPolicy = opts.ssrfPolicy ?? {};
+        this.maxResponseBytes = opts.maxResponseBytes ?? 2_000_000;
     }
 
     async runNode(node: HybridNode, ctx: RunContext = {}): Promise<RunResult> {
@@ -59,23 +68,25 @@ export class McpClient {
             return { ok: false, error: 'mcpConfig.serverUrl manquant sur le nœud' };
         }
 
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), this.timeoutMs);
-
         try {
-            const response = await this.fetchImpl(url, {
-                method: 'POST',
-                headers: { 'content-type': 'application/json' },
-                signal: controller.signal,
-                body: JSON.stringify({
-                    nodeId: node.id,
-                    nodeName: node.nom,
-                    nodeType: node.type,
-                    systemPrompt: node.systemPrompt,
-                    skills: node.skills ?? [],
-                    flow: ctx,
-                }),
-            });
+            // safeFetch : protection SSRF + timeout + taille max + redirections contrôlées.
+            const response = await safeFetch(
+                url,
+                {
+                    method: 'POST',
+                    headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify({
+                        nodeId: node.id,
+                        nodeName: node.nom,
+                        nodeType: node.type,
+                        systemPrompt: node.systemPrompt,
+                        skills: node.skills ?? [],
+                        flow: ctx,
+                    }),
+                },
+                { timeoutMs: this.timeoutMs, maxResponseBytes: this.maxResponseBytes, ...this.ssrfPolicy },
+                { fetchImpl: this.fetchImpl },
+            );
 
             if (!response.ok) {
                 return { ok: false, error: `HTTP ${response.status} ${response.statusText}`.trim() };
@@ -99,12 +110,16 @@ export class McpClient {
                 ...(texts ? { text: texts } : {}),
             };
         } catch (err) {
+            if (err instanceof SsrfError) {
+                // Cible refusée par la politique réseau ou timeout — message non sensible.
+                const error =
+                    err.reason === 'timeout'
+                        ? `timeout (${this.timeoutMs}ms)`
+                        : 'cible réseau MCP non autorisée';
+                return { ok: false, error };
+            }
             const msg = err instanceof Error ? err.message : String(err);
-            // AbortController abort → message d'erreur normalisé
-            const error = controller.signal.aborted ? `timeout (${this.timeoutMs}ms)` : msg;
-            return { ok: false, error };
-        } finally {
-            clearTimeout(timer);
+            return { ok: false, error: msg };
         }
     }
 }

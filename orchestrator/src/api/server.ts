@@ -1,10 +1,10 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import { registerRoutes } from './routes.js';
-import type { GraphStore } from '../state/graphStore.js';
+import type { InMemoryGraphStore } from '../state/graphStore.js';
 import type { OrchestrationEngine } from '../orchestration/engine.js';
 
 export interface ServerDeps {
-    store: GraphStore;
+    store: InMemoryGraphStore;
     engine: OrchestrationEngine;
 }
 

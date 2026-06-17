@@ -5,6 +5,7 @@ import {
     PROTOCOL_VERSION,
     SERVER_INFO,
 } from '../src/mcp/mcpServer.js';
+import { ALL_SCOPES, SCOPES } from '../src/api/scopes.js';
 
 /**
  * Tests du dispatcher MCP — couvre le protocole JSON-RPC 2.0 et la liste
@@ -15,14 +16,16 @@ import {
 
 function mockSql(rows: unknown[] = []) {
     const tx = vi.fn().mockImplementation(async (cb: (tx: typeof tag) => Promise<unknown>) => cb(tag));
-    const tag = vi.fn(async (..._args: unknown[]) => rows) as unknown as import('postgres').Sql;
+    const tag = vi.fn(async () => rows) as unknown as import('postgres').Sql;
     (tag as unknown as { begin: typeof tx }).begin = tx;
     return tag;
 }
 
 describe('MCP Server — protocole JSON-RPC 2.0', () => {
     const sql = mockSql();
-    const ctx = { sql, workspaceId: 'ws-1' };
+    // Contexte « pleins droits » : ces tests vérifient le PROTOCOLE et la
+    // validation des arguments, pas l'autorisation (testée plus bas).
+    const ctx = { sql, workspaceId: 'ws-1', scopes: [...ALL_SCOPES] };
 
     it("répond à initialize avec serverInfo + protocolVersion", async () => {
         const res = await dispatchMcpRequest(
@@ -107,7 +110,7 @@ describe('MCP Server — protocole JSON-RPC 2.0', () => {
         const sqlRows = mockSql(rows);
         const res = await dispatchMcpRequest(
             { jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'list_nodes', arguments: {} } },
-            { sql: sqlRows, workspaceId: 'ws-1' },
+            { sql: sqlRows, workspaceId: 'ws-1', scopes: [SCOPES.graphRead] },
         );
         expect(res?.result).toMatchObject({
             content: [{ type: 'text' }],
@@ -135,5 +138,57 @@ describe('MCP Server — protocole JSON-RPC 2.0', () => {
             ctx,
         );
         expect(res?.error?.message).toMatch(/feedback/);
+    });
+});
+
+describe('MCP Server — autorisation par scopes (Priorité 2)', () => {
+    const sql = mockSql();
+    const FORBIDDEN = -32003;
+
+    // Clé « agent technique » : peut lire et lancer, mais PAS valider/rejeter/reset.
+    const agentScopes = [SCOPES.graphRead, SCOPES.nodeRead, SCOPES.nodeRun, SCOPES.executionRead];
+
+    function call(name: string, scopes: string[], args: Record<string, unknown> = {}) {
+        return dispatchMcpRequest(
+            { jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name, arguments: args } },
+            { sql, workspaceId: 'ws-1', scopes },
+        );
+    }
+
+    it('une clé agent (node:run) NE PEUT PAS approuver', async () => {
+        const res = await call('approve_node', agentScopes, { node_id: 'n1' });
+        expect(res?.error?.code).toBe(FORBIDDEN);
+        expect(res?.error?.data).toMatchObject({ required: SCOPES.humanApprove });
+    });
+
+    it('une clé agent NE PEUT PAS rejeter', async () => {
+        const res = await call('reject_node', agentScopes, { node_id: 'n1', feedback: 'x' });
+        expect(res?.error?.code).toBe(FORBIDDEN);
+        expect(res?.error?.data).toMatchObject({ required: SCOPES.humanReject });
+    });
+
+    it('une clé agent NE PEUT PAS reset', async () => {
+        const res = await call('reset_node', agentScopes, { node_id: 'n1' });
+        expect(res?.error?.code).toBe(FORBIDDEN);
+        expect(res?.error?.data).toMatchObject({ required: SCOPES.nodeReset });
+    });
+
+    it('une clé sans aucun scope NE PEUT PAS lister', async () => {
+        const res = await call('list_nodes', []);
+        expect(res?.error?.code).toBe(FORBIDDEN);
+        expect(res?.error?.data).toMatchObject({ required: SCOPES.graphRead });
+    });
+
+    it('une clé sans node:run NE PEUT PAS lancer', async () => {
+        const res = await call('run_node', [SCOPES.graphRead], { node_id: 'n1' });
+        expect(res?.error?.code).toBe(FORBIDDEN);
+        expect(res?.error?.data).toMatchObject({ required: SCOPES.nodeRun });
+    });
+
+    it('avec le scope human:approve, le contrôle de scope passe (échoue ensuite sur l\'argument)', async () => {
+        const res = await call('approve_node', [SCOPES.humanApprove], {});
+        // Le scope est OK → on atteint la validation d'argument (node_id manquant).
+        expect(res?.error?.code).not.toBe(FORBIDDEN);
+        expect(res?.error?.message).toMatch(/node_id/);
     });
 });

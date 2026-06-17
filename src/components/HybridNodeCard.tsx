@@ -2,7 +2,8 @@ import { useMemo } from 'react';
 import { Lock, AlertCircle, Play, Mail, Trash2, Pencil, ChevronUp, ChevronDown } from 'lucide-react';
 import type { HybridNode } from '../types/hybridNode';
 import { ARCHETYPE, STATUS, TONE_CLASSES } from '../design/tokens';
-import { Button, IconButton, Pill, cx } from '../design/ui';
+import { Button, IconButton, Pill } from '../design/ui';
+import { cx } from '../design/cx';
 
 /**
  * HybridNodeCard — carte universelle des 3 archétypes.

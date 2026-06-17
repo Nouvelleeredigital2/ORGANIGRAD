@@ -9,7 +9,7 @@ interface AppShellProps {
 
 export const AppShell: React.FC<AppShellProps> = ({ sidebar, header, subHeader, children }) => {
     return (
-        <div className="flex h-screen text-slate-900 selection:bg-sky-100 overflow-hidden relative">
+        <div className="flex h-[100dvh] text-slate-900 selection:bg-sky-100 overflow-hidden relative">
             <div className="absolute inset-0 pointer-events-none z-0">
                 <div className="absolute inset-0 opacity-[0.012] grain-bg"></div>
                 <div className="absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-white/90 to-transparent"></div>

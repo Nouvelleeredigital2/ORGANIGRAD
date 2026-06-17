@@ -66,7 +66,11 @@ describe('OrchestratorClient', () => {
         await expect(client.runNode('nope')).rejects.toMatchObject({ code: 'NODE_NOT_FOUND' });
     });
 
-    it('subscribe() s\'abonne via EventSource et reçoit les transitions', () => {
+    it('subscribe() obtient un ticket puis reçoit les transitions via EventSource', async () => {
+        // Le flux demande d'abord un ticket SSE (POST /events/ticket).
+        fetchMock.mockResolvedValue(
+            new Response(JSON.stringify({ ticket: 'tkt-1' }), { status: 200 }),
+        );
         const listeners = new Map<string, (e: MessageEvent) => void>();
         const close = vi.fn();
         function FakeES(this: Record<string, unknown>) {
@@ -81,6 +85,9 @@ describe('OrchestratorClient', () => {
 
         const received: unknown[] = [];
         const off = c.subscribe((e) => received.push(e));
+
+        // Attend la résolution du ticket + l'ouverture de l'EventSource.
+        await vi.waitFor(() => expect(listeners.has('NODE_STATUS_CHANGED')).toBe(true));
 
         const payload = {
             type: 'NODE_STATUS_CHANGED',
@@ -109,7 +116,10 @@ describe('OrchestratorClient', () => {
         expect(headers.authorization).toBe('Bearer ok_secret123');
     });
 
-    it('ajoute apiKey en query string sur subscribe() (SSE)', () => {
+    it('ouvre le flux SSE via un ticket à usage unique — JAMAIS la clé dans l\'URL', async () => {
+        fetchMock.mockResolvedValue(
+            new Response(JSON.stringify({ ticket: 'tkt-xyz' }), { status: 200 }),
+        );
         let capturedUrl = '';
         const FakeES = vi.fn().mockImplementation(function (this: Record<string, unknown>, url: string) {
             capturedUrl = url;
@@ -120,11 +130,21 @@ describe('OrchestratorClient', () => {
         const c = new OrchestratorClient({
             fetchImpl: fetchMock as typeof fetch,
             eventSourceImpl: FakeES as unknown as typeof EventSource,
-            apiKey: 'ok_se cret',
+            apiKey: 'ok_secret',
             baseUrl: 'http://o/api',
         });
         const off = c.subscribe(() => {});
-        expect(capturedUrl).toBe('http://o/api/events?key=ok_se%20cret');
+        await vi.waitFor(() => expect(capturedUrl).not.toBe(''));
+
+        // L'EventSource est ouvert avec le TICKET, pas la clé API.
+        expect(capturedUrl).toBe('http://o/api/events?ticket=tkt-xyz');
+        expect(capturedUrl).not.toContain('ok_secret');
+
+        // La clé API ne circule que dans le header Bearer de la requête de ticket.
+        const [ticketUrl, init] = fetchMock.mock.calls[0]!;
+        expect(ticketUrl).toBe('http://o/api/events/ticket');
+        expect((init as RequestInit).method).toBe('POST');
+        expect((init!.headers as Record<string, string>).authorization).toBe('Bearer ok_secret');
         off();
     });
 

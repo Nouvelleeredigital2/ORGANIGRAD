@@ -1,8 +1,7 @@
-import { createContext, useContext, type ReactNode } from 'react';
-import { useSession } from '../hooks/useSession';
-import { useWorkspace, type WorkspaceWithRole } from '../hooks/useWorkspace';
+import { createContext, useContext } from 'react';
+import type { WorkspaceWithRole } from '../hooks/useWorkspace';
 
-interface WorkspaceContextValue {
+export interface WorkspaceContextValue {
     userId: string | null;
     workspaces: WorkspaceWithRole[];
     activeId: string | null;
@@ -12,25 +11,9 @@ interface WorkspaceContextValue {
     loading: boolean;
 }
 
-const Ctx = createContext<WorkspaceContextValue | null>(null);
-
-export function WorkspaceProvider({ children }: { children: ReactNode }) {
-    const { session } = useSession();
-    const userId = session?.user.id ?? null;
-    const { workspaces, activeId, setActive, refresh, loading } = useWorkspace(
-        userId ?? undefined,
-    );
-
-    const activeWorkspace = workspaces.find((w) => w.id === activeId) ?? null;
-
-    return (
-        <Ctx.Provider
-            value={{ userId, workspaces, activeId, activeWorkspace, setActive, refresh, loading }}
-        >
-            {children}
-        </Ctx.Provider>
-    );
-}
+// Le composant `WorkspaceProvider` vit dans un fichier séparé (WorkspaceProvider.tsx)
+// pour que ce module n'exporte que le contexte + le hook (Fast Refresh / react-refresh).
+export const WorkspaceCtx = createContext<WorkspaceContextValue | null>(null);
 
 const DEFAULT_CTX: WorkspaceContextValue = {
     userId: null,
@@ -47,5 +30,5 @@ const DEFAULT_CTX: WorkspaceContextValue = {
  * vide cohérent au lieu de jeter — le repo bascule en fallback localStorage.
  */
 export function useWorkspaceContext(): WorkspaceContextValue {
-    return useContext(Ctx) ?? DEFAULT_CTX;
+    return useContext(WorkspaceCtx) ?? DEFAULT_CTX;
 }

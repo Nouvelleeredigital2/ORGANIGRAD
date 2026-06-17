@@ -3,7 +3,8 @@ import { onActivity, type ActivityEvent } from '../services/activityBus';
 import { NOTIFICATION_EVENT, type NotificationEventDetail } from '../services/notificationService';
 import { transitionsRepo, type TransitionRecord } from '../services/transitionsRepo';
 import { useWorkspaceContext } from '../contexts/WorkspaceContext';
-import { Surface, Pill, cx } from '../design/ui';
+import { Surface, Pill } from '../design/ui';
+import { cx } from '../design/cx';
 import { STATUS } from '../design/tokens';
 import type { HybridNode, NodeStatus } from '../types/hybridNode';
 import { hybridNodeRepo } from '../services/hybridNodeRepo';
@@ -43,8 +44,8 @@ export function ActivityLog() {
     // Map de résolution `node_id` → nom — alimentée par le repo
     useEffect(() => {
         if (!workspaceId) return;
-        void hybridNodeRepo.list({ workspaceId }).then((nodes) => {
-            setNodeNameById(new Map(nodes.map((n) => [n.id, n.nom])));
+        void hybridNodeRepo.list({ workspaceId }).then((res) => {
+            setNodeNameById(new Map(res.nodes.map((n) => [n.id, n.nom])));
         });
         const off = hybridNodeRepo.subscribe({ workspaceId }, (event, node) => {
             if (event === 'DELETE') {

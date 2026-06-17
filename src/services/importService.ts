@@ -1,7 +1,13 @@
 import Papa from 'papaparse';
-import * as XLSX from 'xlsx';
 import type { Agent } from '../types/agent';
 import { mapImportedRowToAgent } from '../utils/importMapping';
+import {
+    IMPORT_LIMITS,
+    assertFileSize,
+    assertSheetCount,
+    assertDimensions,
+    assertCellLengths,
+} from './sheetSecurity';
 
 const looksLikeMojibake = (text: string): boolean => {
     return /Ã.|Â|�/.test(text);
@@ -29,27 +35,63 @@ const parseCsvAgents = (buffer: ArrayBuffer): Promise<Agent[]> => {
             header: true,
             skipEmptyLines: true,
             complete: (results) => {
-                resolve(filterImportedAgents(results.data.map((row, index) => mapImportedRowToAgent(row, index))));
+                try {
+                    const data = results.data;
+                    assertDimensions(data.length, results.meta.fields?.length ?? 0);
+                    assertCellLengths(data);
+                    resolve(
+                        filterImportedAgents(data.map((row, index) => mapImportedRowToAgent(row, index))),
+                    );
+                } catch (err) {
+                    reject(err);
+                }
             },
             error: reject,
         });
     });
 };
 
-const parseWorkbookAgents = (buffer: ArrayBuffer): Agent[] => {
-    const workbook = XLSX.read(buffer, { type: 'array' });
-    const firstSheetName = workbook.SheetNames[0];
+const parseWorkbookAgents = async (buffer: ArrayBuffer): Promise<Agent[]> => {
+    // Import dynamique : xlsx (lib lourde + CVE) reste HORS du bundle initial et
+    // n'est chargé qu'au moment d'un import XLSX (Priorité 12).
+    const XLSX = await import('xlsx');
+    // Lecture DÉFENSIVE : pas d'analyse de formules, pas d'extraction VBA/macros
+    // (jamais exécutées par SheetJS, mais on évite même de les charger), et on
+    // borne le nombre de lignes lues. Atténue la surface des CVE `xlsx`.
+    const workbook = XLSX.read(buffer, {
+        type: 'array',
+        cellFormula: false,
+        cellHTML: false,
+        bookVBA: false,
+        sheetRows: IMPORT_LIMITS.maxRows + 1, // +1 pour l'en-tête
+    });
 
+    assertSheetCount(workbook.SheetNames.length);
+
+    const firstSheetName = workbook.SheetNames[0];
     if (!firstSheetName) {
         return [];
     }
 
     const sheet = workbook.Sheets[firstSheetName];
+    // Dimensions déclarées par la feuille (avant matérialisation des lignes).
+    const ref = sheet?.['!ref'];
+    if (ref) {
+        const range = XLSX.utils.decode_range(ref);
+        const cols = range.e.c - range.s.c + 1;
+        const rows = range.e.r - range.s.r + 1;
+        assertDimensions(rows, cols);
+    }
+
     const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' });
+    assertDimensions(rows.length, 0);
+    assertCellLengths(rows);
     return filterImportedAgents(rows.map((row, index) => mapImportedRowToAgent(row, index)));
 };
 
 export const importAgentsFromFile = async (file: File): Promise<Agent[]> => {
+    // Garde-fou taille AVANT de charger le fichier en mémoire.
+    assertFileSize(file);
     const buffer = await file.arrayBuffer();
     const lowerName = file.name.toLowerCase();
 
@@ -61,5 +103,5 @@ export const importAgentsFromFile = async (file: File): Promise<Agent[]> => {
         return parseWorkbookAgents(buffer);
     }
 
-    throw new Error('Format de fichier non supporte.');
+    throw new Error('Format de fichier non supporté (formats acceptés : .csv, .xlsx, .xls).');
 };

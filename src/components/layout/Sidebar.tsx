@@ -40,9 +40,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const [wsDropdownOpen, setWsDropdownOpen] = useState(false);
     const ws = useWorkspaceContext();
 
-    useEffect(() => {
+    // Ferme le menu mobile lors d'une navigation — ajustement pendant le rendu
+    // (pas de setState synchrone dans un effet).
+    const navKey = `${activeView}::${selectedPoleKey ?? ''}`;
+    const [lastNavKey, setLastNavKey] = useState(navKey);
+    if (navKey !== lastNavKey) {
+        setLastNavKey(navKey);
         setMobileOpen(false);
-    }, [activeView, selectedPoleKey]);
+    }
 
     useEffect(() => {
         if (!mobileOpen) return;

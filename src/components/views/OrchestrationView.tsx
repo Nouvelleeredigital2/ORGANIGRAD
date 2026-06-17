@@ -45,7 +45,11 @@ const cycleStatus = (s: NodeStatus): NodeStatus => CYCLE[(CYCLE.indexOf(s) + 1) 
  */
 export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents }) => {
     const { activeId: workspaceId } = useWorkspaceContext();
-    const [hybridSource, setHybridSource] = useState<HybridNode[]>(() => hybridNodeStore.list());
+    const [hybridSource, setHybridSource] = useState<HybridNode[]>(() =>
+        hybridNodeStore.list(workspaceId),
+    );
+    const [dataState, setDataState] = useState<'loading' | 'ready' | 'stale'>('loading');
+    const [statuses, setStatuses] = useState<Record<string, NodeStatus>>({});
 
     // Pont vers l'orchestrateur backend (config dans Paramètres).
     // Quand `bridge.connected`, on délègue run/approve/reject au service distant
@@ -55,8 +59,15 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
     // Charge depuis Supabase quand on a un workspace + souscrit aux changements live
     useEffect(() => {
         let cancelled = false;
-        void hybridNodeRepo.list({ workspaceId }).then((nodes) => {
-            if (!cancelled) setHybridSource(nodes);
+        // Cloisonnement : on repart IMMÉDIATEMENT du cache namespacé de CE
+        // workspace (jamais celui d'un workspace précédent), puis on rafraîchit.
+        setHybridSource(hybridNodeStore.list(workspaceId));
+        setStatuses({});
+        setDataState('loading');
+        void hybridNodeRepo.list({ workspaceId }).then((res) => {
+            if (cancelled) return;
+            setHybridSource(res.nodes);
+            setDataState(res.stale ? 'stale' : 'ready');
         });
         const off = hybridNodeRepo.subscribe({ workspaceId }, (event, node) => {
             setHybridSource((prev) => {
@@ -71,7 +82,6 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
             off();
         };
     }, [workspaceId]);
-    const [statuses, setStatuses] = useState<Record<string, NodeStatus>>({});
     const [isRunning, setIsRunning] = useState(false);
     const [validationOpen, setValidationOpen] = useState(false);
     const [editorOpen, setEditorOpen] = useState(false);
@@ -265,6 +275,20 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
 
     return (
         <div className="relative w-full overflow-y-auto p-4 pt-16 sm:p-6 lg:p-10 lg:pt-10">
+            {dataState === 'stale' && (
+                <div
+                    role="status"
+                    className="mb-4 rounded-xl px-4 py-2.5 text-[13px]"
+                    style={{
+                        background: 'rgba(255,149,0,0.08)',
+                        color: 'var(--system-orange, #b25e00)',
+                        boxShadow: 'inset 0 0 0 1px rgba(255,149,0,0.3)',
+                    }}
+                >
+                    Connexion au serveur impossible — données affichées potentiellement obsolètes
+                    (dernier cache de ce workspace).
+                </div>
+            )}
             <header className="mb-6 flex flex-col gap-4 sm:gap-6 lg:mb-8 lg:flex-row lg:items-start lg:justify-between">
                 <div>
                     <p className="eyebrow">Chaîne hybride</p>

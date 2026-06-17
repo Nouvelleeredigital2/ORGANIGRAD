@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { OrchestrationEngine } from '../src/orchestration/engine.js';
-import { GraphStore } from '../src/state/graphStore.js';
+import { InMemoryGraphStore } from '../src/state/graphStore.js';
 import type { HybridNode } from '../src/domain/types.js';
 import type { RunResult } from '../src/mcp/mcpClient.js';
 
@@ -56,7 +56,7 @@ const NODES: HybridNode[] = [
 ];
 
 function makeEngine(runImpl?: (node: HybridNode) => Promise<RunResult>) {
-    const store = new GraphStore();
+    const store = new InMemoryGraphStore();
     store.load(NODES);
     const mcpClient = {
         runNode: vi
@@ -74,35 +74,35 @@ describe('OrchestrationEngine', () => {
         await engine.runFlow('redacteur');
 
         // Tous les nœuds non-humains sont retournés en IDLE après exécution
-        expect(store.get('redacteur').status).toBe('IDLE');
-        expect(store.get('brand').status).toBe('IDLE');
-        expect(store.get('fact').status).toBe('IDLE');
+        expect((await store.get('redacteur')).status).toBe('IDLE');
+        expect((await store.get('brand')).status).toBe('IDLE');
+        expect((await store.get('fact')).status).toBe('IDLE');
         // L'humain est figé en attente
-        expect(store.get('human').status).toBe('WAITING_HUMAN_APPROVAL');
+        expect((await store.get('human')).status).toBe('WAITING_HUMAN_APPROVAL');
     });
 
     it('le flux n\'avance pas tant que l\'humain n\'a pas approuvé', async () => {
         const { engine, store } = makeEngine();
         await engine.runFlow('redacteur');
-        expect(store.get('human').status).toBe('WAITING_HUMAN_APPROVAL');
+        expect((await store.get('human')).status).toBe('WAITING_HUMAN_APPROVAL');
 
         // Aucune action implicite ne fait sortir de WAITING_HUMAN_APPROVAL
         await new Promise((r) => setTimeout(r, 30));
-        expect(store.get('human').status).toBe('WAITING_HUMAN_APPROVAL');
+        expect((await store.get('human')).status).toBe('WAITING_HUMAN_APPROVAL');
     });
 
     it('approve() fait passer le nœud humain en IDLE', async () => {
         const { engine, store } = makeEngine();
         await engine.runFlow('redacteur');
-        engine.approve('human');
-        expect(store.get('human').status).toBe('IDLE');
+        await engine.approve('human');
+        expect((await store.get('human')).status).toBe('IDLE');
     });
 
     it('reject() avec feedback met l\'humain en ERROR', async () => {
         const { engine, store } = makeEngine();
         await engine.runFlow('redacteur');
-        engine.reject('human', 'Trop générique');
-        expect(store.get('human').status).toBe('ERROR');
+        await engine.reject('human', 'Trop générique');
+        expect((await store.get('human')).status).toBe('ERROR');
     });
 
     it('un échec MCP met le nœud en ERROR et stoppe le flux', async () => {
@@ -111,30 +111,30 @@ describe('OrchestrationEngine', () => {
         );
         await engine.runFlow('redacteur');
 
-        expect(store.get('redacteur').status).toBe('IDLE');
-        expect(store.get('brand').status).toBe('ERROR');
+        expect((await store.get('redacteur')).status).toBe('IDLE');
+        expect((await store.get('brand')).status).toBe('ERROR');
         // Le flux n'a pas atteint Fact-Checker ni l'humain
-        expect(store.get('fact').status).toBe('IDLE');
-        expect(store.get('human').status).toBe('IDLE');
+        expect((await store.get('fact')).status).toBe('IDLE');
+        expect((await store.get('human')).status).toBe('IDLE');
     });
 
-    it('approve() sur un nœud qui n\'est pas en WAITING_HUMAN_APPROVAL lève une erreur', () => {
+    it('approve() sur un nœud qui n\'est pas en WAITING_HUMAN_APPROVAL rejette', async () => {
         const { engine } = makeEngine();
-        expect(() => engine.approve('human')).toThrowError();
+        await expect(engine.approve('human')).rejects.toThrowError();
     });
 
     it('reset() ramène un nœud en ERROR à IDLE', async () => {
         const { engine, store } = makeEngine();
         await engine.runFlow('redacteur');
-        engine.reject('human', 'KO');
-        expect(store.get('human').status).toBe('ERROR');
-        engine.reset('human');
-        expect(store.get('human').status).toBe('IDLE');
+        await engine.reject('human', 'KO');
+        expect((await store.get('human')).status).toBe('ERROR');
+        await engine.reset('human');
+        expect((await store.get('human')).status).toBe('IDLE');
     });
 
     it('runNode() lance un nœud isolé (bouton ⚡ Run)', async () => {
         const { engine, store } = makeEngine();
         await engine.runNode('redacteur');
-        expect(store.get('redacteur').status).toBe('IDLE'); // EXECUTING puis IDLE
+        expect((await store.get('redacteur')).status).toBe('IDLE'); // EXECUTING puis IDLE
     });
 });

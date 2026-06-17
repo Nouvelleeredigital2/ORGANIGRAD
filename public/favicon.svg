@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Organigrad">
+  <rect width="32" height="32" rx="7" fill="#0071e3"/>
+  <circle cx="16" cy="9" r="3.2" fill="#fff"/>
+  <circle cx="9" cy="23" r="3.2" fill="#fff"/>
+  <circle cx="23" cy="23" r="3.2" fill="#fff"/>
+  <path d="M16 12.2 16 16 M16 16 L9 19.8 M16 16 L23 19.8" stroke="#fff" stroke-width="1.8" stroke-linecap="round" fill="none"/>
+</svg>
