@@ -8,6 +8,7 @@ import {
     type NotificationAuditEntry,
 } from '../src/observability/notifier.js';
 import { InMemoryGraphStore } from '../src/state/graphStore.js';
+import { FixedWindowRateLimiter } from '../src/observability/rateLimiter.js';
 import type { HybridNode } from '../src/domain/types.js';
 
 // Helpers pour accéder aux arguments des appels fetch de manière typée
@@ -556,5 +557,28 @@ describe('Notifier — transport email', () => {
             store.applyTransition('hum', 'WAITING_HUMAN_APPROVAL'),
         ).not.toThrow();
         await new Promise((r) => setImmediate(r));
+    });
+});
+
+describe('Notifier — rate limiting', () => {
+    it('ignore les envois sortants au-delà de la limite', async () => {
+        const store = makeStore();
+        const fetchMock = makeFetch(200);
+        const FLUX = 'https://hooks.slack.com/flux';
+        const notifier = new Notifier({
+            store,
+            workspaceId: 'ws-1',
+            fetchImpl: fetchMock as typeof fetch,
+            fluxWebhook: FLUX,
+            rateLimiter: new FixedWindowRateLimiter({ max: 1, windowMs: 60_000 }),
+        });
+        notifier.attach();
+
+        store.applyTransition('ia', 'EXECUTING'); // 1er flux → envoyé
+        store.applyTransition('ia', 'ERROR'); // 2e flux → bloqué par la limite
+        await new Promise((r) => setImmediate(r));
+
+        const fluxCalls = fetchMock.mock.calls.filter((c) => (c[0] as string) === FLUX);
+        expect(fluxCalls).toHaveLength(1);
     });
 });
