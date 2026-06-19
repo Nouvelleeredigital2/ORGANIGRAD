@@ -2,6 +2,7 @@ import type { Sql } from 'postgres';
 import type { TransitionEvent } from '../state/graphStore.js';
 import { safeFetch, type SsrfPolicy } from '../net/ssrfGuard.js';
 import { parseEmailNotification, type EmailNotification } from './notificationContract.js';
+import { FixedWindowRateLimiter, type RateLimiter } from './rateLimiter.js';
 
 /**
  * Interface minimale requise par le Notifier — compatible GraphStore et PgGraphStore.
@@ -102,6 +103,11 @@ export interface NotifierOptions {
      * en production.
      */
     ssrfPolicy?: SsrfPolicy;
+    /**
+     * Limiteur de débit des envois sortants (anti-flood). Défaut : 60 envois /
+     * 60 s par workspace. Injecter `unlimitedRateLimiter` pour désactiver.
+     */
+    rateLimiter?: RateLimiter;
 }
 
 // ─── Slack Block Kit builders ─────────────────────────────────────────────────
@@ -263,6 +269,7 @@ export class Notifier {
     private readonly supabaseServiceRoleKey?: string;
     private readonly workspaceId?: string;
     private readonly ssrfPolicy: SsrfPolicy;
+    private readonly rateLimiter: RateLimiter;
     private offTransition: (() => void) | null = null;
 
     constructor(opts: NotifierOptions) {
@@ -276,6 +283,19 @@ export class Notifier {
         this.supabaseServiceRoleKey = opts.supabaseServiceRoleKey;
         this.workspaceId = opts.workspaceId;
         this.ssrfPolicy = opts.ssrfPolicy ?? {};
+        this.rateLimiter =
+            opts.rateLimiter ?? new FixedWindowRateLimiter({ max: 60, windowMs: 60_000 });
+    }
+
+    /** Autorise un envoi sortant (anti-flood), clé par workspace. */
+    private allowOutbound(): boolean {
+        const allowed = this.rateLimiter.tryConsume(this.workspaceId ?? 'global');
+        if (!allowed) {
+            console.warn('[notifier] limite de débit atteinte — envoi ignoré', {
+                workspaceId: this.workspaceId,
+            });
+        }
+        return allowed;
     }
 
     attach(): void {
@@ -424,6 +444,7 @@ export class Notifier {
         data: Record<string, unknown>;
     }): Promise<void> {
         if (!this.emailEdgeFunctionUrl) return;
+        if (!this.allowOutbound()) return;
 
         // Contrat partagé : clé d'idempotence déterministe (stable entre retries
         // de la MÊME transition) + validation runtime avant tout appel réseau.
@@ -482,6 +503,8 @@ export class Notifier {
         let auditStatus: 'sent' | 'failed' = 'sent';
         let errorMsg: string | null = null;
         let sentAt: string | null = null;
+
+        if (!this.allowOutbound()) return;
 
         try {
             const res = await postWithRetry(this.fetchImpl, url, payload, {
