@@ -5,10 +5,12 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "dev": "tsx watch src/api/bootstrap.ts",
-    "start": "node dist/api/bootstrap.js"
+    "start": "node dist/api/bootstrap.js",
+    "check": "npm run typecheck && npm run test"
   },
   "dependencies": {
     "@fastify/cors": "^11.2.0",
