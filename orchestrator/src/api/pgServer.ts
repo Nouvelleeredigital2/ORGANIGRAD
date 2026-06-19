@@ -10,6 +10,7 @@ import { buildAuthHook } from './auth.js';
 import { assertScope, MissingScopeError, SCOPES } from './scopes.js';
 import { toPublicNodeDTO } from './dto.js';
 import { SseTicketStore } from './sseTickets.js';
+import { PgAuditTrail } from '../observability/auditLog.js';
 import { dispatchMcpRequest } from '../mcp/mcpServer.js';
 import { Notifier, PgAuditLogger } from '../observability/notifier.js';
 
@@ -54,6 +55,31 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
     const app = Fastify({ logger: false });
     const mcp = deps.mcpClient ?? new McpClient({ timeoutMs: 30_000 });
     const sseTickets = new SseTicketStore();
+    const audit = new PgAuditTrail(deps.sql);
+
+    // Journalise une action sensible (best-effort, n'échoue jamais le flux).
+    const recordAudit = (
+        req: import('fastify').FastifyRequest,
+        action: string,
+        resourceId: string | null,
+        result: 'success' | 'denied' | 'error',
+    ): void => {
+        void audit.record({
+            workspaceId: req.workspaceId ?? 'unknown',
+            actorKind: 'api_key',
+            actorId: req.apiKeyId ?? null,
+            action,
+            resourceType: 'node',
+            resourceId,
+            result,
+            ip: req.ip ?? null,
+            requestId: req.id ?? null,
+        });
+    };
+
+    // Classe un échec en 'denied' (scope) ou 'error', pour l'audit.
+    const auditResultOf = (err: unknown): 'denied' | 'error' =>
+        err instanceof MissingScopeError ? 'denied' : 'error';
 
     const allowedOrigins =
         deps.allowedOrigins ??
@@ -182,8 +208,10 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
             const store = storeFor(req.workspaceId!, req.apiKeyId);
             const engine = new OrchestrationEngine(store, mcp);
             await engine.runNode(req.params.id);
+            recordAudit(req, 'node:run', req.params.id, 'success');
             return { ok: true };
         } catch (err) {
+            recordAudit(req, 'node:run', req.params.id, auditResultOf(err));
             return handleError(reply, err);
         }
     });
@@ -196,8 +224,10 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
             assertScope(req.scopes, SCOPES.humanApprove);
             const store = storeFor(req.workspaceId!, req.apiKeyId);
             await store.applyTransition(req.params.id, 'IDLE');
+            recordAudit(req, 'human:approve', req.params.id, 'success');
             return { ok: true };
         } catch (err) {
+            recordAudit(req, 'human:approve', req.params.id, auditResultOf(err));
             return handleError(reply, err);
         }
     });
@@ -212,8 +242,10 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
                 await store.applyTransition(req.params.id, 'ERROR', {
                     feedback: req.body?.feedback ?? '',
                 });
+                recordAudit(req, 'human:reject', req.params.id, 'success');
                 return { ok: true };
             } catch (err) {
+                recordAudit(req, 'human:reject', req.params.id, auditResultOf(err));
                 return handleError(reply, err);
             }
         },
@@ -225,8 +257,10 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
             assertScope(req.scopes, SCOPES.nodeReset);
             const store = storeFor(req.workspaceId!, req.apiKeyId);
             await store.applyTransition(req.params.id, 'IDLE');
+            recordAudit(req, 'node:reset', req.params.id, 'success');
             return { ok: true };
         } catch (err) {
+            recordAudit(req, 'node:reset', req.params.id, auditResultOf(err));
             return handleError(reply, err);
         }
     });
