@@ -10,22 +10,26 @@ import { Notifier } from '../observability/notifier.js';
 import { buildServer } from './server.js';
 import { buildPgServer } from './pgServer.js';
 import { getSql } from '../state/pgGraphStore.js';
+import { loadEnv } from '../config/env.js';
 
-export async function startOrchestrator(port = Number(process.env.PORT ?? 3001)) {
-    const pgMode = Boolean(process.env.SUPABASE_DB_URL);
-    const appUrl = process.env.APP_URL ?? undefined;
+export async function startOrchestrator() {
+    // Validation centralisée — échoue tôt avec un message clair si config invalide.
+    const env = loadEnv();
+    const port = env.port;
+    const appUrl = env.appUrl;
 
-    if (pgMode) {
+    if (env.mode === 'pg') {
         const sql = getSql();
         const app = buildPgServer({
             sql,
+            allowedOrigins: env.corsAllowedOrigins,
             notifierOptions: {
-                validationsWebhook: process.env.SLACK_VALIDATIONS ?? undefined,
-                fluxWebhook: process.env.SLACK_FLUX ?? undefined,
+                validationsWebhook: env.slackValidations,
+                fluxWebhook: env.slackFlux,
                 appUrl,
                 sqlForAudit: sql,
-                emailEdgeFunctionUrl: process.env.EMAIL_EDGE_FUNCTION_URL ?? undefined,
-                supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? undefined,
+                emailEdgeFunctionUrl: env.emailEdgeFunctionUrl,
+                supabaseServiceRoleKey: env.supabaseServiceRoleKey,
             },
         });
         await app.listen({ port, host: '0.0.0.0' });
@@ -43,11 +47,11 @@ export async function startOrchestrator(port = Number(process.env.PORT ?? 3001))
     // En mode mémoire, on n'a pas de workspace DB — l'audit SQL est optionnel.
     const notifier = new Notifier({
         store,
-        validationsWebhook: process.env.SLACK_VALIDATIONS ?? undefined,
-        fluxWebhook: process.env.SLACK_FLUX ?? undefined,
+        validationsWebhook: env.slackValidations,
+        fluxWebhook: env.slackFlux,
         appUrl,
-        emailEdgeFunctionUrl: process.env.EMAIL_EDGE_FUNCTION_URL ?? undefined,
-        supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? undefined,
+        emailEdgeFunctionUrl: env.emailEdgeFunctionUrl,
+        supabaseServiceRoleKey: env.supabaseServiceRoleKey,
     });
     notifier.attach();
 
