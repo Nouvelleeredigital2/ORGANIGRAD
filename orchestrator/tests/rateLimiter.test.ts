@@ -3,7 +3,7 @@ import { FixedWindowRateLimiter, unlimitedRateLimiter } from '../src/observabili
 
 describe('FixedWindowRateLimiter', () => {
     it('autorise jusqu\'à max puis bloque dans la fenêtre', () => {
-        let t = 1000;
+        const t = 1000;
         const rl = new FixedWindowRateLimiter({ max: 2, windowMs: 1000, now: () => t });
         expect(rl.tryConsume('ws')).toBe(true);
         expect(rl.tryConsume('ws')).toBe(true);
