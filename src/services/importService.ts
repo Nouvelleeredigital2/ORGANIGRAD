@@ -21,13 +21,14 @@ const decodeCsvBuffer = (buffer: ArrayBuffer): string => {
     return utf8;
 };
 
-const filterImportedAgents = (agents: Agent[]): Agent[] => {
-    return agents.filter((agent) => {
-        return Boolean(agent.pole || agent.service || agent.nom || agent.prenom || agent.fonction);
-    });
-};
+/** Un agent est "significatif" s'il porte au moins un champ exploitable. */
+const isMeaningfulAgent = (agent: Agent): boolean =>
+    Boolean(agent.pole || agent.service || agent.nom || agent.prenom || agent.fonction);
 
-const parseCsvAgents = (buffer: ArrayBuffer): Promise<Agent[]> => {
+const filterImportedAgents = (agents: Agent[]): Agent[] => agents.filter(isMeaningfulAgent);
+
+/** Parse CSV → tous les agents mappés (NON filtrés) pour permettre l'analyse. */
+const parseCsvRows = (buffer: ArrayBuffer): Promise<Agent[]> => {
     const text = decodeCsvBuffer(buffer);
 
     return new Promise((resolve, reject) => {
@@ -39,9 +40,7 @@ const parseCsvAgents = (buffer: ArrayBuffer): Promise<Agent[]> => {
                     const data = results.data;
                     assertDimensions(data.length, results.meta.fields?.length ?? 0);
                     assertCellLengths(data);
-                    resolve(
-                        filterImportedAgents(data.map((row, index) => mapImportedRowToAgent(row, index))),
-                    );
+                    resolve(data.map((row, index) => mapImportedRowToAgent(row, index)));
                 } catch (err) {
                     reject(err);
                 }
@@ -51,7 +50,7 @@ const parseCsvAgents = (buffer: ArrayBuffer): Promise<Agent[]> => {
     });
 };
 
-const parseWorkbookAgents = async (buffer: ArrayBuffer): Promise<Agent[]> => {
+const parseWorkbookRows = async (buffer: ArrayBuffer): Promise<Agent[]> => {
     // Import dynamique : xlsx (lib lourde + CVE) reste HORS du bundle initial et
     // n'est chargé qu'au moment d'un import XLSX (Priorité 12).
     const XLSX = await import('xlsx');
@@ -89,22 +88,98 @@ const parseWorkbookAgents = async (buffer: ArrayBuffer): Promise<Agent[]> => {
     const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' });
     assertDimensions(rows.length, 0);
     assertCellLengths(rows);
-    return filterImportedAgents(rows.map((row, index) => mapImportedRowToAgent(row, index)));
+    return rows.map((row, index) => mapImportedRowToAgent(row, index));
+};
+
+/** Parse un fichier → agents mappés non filtrés (CSV ou XLSX selon l'extension). */
+const parseFileRows = async (file: File): Promise<Agent[]> => {
+    assertFileSize(file); // garde-fou taille AVANT lecture en mémoire
+    const buffer = await file.arrayBuffer();
+    const lowerName = file.name.toLowerCase();
+    if (lowerName.endsWith('.csv')) return parseCsvRows(buffer);
+    if (lowerName.endsWith('.xlsx') || lowerName.endsWith('.xls')) return parseWorkbookRows(buffer);
+    throw new Error('Format de fichier non supporté (formats acceptés : .csv, .xlsx, .xls).');
 };
 
 export const importAgentsFromFile = async (file: File): Promise<Agent[]> => {
-    // Garde-fou taille AVANT de charger le fichier en mémoire.
-    assertFileSize(file);
-    const buffer = await file.arrayBuffer();
-    const lowerName = file.name.toLowerCase();
+    return filterImportedAgents(await parseFileRows(file));
+};
 
-    if (lowerName.endsWith('.csv')) {
-        return parseCsvAgents(buffer);
+// ─── Prévisualisation + import transactionnel (Phase 7) ───────────────────────
+
+export interface ImportPreview {
+    totals: { rows: number; valid: number; invalid: number; duplicates: number };
+    /** Agents valides et dédupliqués, prêts à être importés. */
+    valid: Agent[];
+    /** Lignes rejetées (vides / sans champ requis). */
+    invalid: Array<{ row: number; reason: string }>;
+    /** Doublons détectés (même nom+prénom+fonction), exclus de `valid`. */
+    duplicates: Array<{ row: number; key: string }>;
+    warnings: string[];
+}
+
+const dedupKey = (a: Agent): string =>
+    `${(a.nom ?? '').trim().toLowerCase()}|${(a.prenom ?? '').trim().toLowerCase()}|${(a.fonction ?? '').trim().toLowerCase()}`;
+
+/**
+ * Analyse un fichier SANS l'appliquer : classe chaque ligne en valide / invalide
+ * / doublon, pour confirmation avant import. Aucune mutation.
+ */
+export const previewImport = async (file: File): Promise<ImportPreview> => {
+    const rows = await parseFileRows(file);
+    const valid: Agent[] = [];
+    const invalid: ImportPreview['invalid'] = [];
+    const duplicates: ImportPreview['duplicates'] = [];
+    const seen = new Set<string>();
+
+    rows.forEach((agent, i) => {
+        const row = i + 1;
+        if (!isMeaningfulAgent(agent)) {
+            invalid.push({ row, reason: 'ligne vide ou sans champ exploitable' });
+            return;
+        }
+        const key = dedupKey(agent);
+        if (seen.has(key)) {
+            duplicates.push({ row, key });
+            return;
+        }
+        seen.add(key);
+        valid.push(agent);
+    });
+
+    const warnings: string[] = [];
+    if (invalid.length > 0) warnings.push(`${invalid.length} ligne(s) ignorée(s) (invalides).`);
+    if (duplicates.length > 0) warnings.push(`${duplicates.length} doublon(s) ignoré(s).`);
+
+    return {
+        totals: { rows: rows.length, valid: valid.length, invalid: invalid.length, duplicates: duplicates.length },
+        valid,
+        invalid,
+        duplicates,
+        warnings,
+    };
+};
+
+export class ImportValidationError extends Error {
+    readonly invalid: ImportPreview['invalid'];
+    constructor(invalid: ImportPreview['invalid']) {
+        super(`Import refusé : ${invalid.length} ligne(s) invalide(s).`);
+        this.name = 'ImportValidationError';
+        this.invalid = invalid;
     }
+}
 
-    if (lowerName.endsWith('.xlsx') || lowerName.endsWith('.xls')) {
-        return parseWorkbookAgents(buffer);
+/**
+ * Valide une prévisualisation et renvoie les agents à importer (tout-ou-rien).
+ * Par défaut, refuse l'import si des lignes invalides subsistent ; passer
+ * `allowInvalid: true` pour importer uniquement les lignes valides malgré tout.
+ */
+export const commitImport = (
+    preview: ImportPreview,
+    opts: { allowInvalid?: boolean } = {},
+): Agent[] => {
+    if (!opts.allowInvalid && preview.invalid.length > 0) {
+        throw new ImportValidationError(preview.invalid);
     }
-
-    throw new Error('Format de fichier non supporté (formats acceptés : .csv, .xlsx, .xls).');
+    return preview.valid;
 };

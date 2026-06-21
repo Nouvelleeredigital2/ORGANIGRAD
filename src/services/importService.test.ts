@@ -1,7 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import * as XLSX from 'xlsx';
-import { importAgentsFromFile } from './importService';
+import {
+    importAgentsFromFile,
+    previewImport,
+    commitImport,
+    ImportValidationError,
+} from './importService';
 import { ImportLimitError } from './sheetSecurity';
+
+const HEADER =
+    "Pôle / Direction,Service / Secteur,Nom,Prénom,Poste / Fonction,Grade / Cadre d'emplois,Statut,NBI";
+const csvFile = (lines: string[]) =>
+    new File([[HEADER, ...lines].join('\n')], 'org.csv', { type: 'text/csv' });
 
 describe('importAgentsFromFile', () => {
     it('imports agents from a UTF-8 CSV file', async () => {
@@ -64,5 +74,34 @@ describe('importAgentsFromFile', () => {
     it('rejette un format de fichier non supporté', async () => {
         const file = new File(['data'], 'malware.exe', { type: 'application/octet-stream' });
         await expect(importAgentsFromFile(file)).rejects.toThrow(/non supporté/);
+    });
+});
+
+describe('previewImport / commitImport (Phase 7)', () => {
+    const file = csvFile([
+        'CABINET,Direction,DECROUY,Clément,Maire,Élu,T,10 pts',
+        'CABINET,Direction,DECROUY,Clément,Maire,Élu,T,10 pts', // doublon
+        'DGS,Service,MARTIN,Alice,DGA,A,T,5 pts', // valide distinct
+        ',,,,,,,', // ligne sans champ exploitable → invalide
+    ]);
+
+    it('classe les lignes en valides / doublons / invalides sans muter', async () => {
+        const p = await previewImport(file);
+        expect(p.totals).toEqual({ rows: 4, valid: 2, invalid: 1, duplicates: 1 });
+        expect(p.valid.map((a) => a.nom)).toEqual(['DECROUY', 'MARTIN']);
+        expect(p.duplicates).toHaveLength(1);
+        expect(p.invalid).toHaveLength(1);
+        expect(p.warnings.length).toBeGreaterThan(0);
+    });
+
+    it('commitImport refuse l\'import si des lignes sont invalides (tout-ou-rien)', async () => {
+        const p = await previewImport(file);
+        expect(() => commitImport(p)).toThrow(ImportValidationError);
+    });
+
+    it('commitImport avec allowInvalid renvoie uniquement les lignes valides', async () => {
+        const p = await previewImport(file);
+        const agents = commitImport(p, { allowInvalid: true });
+        expect(agents.map((a) => a.nom)).toEqual(['DECROUY', 'MARTIN']);
     });
 });
