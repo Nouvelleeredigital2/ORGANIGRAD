@@ -125,23 +125,23 @@ create policy nodes_write on public.hybrid_nodes
     for all using (public.has_workspace_role(workspace_id, array['owner', 'admin', 'member']))
     with check (public.has_workspace_role(workspace_id, array['owner', 'admin', 'member']));
 
--- ── node_transitions (journal immuable : lecture membre, insert éditeur) ──────
+-- ── node_transitions (journal immuable) ──────────────────────────────────────
+-- Lecture : membres. AUCUNE policy INSERT/UPDATE/DELETE → les clients (anon /
+-- authenticated) ne peuvent PAS écrire ; seul l'orchestrateur (service_role,
+-- bypass RLS) alimente le journal. Garantit l'intégrité de l'audit.
 drop policy if exists transitions_select on public.node_transitions;
 create policy transitions_select on public.node_transitions
     for select using (public.is_workspace_member(workspace_id));
 
 drop policy if exists transitions_insert on public.node_transitions;
-create policy transitions_insert on public.node_transitions
-    for insert with check (public.has_workspace_role(workspace_id, array['owner', 'admin', 'member']));
 
--- ── notifications (audit : lecture membre, insert éditeur) ────────────────────
+-- ── notifications (audit) ─────────────────────────────────────────────────────
+-- Idem : lecture membre uniquement ; écriture réservée au service_role.
 drop policy if exists notifications_select on public.notifications;
 create policy notifications_select on public.notifications
     for select using (public.is_workspace_member(workspace_id));
 
 drop policy if exists notifications_insert on public.notifications;
-create policy notifications_insert on public.notifications
-    for insert with check (public.has_workspace_role(workspace_id, array['owner', 'admin', 'member']));
 
 -- ── Rollback (manuel) ────────────────────────────────────────────────────────
 -- alter table ... disable row level security;  (pour chaque table)
