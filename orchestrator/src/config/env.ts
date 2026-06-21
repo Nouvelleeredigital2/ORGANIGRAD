@@ -18,6 +18,7 @@ export interface OrchestratorEnv {
     slackValidations?: string;
     slackFlux?: string;
     corsAllowedOrigins: string[];
+    integrationEncryptionKey?: string;
 }
 
 export class EnvValidationError extends Error {
@@ -80,6 +81,13 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): OrchestratorEn
         );
     }
 
+    // Clé de chiffrement des secrets (optionnelle) : si présente, doit décoder
+    // en 32 octets (AES-256).
+    const encKey = source.INTEGRATION_ENCRYPTION_KEY?.trim() || undefined;
+    if (encKey !== undefined && Buffer.from(encKey, 'base64').length !== 32) {
+        issues.push('INTEGRATION_ENCRYPTION_KEY doit être 32 octets encodés en base64');
+    }
+
     if (issues.length > 0) {
         throw new EnvValidationError(issues);
     }
@@ -97,5 +105,6 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): OrchestratorEn
             .split(',')
             .map((o) => o.trim())
             .filter(Boolean),
+        integrationEncryptionKey: encKey,
     };
 }
