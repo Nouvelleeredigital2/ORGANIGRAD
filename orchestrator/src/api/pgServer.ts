@@ -167,8 +167,13 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
      * sont configurés. Le Notifier se détachera automatiquement lorsque le store
      * sera GC'd (aucun listener persistant côté Notifier après la requête).
      */
-    const storeFor = (workspaceId: string, apiKeyId?: string) => {
-        const store = new PgGraphStore(deps.sql, workspaceId, { kind: 'api_key', id: apiKeyId });
+    const storeFor = (workspaceId: string, apiKeyId?: string, userId?: string) => {
+        // Acteur RÉEL pour le journal des transitions : utilisateur (session JWT)
+        // si présent, sinon clé API technique (corrige l'identité d'audit).
+        const actor = userId
+            ? ({ kind: 'user', id: userId } as const)
+            : ({ kind: 'api_key', id: apiKeyId } as const);
+        const store = new PgGraphStore(deps.sql, workspaceId, actor);
         const nc = deps.notifierOptions;
         // Le notifier doit aussi s'attacher quand SEUL l'e-mail est configuré
         // (auparavant : attaché uniquement si un webhook Slack était présent).
@@ -195,7 +200,7 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
     app.get('/api/graph', async (req, reply) => {
         try {
             assertScope(req.scopes, SCOPES.graphRead);
-            const store = storeFor(req.workspaceId!, req.apiKeyId);
+            const store = storeFor(req.workspaceId!, req.apiKeyId, req.userId);
             const nodes = await store.list();
             return { nodes: nodes.map(toPublicNodeDTO) };
         } catch (err) {
@@ -207,7 +212,7 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
     app.post<{ Params: { id: string } }>('/api/nodes/:id/run', async (req, reply) => {
         try {
             assertScope(req.scopes, SCOPES.nodeRun);
-            const store = storeFor(req.workspaceId!, req.apiKeyId);
+            const store = storeFor(req.workspaceId!, req.apiKeyId, req.userId);
             const engine = new OrchestrationEngine(store, mcp);
             const result = await engine.runNode(req.params.id);
             if (!result.ok) {
@@ -227,7 +232,7 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
     app.post<{ Params: { id: string } }>('/api/nodes/:id/run-flow', async (req, reply) => {
         try {
             assertScope(req.scopes, SCOPES.nodeRun);
-            const store = storeFor(req.workspaceId!, req.apiKeyId);
+            const store = storeFor(req.workspaceId!, req.apiKeyId, req.userId);
             const engine = new OrchestrationEngine(store, mcp);
             const result = await engine.runFlow(req.params.id);
             if (!result.ok) {
@@ -249,7 +254,7 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
     app.post<{ Params: { id: string } }>('/api/nodes/:id/approve', async (req, reply) => {
         try {
             assertScope(req.scopes, SCOPES.humanApprove);
-            const store = storeFor(req.workspaceId!, req.apiKeyId);
+            const store = storeFor(req.workspaceId!, req.apiKeyId, req.userId);
             await store.applyTransition(req.params.id, 'IDLE');
             recordAudit(req, 'human:approve', req.params.id, 'success');
             // Reprise du workflow après validation humaine (best-effort : un échec
@@ -275,7 +280,7 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
         async (req, reply) => {
             try {
                 assertScope(req.scopes, SCOPES.humanReject);
-                const store = storeFor(req.workspaceId!, req.apiKeyId);
+                const store = storeFor(req.workspaceId!, req.apiKeyId, req.userId);
                 await store.applyTransition(req.params.id, 'ERROR', {
                     feedback: req.body?.feedback ?? '',
                 });
@@ -292,7 +297,7 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
     app.post<{ Params: { id: string } }>('/api/nodes/:id/reset', async (req, reply) => {
         try {
             assertScope(req.scopes, SCOPES.nodeReset);
-            const store = storeFor(req.workspaceId!, req.apiKeyId);
+            const store = storeFor(req.workspaceId!, req.apiKeyId, req.userId);
             await store.applyTransition(req.params.id, 'IDLE');
             recordAudit(req, 'node:reset', req.params.id, 'success');
             return { ok: true };
