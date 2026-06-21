@@ -128,6 +128,19 @@ describe('MCP Server — protocole JSON-RPC 2.0', () => {
         expect(res?.error?.message).toMatch(/node_id/);
     });
 
+    it('reject_node refuse un feedback démesuré (limite stricte anti-abus)', async () => {
+        const res = await dispatchMcpRequest(
+            {
+                jsonrpc: '2.0',
+                id: 8,
+                method: 'tools/call',
+                params: { name: 'reject_node', arguments: { node_id: 'x', feedback: 'a'.repeat(5000) } },
+            },
+            ctx,
+        );
+        expect(res?.error?.message).toMatch(/trop long/);
+    });
+
     it('reject_node exige node_id ET feedback', async () => {
         const res = await dispatchMcpRequest(
             {

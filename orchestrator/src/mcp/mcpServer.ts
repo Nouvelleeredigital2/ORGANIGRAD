@@ -253,7 +253,7 @@ async function callTool(
         case 'reject_node': {
             assertScope(ctx.scopes, SCOPES.humanReject);
             const id = requireString(args, 'node_id');
-            const feedback = requireString(args, 'feedback');
+            const feedback = requireString(args, 'feedback', 4000);
             await store.applyTransition(id, 'ERROR', { feedback });
             return contentJson({ ok: true, node_id: id, status: 'ERROR' });
         }
@@ -292,11 +292,14 @@ function contentJson(value: unknown) {
     };
 }
 
-function requireString(args: Record<string, unknown>, key: string): string {
+function requireString(args: Record<string, unknown>, key: string, maxLen = 256): string {
     const v = args[key];
     if (typeof v !== 'string' || v.trim() === '') {
-        const err = new Error(`Paramètre "${key}" requis (string non vide).`);
-        throw err;
+        throw new Error(`Paramètre "${key}" requis (string non vide).`);
+    }
+    // Limite stricte anti-abus (payloads démesurés).
+    if (v.length > maxLen) {
+        throw new Error(`Paramètre "${key}" trop long (max ${maxLen} caractères).`);
     }
     return v;
 }

@@ -139,6 +139,12 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
             ? (body as Array<Record<string, unknown>>)
             : [body as Record<string, unknown>];
 
+        // Borne la taille du batch (anti-abus : Promise.all non borné sinon).
+        const MAX_MCP_BATCH = 20;
+        if (requests.length > MAX_MCP_BATCH) {
+            return reply.code(413).send({ error: 'BATCH_TOO_LARGE', max: MAX_MCP_BATCH });
+        }
+
         const responses = await Promise.all(
             requests.map((r) =>
                 dispatchMcpRequest(

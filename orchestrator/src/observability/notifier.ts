@@ -124,6 +124,23 @@ function isoNow(): string {
     return new Date().toISOString();
 }
 
+/** Masque un webhook (le chemin contient le secret) pour les logs. */
+export function maskWebhook(url: string): string {
+    try {
+        const u = new URL(url);
+        return `${u.protocol}//${u.host}/***`;
+    } catch {
+        return '***';
+    }
+}
+
+/** Masque une adresse e-mail pour les logs. */
+export function maskEmail(email: string): string {
+    const at = email.indexOf('@');
+    if (at <= 0) return '***';
+    return `${email[0]}***${email.slice(at)}`;
+}
+
 export function buildValidationBlocks(
     nodeId: string,
     nodeName: string,
@@ -479,12 +496,12 @@ export class Notifier {
             if (!res.ok) {
                 console.warn('[notifier] Edge Function notify-email a répondu en erreur', {
                     status: res.status,
-                    to: payload.to,
+                    to: maskEmail(payload.to),
                 });
             }
         } catch (err) {
             console.warn('[notifier] échec envoi email', {
-                to: payload.to,
+                to: maskEmail(payload.to),
                 error: err instanceof Error ? err.message : String(err),
             });
         }
@@ -520,7 +537,7 @@ export class Notifier {
         } catch (err) {
             auditStatus = 'failed';
             errorMsg = err instanceof Error ? err.message : String(err);
-            console.warn('[notifier] échec envoi Slack', { url, error: errorMsg });
+            console.warn('[notifier] échec envoi Slack', { url: maskWebhook(url), error: errorMsg });
         }
 
         if (this.auditLogger) {
