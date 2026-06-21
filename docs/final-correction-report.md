@@ -84,7 +84,8 @@ Supabase      : migrations P2/P5 + audit_log appliquées ; advisors → 0 table 
 ```
 
 ## 14. Nombre de tests réussis
-Orchestrateur **167** · Frontend **98** (total **265**).
+Orchestrateur **184** (+5 d'intégration PG sautés sans `TEST_DATABASE_URL`) ·
+Frontend **101** (total **285**).
 
 ## 15. Vulnérabilités npm restantes
 - `xlsx` **HIGH** (prototype pollution / ReDoS) — **pas de correctif npm** ; atténué
@@ -105,13 +106,23 @@ xlsx, jspdf) chargées à la demande / en chunks vendor distincts.
 Si une archive (`organigrad.zip`) ou un `.env` a été partagé : mot de passe Postgres,
 clé `service_role` Supabase, et **les deux webhooks Slack**. Aucun secret n'est versionné.
 
+### Mise à jour (lot complémentaire P2–P7)
+Désormais **résolus** : validation humaine par **session JWT vérifiée**
+(`userAuth.ts` + double-auth dans `auth.ts`, SPA envoie le token) ; **test
+d'intégration PostgreSQL** réel gated (`pgGraphStore.integration.test.ts`) ;
+module de **chiffrement au repos** (`security/crypto.ts`) ; flags TS
+`noUncheckedIndexedAccess`/`noImplicitOverride` (front) ; **prévisualisation +
+import transactionnel** (couche données) ; **rate-limiting** notifications ;
+**audit log**.
+
 ## 19. Risques résiduels
 | Problème | Gravité | Fichier | Raison du report | Correction recommandée | Risque métier |
 |---|---|---|---|---|---|
-| Validation humaine par scope seul (pas de JWT vérifié côté orchestrateur) | Moyen | `orchestrator/src/api/auth.ts` | Chantier auth + frontend | Vérifier le JWT Supabase + rôle `workspace_members` pour `approve/reject` | Une clé à scope humain (non émise aux agents) pourrait approuver sans session |
 | CVE `xlsx` | Élevé | `package.json` | Pas de fix npm | Build SheetJS CDN ou remplacement | Fichier XLSX hostile (atténué par limites + import dynamique) |
-| Pas de test d'intégration PG réel | Moyen | `orchestrator/tests/*` | Infra Docker indisponible ici | Testcontainers | Régression possible non couverte sur le vrai Postgres |
-| Secrets d'intégration non chiffrés au repos | Moyen | DB | Stratégie de clé à décider | Chiffrement centralisé (KMS/env) | Lecture DB = lecture des secrets |
+| Test d'intégration PG non exécuté ici | Faible | `tests/pgGraphStore.integration.test.ts` | Pas de Docker dans cet env | Lancer avec `TEST_DATABASE_URL` (cf. docs/testing.md) | Couverture PG réelle à confirmer en CI |
+| Chiffrement au repos : primitive prête mais **non câblée de bout en bout** | Moyen | `security/crypto.ts` | Pas de chemin d'écriture serveur (SPA écrit direct) | Introduire une écriture des nœuds via orchestrateur/Edge qui chiffre | Lecture DB = lecture des webhooks en clair |
+| `exactOptionalPropertyTypes` non activé | Faible | `tsconfig*` | ~50 erreurs, faible valeur | Activation progressive | Typage légèrement moins strict |
+| Prévisualisation d'import : UI non branchée | Faible | SPA | Fonctionnalité produit | Modale de preview appelant `previewImport`/`commitImport` | Import sans étape de confirmation visuelle |
 | DNS rebinding | Faible | `ssrfGuard.ts` | Hors périmètre initial | Pinning d'IP entre résolution et connexion | SSRF avancée |
 
 ## 20. Procédure de déploiement
