@@ -23,8 +23,26 @@ export function registerRoutes(app: FastifyInstance, { store, engine }: ServerDe
     app.post<{ Params: { id: string } }>('/api/nodes/:id/run', async (req, reply) => {
         const { id } = req.params;
         try {
-            await engine.runNode(id);
+            const result = await engine.runNode(id);
+            // Un échec d'exécution (MCP) n'est PAS un succès HTTP : le nœud est en
+            // ERROR, on renvoie 502 avec le motif réel.
+            if (!result.ok) {
+                return reply.code(502).send({ ok: false, error: result.error });
+            }
             return { ok: true };
+        } catch (err) {
+            return handleError(reply, err);
+        }
+    });
+
+    // --- POST /api/nodes/:id/run-flow — exécute la chaîne depuis ce nœud ----
+    app.post<{ Params: { id: string } }>('/api/nodes/:id/run-flow', async (req, reply) => {
+        try {
+            const result = await engine.runFlow(req.params.id);
+            if (!result.ok) {
+                return reply.code(502).send({ ok: false, stoppedAt: result.stoppedAt, error: result.error });
+            }
+            return { ok: true, waitingHumanAt: result.waitingHumanAt ?? null };
         } catch (err) {
             return handleError(reply, err);
         }

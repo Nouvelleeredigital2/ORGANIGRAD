@@ -56,7 +56,7 @@ describe('MCP Server — protocole JSON-RPC 2.0', () => {
         expect(res).toEqual({ jsonrpc: '2.0', id: 'p1', result: {} });
     });
 
-    it('tools/list énumère les 5 outils Organigrad', async () => {
+    it('tools/list énumère les 6 outils Organigrad', async () => {
         const res = await dispatchMcpRequest(
             { jsonrpc: '2.0', id: 2, method: 'tools/list' },
             ctx,
@@ -69,6 +69,7 @@ describe('MCP Server — protocole JSON-RPC 2.0', () => {
             'list_nodes',
             'reject_node',
             'reset_node',
+            'run_flow',
             'run_node',
         ]);
     });

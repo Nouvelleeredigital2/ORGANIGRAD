@@ -25,6 +25,7 @@ export interface OrchestratorBridge {
     connected: boolean;
     nodes: OrchestratorGraphNode[];
     runNode: (id: string) => Promise<void>;
+    runFlow: (id: string) => Promise<void>;
     approve: (id: string) => Promise<void>;
     reject: (id: string, feedback: string) => Promise<void>;
     reset: (id: string) => Promise<void>;
@@ -113,6 +114,9 @@ export function useOrchestratorBridge(
         nodes,
         runNode: async (id) => {
             await clientRef.current?.runNode(id);
+        },
+        runFlow: async (id) => {
+            await clientRef.current?.runFlow(id);
         },
         approve: async (id) => {
             await clientRef.current?.approve(id);

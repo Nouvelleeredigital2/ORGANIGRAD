@@ -20,6 +20,16 @@ interface MinimalMcpClient {
     runNode(node: HybridNode): Promise<RunResult>;
 }
 
+/** Résultat d'une exécution de chaîne. */
+export interface RunFlowResult {
+    ok: boolean;
+    /** Nœud humain où le flux s'est figé en attente de validation. */
+    waitingHumanAt?: string;
+    /** Nœud où le flux s'est arrêté sur erreur. */
+    stoppedAt?: string;
+    error?: string;
+}
+
 export class OrchestrationEngine {
     constructor(
         private readonly store: GraphStore,
@@ -32,7 +42,7 @@ export class OrchestrationEngine {
      *   - le nœud courant n'est pas humain (sinon fige en WAITING_HUMAN_APPROVAL)
      *   - le résultat MCP est ok (sinon ERROR + stop)
      */
-    async runFlow(rootId: string): Promise<void> {
+    async runFlow(rootId: string): Promise<RunFlowResult> {
         let current: HybridNode | null = await this.store.get(rootId);
 
         while (current) {
@@ -41,7 +51,7 @@ export class OrchestrationEngine {
                 // puis fige en WAITING_HUMAN_APPROVAL en attendant l'action HITL.
                 await this.store.applyTransition(current.id, 'EXECUTING');
                 await this.store.applyTransition(current.id, 'WAITING_HUMAN_APPROVAL');
-                return;
+                return { ok: true, waitingHumanAt: current.id };
             }
 
             // Exécute le nœud (AGENT_IA ou SOFTWARE_MCP) via MCP
@@ -52,7 +62,7 @@ export class OrchestrationEngine {
                 // Échec → ERROR, stop du flux. L'écriture est attendue pour
                 // garantir que l'état d'échec est persisté avant tout retour.
                 await this.store.applyTransition(current.id, 'ERROR', { error: result.error });
-                return;
+                return { ok: false, stoppedAt: current.id, error: result.error };
             }
 
             // Quel est le nœud aval ?
@@ -65,7 +75,7 @@ export class OrchestrationEngine {
                 // mais WAITING_HUMAN_APPROVAL → IDLE est légal seulement via approve().
                 // On modélise : pas d'humain en aval → on remet en IDLE directement.
                 await this.store.applyTransition(current.id, 'IDLE');
-                return;
+                return { ok: true };
             }
 
             // Le nœud courant a terminé son rôle : il repasse en IDLE puis on
@@ -75,6 +85,17 @@ export class OrchestrationEngine {
 
             current = next;
         }
+        return { ok: true };
+    }
+
+    /**
+     * Reprend le flux à partir de l'aval d'un nœud (après validation humaine).
+     * Renvoie `null` s'il n'y a pas d'aval. Utilisé par l'API après `approve`.
+     */
+    async resumeFromChildOf(nodeId: string): Promise<RunFlowResult | null> {
+        const next = await this.findDownstream(nodeId);
+        if (!next) return null;
+        return this.runFlow(next.id);
     }
 
     /** Lance un nœud isolé (bouton ⚡ Run) — pas de chaînage. */

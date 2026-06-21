@@ -101,7 +101,7 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
         },
         credentials: allowedOrigins.length > 0,
         methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-        allowedHeaders: ['authorization', 'content-type'],
+        allowedHeaders: ['authorization', 'content-type', 'x-workspace-id'],
     });
 
     app.get('/healthz', async () => ({ ok: true }));
@@ -209,7 +209,12 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
             assertScope(req.scopes, SCOPES.nodeRun);
             const store = storeFor(req.workspaceId!, req.apiKeyId);
             const engine = new OrchestrationEngine(store, mcp);
-            await engine.runNode(req.params.id);
+            const result = await engine.runNode(req.params.id);
+            if (!result.ok) {
+                // Échec MCP : le nœud est en ERROR. On rapporte l'échec réel.
+                recordAudit(req, 'node:run', req.params.id, 'error');
+                return reply.code(502).send({ ok: false, error: result.error });
+            }
             recordAudit(req, 'node:run', req.params.id, 'success');
             return { ok: true };
         } catch (err) {
@@ -218,16 +223,46 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
         }
     });
 
+    // --- POST /api/nodes/:id/run-flow — exécute la CHAÎNE depuis ce nœud -----
+    app.post<{ Params: { id: string } }>('/api/nodes/:id/run-flow', async (req, reply) => {
+        try {
+            assertScope(req.scopes, SCOPES.nodeRun);
+            const store = storeFor(req.workspaceId!, req.apiKeyId);
+            const engine = new OrchestrationEngine(store, mcp);
+            const result = await engine.runFlow(req.params.id);
+            if (!result.ok) {
+                recordAudit(req, 'flow:run', req.params.id, 'error');
+                return reply.code(502).send({ ok: false, stoppedAt: result.stoppedAt, error: result.error });
+            }
+            recordAudit(req, 'flow:run', req.params.id, 'success');
+            return { ok: true, waitingHumanAt: result.waitingHumanAt ?? null };
+        } catch (err) {
+            recordAudit(req, 'flow:run', req.params.id, auditResultOf(err));
+            return handleError(reply, err);
+        }
+    });
+
     // --- POST /api/nodes/:id/approve ---------------------------------------
     // Validation HUMAINE : exige le scope human:approve, qu'une clé technique
-    // ne peut pas obtenir (cf. create_workspace_api_key).
+    // ne peut pas obtenir (cf. create_workspace_api_key). Après approbation, le
+    // flux REPREND automatiquement à partir de l'aval.
     app.post<{ Params: { id: string } }>('/api/nodes/:id/approve', async (req, reply) => {
         try {
             assertScope(req.scopes, SCOPES.humanApprove);
             const store = storeFor(req.workspaceId!, req.apiKeyId);
             await store.applyTransition(req.params.id, 'IDLE');
             recordAudit(req, 'human:approve', req.params.id, 'success');
-            return { ok: true };
+            // Reprise du workflow après validation humaine (best-effort : un échec
+            // de reprise n'invalide pas l'approbation déjà persistée).
+            let resume: Awaited<ReturnType<OrchestrationEngine['resumeFromChildOf']>> = null;
+            try {
+                const engine = new OrchestrationEngine(store, mcp);
+                resume = await engine.resumeFromChildOf(req.params.id);
+            } catch (resumeErr) {
+                recordAudit(req, 'flow:resume', req.params.id, 'error');
+                console.warn('[approve] reprise du flux échouée', resumeErr);
+            }
+            return { ok: true, resumed: resume !== null, waitingHumanAt: resume?.waitingHumanAt ?? null };
         } catch (err) {
             recordAudit(req, 'human:approve', req.params.id, auditResultOf(err));
             return handleError(reply, err);

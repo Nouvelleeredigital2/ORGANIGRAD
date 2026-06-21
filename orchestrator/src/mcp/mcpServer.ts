@@ -51,6 +51,18 @@ export const TOOLS = [
         },
     },
     {
+        name: 'run_flow',
+        description: "Exécute la CHAÎNE à partir d'un nœud racine : enchaîne les nœuds aval jusqu'à un nœud humain (qui se fige en attente) ou une erreur.",
+        inputSchema: {
+            type: 'object',
+            properties: {
+                node_id: { type: 'string', description: 'UUID du nœud racine de la chaîne' },
+            },
+            required: ['node_id'],
+            additionalProperties: false,
+        },
+    },
+    {
         name: 'approve_node',
         description: "Approuve un nœud HUMAN en attente (WAITING_HUMAN_APPROVAL → IDLE). Le flux aval reprend.",
         inputSchema: {
@@ -211,8 +223,23 @@ async function callTool(
         case 'run_node': {
             assertScope(ctx.scopes, SCOPES.nodeRun);
             const id = requireString(args, 'node_id');
-            await engine.runNode(id);
+            const result = await engine.runNode(id);
+            // Propage l'échec d'exécution (le nœud est en ERROR) au lieu d'un faux ok.
+            if (!result.ok) {
+                return contentJson({ ok: false, node_id: id, error: result.error });
+            }
             return contentJson({ ok: true, node_id: id });
+        }
+
+        case 'run_flow': {
+            assertScope(ctx.scopes, SCOPES.nodeRun);
+            const id = requireString(args, 'node_id');
+            const result = await engine.runFlow(id);
+            return contentJson(
+                result.ok
+                    ? { ok: true, node_id: id, waiting_human_at: result.waitingHumanAt ?? null }
+                    : { ok: false, node_id: id, stopped_at: result.stoppedAt, error: result.error },
+            );
         }
 
         case 'approve_node': {

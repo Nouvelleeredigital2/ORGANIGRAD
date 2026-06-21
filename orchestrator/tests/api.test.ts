@@ -119,6 +119,26 @@ describe('API REST + SSE', () => {
         expect(res.statusCode).toBe(404);
     });
 
+    it('POST /api/nodes/:id/run → 502 si l\'exécution MCP échoue (pas de faux succès)', async () => {
+        const store2 = new InMemoryGraphStore();
+        store2.load(SEED);
+        const mcp = { runNode: async () => ({ ok: false as const, error: 'mcp down' }) };
+        const engine2 = new OrchestrationEngine(store2, mcp);
+        const app2 = buildServer({ store: store2, engine: engine2 });
+        const res = await app2.inject({ method: 'POST', url: '/api/nodes/red/run' });
+        expect(res.statusCode).toBe(502);
+        expect(res.json().error).toBe('mcp down');
+        expect((await store2.get('red')).status).toBe('ERROR');
+        await app2.close();
+    });
+
+    it('POST /api/nodes/:id/run-flow exécute la chaîne jusqu\'au nœud humain', async () => {
+        const res = await app.inject({ method: 'POST', url: '/api/nodes/red/run-flow' });
+        expect(res.statusCode).toBe(200);
+        expect(res.json().waitingHumanAt).toBe('hum');
+        expect((await store.get('hum')).status).toBe('WAITING_HUMAN_APPROVAL');
+    });
+
     it('GET /api/events ouvre un flux SSE et émet sur transition', async () => {
         // Lance la requête SSE en parallèle, déclenche une transition, vérifie le payload
         const responsePromise = app.inject({

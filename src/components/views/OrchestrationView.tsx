@@ -186,9 +186,10 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
         setIsRunning(true);
 
         if (bridge.connected) {
-            void bridge.runNode(first.id)
+            // Exécute la CHAÎNE complète (et non le seul premier nœud).
+            void bridge.runFlow(first.id)
                 .catch((err) => {
-                    console.error('[OrchestrationView] runNode failed', err);
+                    console.error('[OrchestrationView] runFlow failed', err);
                 })
                 .finally(() => setIsRunning(false));
             return;

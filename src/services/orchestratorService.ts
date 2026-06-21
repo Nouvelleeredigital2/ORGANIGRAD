@@ -122,6 +122,11 @@ export class OrchestratorClient {
         await this.postAction(id, 'run');
     }
 
+    /** Exécute la CHAÎNE complète depuis un nœud racine (et non un seul nœud). */
+    async runFlow(id: string): Promise<void> {
+        await this.postAction(id, 'run-flow');
+    }
+
     async approve(id: string): Promise<void> {
         await this.postAction(id, 'approve');
     }
@@ -136,13 +141,15 @@ export class OrchestratorClient {
 
     private async postAction(
         id: string,
-        action: 'run' | 'approve' | 'reject' | 'reset',
+        action: 'run' | 'run-flow' | 'approve' | 'reject' | 'reset',
         body?: Record<string, unknown>,
     ): Promise<void> {
-        // run = action technique (clé API) ; approve/reject/reset = action humaine
-        // (session utilisateur vérifiée requise par l'orchestrateur).
+        // run / run-flow = actions techniques (clé API) ; approve/reject/reset =
+        // actions humaines (session utilisateur vérifiée requise par l'orchestrateur).
         const headers =
-            action === 'run' ? this.authHeaders() : await this.humanHeaders();
+            action === 'run' || action === 'run-flow'
+                ? this.authHeaders()
+                : await this.humanHeaders();
         const res = await this.fetchImpl(`${this.baseUrl}/nodes/${id}/${action}`, {
             method: 'POST',
             headers: { 'content-type': 'application/json', ...headers },

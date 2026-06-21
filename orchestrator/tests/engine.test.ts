@@ -137,4 +137,30 @@ describe('OrchestrationEngine', () => {
         await engine.runNode('redacteur');
         expect((await store.get('redacteur')).status).toBe('IDLE'); // EXECUTING puis IDLE
     });
+
+    it('runFlow() renvoie ok:true + waitingHumanAt au nœud humain', async () => {
+        const { engine } = makeEngine();
+        const r = await engine.runFlow('redacteur');
+        expect(r).toMatchObject({ ok: true, waitingHumanAt: 'human' });
+    });
+
+    it('runFlow() renvoie ok:false + stoppedAt sur échec MCP', async () => {
+        const { engine } = makeEngine(async (node) =>
+            node.id === 'brand' ? { ok: false, error: 'ko' } : { ok: true, output: null },
+        );
+        const r = await engine.runFlow('redacteur');
+        expect(r).toMatchObject({ ok: false, stoppedAt: 'brand', error: 'ko' });
+    });
+
+    it('resumeFromChildOf() relance la chaîne depuis l\'aval', async () => {
+        const { engine } = makeEngine();
+        const r = await engine.resumeFromChildOf('redacteur'); // enfant = brand
+        expect(r?.ok).toBe(true);
+        expect(r?.waitingHumanAt).toBe('human');
+    });
+
+    it('resumeFromChildOf() renvoie null sans aval', async () => {
+        const { engine } = makeEngine();
+        expect(await engine.resumeFromChildOf('human')).toBeNull();
+    });
 });

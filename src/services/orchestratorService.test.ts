@@ -41,6 +41,16 @@ describe('OrchestratorClient', () => {
         expect((init as RequestInit).method).toBe('POST');
     });
 
+    it('runFlow() POST sur /nodes/:id/run-flow (clé API technique)', async () => {
+        fetchMock.mockResolvedValue(new Response('', { status: 200 }));
+        const c = new OrchestratorClient({ fetchImpl: fetchMock as typeof fetch, apiKey: 'ok_k' });
+        await c.runFlow('a');
+        const [url, init] = fetchMock.mock.calls[0]!;
+        expect(url).toMatch(/\/nodes\/a\/run-flow$/);
+        expect((init as RequestInit).method).toBe('POST');
+        expect(((init as RequestInit).headers as Record<string, string>).authorization).toBe('Bearer ok_k');
+    });
+
     it('reject() inclut feedback dans le body', async () => {
         fetchMock.mockResolvedValue(new Response('', { status: 200 }));
         await client.reject('a', 'KO');
