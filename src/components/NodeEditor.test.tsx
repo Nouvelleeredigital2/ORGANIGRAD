@@ -18,7 +18,7 @@ describe('NodeEditor', () => {
         });
         fireEvent.click(screen.getByRole('button', { name: 'Créer' }));
         expect(onSave).toHaveBeenCalled();
-        const node: HybridNode = onSave.mock.calls[0][0];
+        const node: HybridNode = onSave.mock.calls[0]![0];
         expect(node.nom).toBe('Rédacteur Test');
         expect(node.skills).toEqual(['rag', 'image-gen']);
         expect(node.type).toBe('AGENT_IA');

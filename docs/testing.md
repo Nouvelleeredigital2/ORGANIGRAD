@@ -45,3 +45,12 @@ TEST_DATABASE_URL=postgres://postgres:test@localhost:55432/postgres npm run test
 ```
 Marqué **non exécuté** tant que l'infra n'est pas branchée — ne pas considérer
 comme validé.
+
+## TypeScript strict
+`strict: true` partout (donc `useUnknownInCatchVariables`). Activés en plus :
+`noUncheckedIndexedAccess` et `noImplicitOverride` (front + orchestrateur),
+`noUnusedLocals`/`noUnusedParameters` (front).
+
+`exactOptionalPropertyTypes` est **différé** : ~50 erreurs (16 front + 34
+orchestrateur), majoritairement des ajustements de définitions `prop?: T` →
+`prop?: T | undefined`. Faible valeur / coût élevé ; à activer progressivement.

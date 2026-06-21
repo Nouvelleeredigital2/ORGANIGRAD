@@ -74,8 +74,11 @@ const parseWorkbookAgents = async (buffer: ArrayBuffer): Promise<Agent[]> => {
     }
 
     const sheet = workbook.Sheets[firstSheetName];
+    if (!sheet) {
+        return [];
+    }
     // Dimensions déclarées par la feuille (avant matérialisation des lignes).
-    const ref = sheet?.['!ref'];
+    const ref = sheet['!ref'];
     if (ref) {
         const range = XLSX.utils.decode_range(ref);
         const cols = range.e.c - range.s.c + 1;

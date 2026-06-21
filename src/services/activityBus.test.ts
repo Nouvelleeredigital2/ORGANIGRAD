@@ -19,7 +19,7 @@ describe('activityBus', () => {
         emitActivity({ kind: 'run', nodeId: node.id, nodeName: node.nom, message: 'start' });
         off();
         expect(handler).toHaveBeenCalledOnce();
-        const evt = handler.mock.calls[0][0];
+        const evt = handler.mock.calls[0]![0];
         expect(evt.kind).toBe('run');
         expect(evt.message).toBe('start');
         expect(evt.id).toBeTruthy();
@@ -31,7 +31,7 @@ describe('activityBus', () => {
         const off = onActivity(handler);
         emitTransition(node, 'IDLE', 'EXECUTING');
         off();
-        const evt = handler.mock.calls[0][0];
+        const evt = handler.mock.calls[0]![0];
         expect(evt.from).toBe('IDLE');
         expect(evt.to).toBe('EXECUTING');
         expect(evt.message).toMatch(/IDLE.*EXECUTING/);

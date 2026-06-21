@@ -20,7 +20,8 @@ const flattenTree = (viewTree: TreeNode[]): Agent[] => {
 };
 
 export const exportToCsv = (data: TreeNode[] | Agent[]) => {
-    const allAgents = data.length > 0 && 'children' in data[0] ? flattenTree(data as TreeNode[]) : (data as Agent[]);
+    const first = data[0];
+    const allAgents = first && 'children' in first ? flattenTree(data as TreeNode[]) : (data as Agent[]);
     // Neutralise l'injection de formules avant sérialisation (Priorité 10).
     const safeAgents = sanitizeRowsForCsv(allAgents as unknown as Array<Record<string, unknown>>);
     const csv = Papa.unparse(safeAgents);

@@ -55,7 +55,8 @@ export const SpotlightPanel: React.FC<SpotlightPanelProps> = ({ isOpen, onClose,
                 setSelectedIndex(prev => (prev > 0 ? prev - 1 : prev));
             } else if (e.key === 'Enter') {
                 e.preventDefault();
-                onSelect(results[selectedIndex]);
+                const item = results[selectedIndex];
+                if (item) onSelect(item);
             }
         };
 

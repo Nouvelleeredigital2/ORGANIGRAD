@@ -132,7 +132,7 @@ export const useOrgChartController = () => {
         }
 
         if (!selectedPoleKey || !poleStateMap.has(selectedPoleKey)) {
-            setSelectedPoleKey(poleDirectory[0].key);
+            setSelectedPoleKey(poleDirectory[0]!.key);
         }
     }, [selectedPoleKey, poleDirectory, poleStateMap]);
 

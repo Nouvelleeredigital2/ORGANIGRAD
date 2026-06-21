@@ -49,7 +49,7 @@ describe('buildPoleHierarchy', () => {
         ]);
 
         expect(tree).toHaveLength(1);
-        expect(tree[0].id).toBe('elina');
+        expect(tree[0]!.id).toBe('elina');
 
         const edith = findNode(tree, (node) => node.id === 'edith');
         const nathalie = findNode(tree, (node) => node.id === 'nathalie');
@@ -57,8 +57,8 @@ describe('buildPoleHierarchy', () => {
         const salma = findNode(tree, (node) => node.id === 'salma');
         const sandrine = findNode(tree, (node) => node.id === 'sandrine');
 
-        expect(tree[0].children?.map((child) => child.id)).toContain('edith');
-        expect(tree[0].children?.map((child) => child.id)).toContain('nathalie');
+        expect(tree[0]!.children?.map((child) => child.id)).toContain('edith');
+        expect(tree[0]!.children?.map((child) => child.id)).toContain('nathalie');
         expect(edith?.children?.map((child) => child.id)).toEqual(['martial', 'salma']);
         expect(nathalie?.children?.map((child) => child.id)).toEqual(['sandrine', 'lomig']);
         expect(martial?.rattachementId).toBe('edith');

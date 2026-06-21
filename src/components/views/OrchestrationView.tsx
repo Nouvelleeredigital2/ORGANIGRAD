@@ -30,7 +30,7 @@ const CYCLE: NodeStatus[] = [
     'WAITING_HUMAN_APPROVAL',
     'ERROR',
 ];
-const cycleStatus = (s: NodeStatus): NodeStatus => CYCLE[(CYCLE.indexOf(s) + 1) % CYCLE.length];
+const cycleStatus = (s: NodeStatus): NodeStatus => CYCLE[(CYCLE.indexOf(s) + 1) % CYCLE.length]!;
 
 /**
  * OrchestrationView — vue de coordination Humain · IA · MCP.

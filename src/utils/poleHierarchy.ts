@@ -56,9 +56,10 @@ export const buildPoleHierarchy = (agents: Agent[]): TreeNode[] => {
     }
 
     const enrichedAgents = agents.map((agent) => ({ ...agent }));
+    // agents.length > 0 garanti ci-dessus → enrichedAgents[0] existe.
     const root = enrichedAgents.reduce((bestAgent, currentAgent) => {
         return getLeadershipScore(currentAgent) > getLeadershipScore(bestAgent) ? currentAgent : bestAgent;
-    }, enrichedAgents[0]);
+    }, enrichedAgents[0]!);
 
     type WithRattachement = typeof enrichedAgents[number] & { rattachementId: string | null };
 

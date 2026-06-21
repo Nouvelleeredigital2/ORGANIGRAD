@@ -34,7 +34,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ rawAgents, totalAg
         const computedBarData = Object.keys(agentsPerPole)
             .map((key) => ({
                 pole: key,
-                agents: agentsPerPole[key],
+                agents: agentsPerPole[key] ?? 0,
             }))
             .sort((a, b) => b.agents - a.agents)
             .slice(0, 5);
