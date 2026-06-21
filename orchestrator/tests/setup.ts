@@ -19,6 +19,10 @@ beforeEach(() => {
     );
     // Pare-feu contre une connexion Postgres réelle via getSql().
     delete process.env.SUPABASE_DB_URL;
+    // Contexte de test = "dev" : SSRF permissive (localhost + pas de DNS réel),
+    // SAUF les tests qui passent une policy explicite (ils testent le strict).
+    process.env.SSRF_ALLOW_PRIVATE = '1';
+    process.env.SSRF_ALLOW_HTTP = '1';
 });
 
 afterEach(() => {

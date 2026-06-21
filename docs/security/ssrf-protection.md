@@ -20,8 +20,12 @@ Composant central : `orchestrator/src/net/ssrfGuard.ts` (`safeFetch`,
 7. **Messages génériques** côté appelant — aucune fuite de topologie interne.
 
 ## Politique
-- Stricte par défaut en production (`NODE_ENV=production` → https + IP publiques).
-- Relâchée en dev (`allowHttp`/`allowPrivate`) pour viser un MCP localhost.
+- **Stricte par défaut, indépendamment de `NODE_ENV`** (https + IP publiques) — un
+  `NODE_ENV` non défini en prod ne désactive donc PAS la protection.
+- Le mode permissif (http + cibles privées, pour viser un MCP localhost en dev)
+  exige un **opt-in explicite** : variables `SSRF_ALLOW_HTTP=1` /
+  `SSRF_ALLOW_PRIVATE=1`, ou une `SsrfPolicy` passée explicitement. À ne jamais
+  activer en production.
 
 ## Tests
 `orchestrator/tests/ssrfGuard.test.ts` (hermétiques, DNS + fetch injectés) :

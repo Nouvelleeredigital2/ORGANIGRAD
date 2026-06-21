@@ -46,16 +46,17 @@ export interface SafeFetchDeps {
     lookup?: (hostname: string) => Promise<{ address: string; family: number }[]>;
 }
 
-function isProd(): boolean {
-    return process.env.NODE_ENV === 'production';
-}
-
 function resolvePolicy(p: SsrfPolicy = {}): Required<Omit<SsrfPolicy, 'allowlist'>> & {
     allowlist: string[];
 } {
+    // STRICT par défaut, INDÉPENDAMMENT de NODE_ENV (qui peut être non défini en
+    // prod). http:// et les cibles privées ne sont autorisés que par un opt-in
+    // EXPLICITE (option de la policy, ou variables d'env de développement).
+    const envAllowHttp = process.env.SSRF_ALLOW_HTTP === '1';
+    const envAllowPrivate = process.env.SSRF_ALLOW_PRIVATE === '1';
     return {
-        allowHttp: p.allowHttp ?? !isProd(),
-        allowPrivate: p.allowPrivate ?? !isProd(),
+        allowHttp: p.allowHttp ?? envAllowHttp,
+        allowPrivate: p.allowPrivate ?? envAllowPrivate,
         allowlist: p.allowlist ?? [],
         maxRedirects: p.maxRedirects ?? 3,
         timeoutMs: p.timeoutMs ?? 10_000,

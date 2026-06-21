@@ -109,6 +109,23 @@ describe('assertUrlAllowed', () => {
             assertUrlAllowed('http://localhost:3001/mcp', { allowHttp: true, allowPrivate: true }),
         ).resolves.toBeUndefined();
     });
+
+    it('STRICT par défaut sans opt-in env : http et IP privée refusés', async () => {
+        delete process.env.SSRF_ALLOW_HTTP;
+        delete process.env.SSRF_ALLOW_PRIVATE;
+        // http refusé (allowHttp défaut false)
+        await expect(
+            assertUrlAllowed('http://api.example.com/x', {}, {
+                lookup: fakeLookup({ 'api.example.com': ['93.184.216.34'] }),
+            }),
+        ).rejects.toBeInstanceOf(SsrfError);
+        // IP privée refusée (allowPrivate défaut false)
+        await expect(
+            assertUrlAllowed('https://intra.example/x', {}, {
+                lookup: fakeLookup({ 'intra.example': ['10.0.0.1'] }),
+            }),
+        ).rejects.toBeInstanceOf(SsrfError);
+    });
 });
 
 describe('safeFetch', () => {
