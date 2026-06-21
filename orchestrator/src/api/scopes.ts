@@ -12,6 +12,7 @@
 
 export const SCOPES = {
     graphRead: 'graph:read',
+    graphWrite: 'graph:write',
     nodeRead: 'node:read',
     nodeRun: 'node:run',
     executionRead: 'execution:read',
@@ -51,9 +52,11 @@ export function scopesForRole(role: string): Scope[] {
         case 'owner':
         case 'admin':
             return [...ALL_SCOPES];
+        // viewer: graph:read + node:read + execution:read uniquement
         case 'member':
             return [
                 SCOPES.graphRead,
+                SCOPES.graphWrite,
                 SCOPES.nodeRead,
                 SCOPES.nodeRun,
                 SCOPES.executionRead,

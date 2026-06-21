@@ -24,6 +24,8 @@ import { supabase } from '../lib/supabase';
 export interface OrchestratorBridge {
     connected: boolean;
     nodes: OrchestratorGraphNode[];
+    /** Client actif — exposé pour que le repo puisse router les écritures via l'orchestrateur. */
+    client: OrchestratorClient | null;
     runNode: (id: string) => Promise<void>;
     runFlow: (id: string) => Promise<void>;
     approve: (id: string) => Promise<void>;
@@ -45,6 +47,7 @@ export function useOrchestratorBridge(
 ): OrchestratorBridge {
     const [connected, setConnected] = useState(false);
     const [nodes, setNodes] = useState<OrchestratorGraphNode[]>([]);
+    const [activeClient, setActiveClient] = useState<OrchestratorClient | null>(null);
     const clientRef = useRef<OrchestratorClient | null>(null);
 
     // Configuration persistée (Paramètres). Les options explicites priment.
@@ -88,6 +91,7 @@ export function useOrchestratorBridge(
             if (cancelled) return;
             if (!reachable) {
                 setConnected(false);
+                setActiveClient(null);
                 return;
             }
             try {
@@ -95,16 +99,19 @@ export function useOrchestratorBridge(
                 if (cancelled) return;
                 setNodes(snapshot);
                 setConnected(true);
+                setActiveClient(client);
                 unsubscribe = client.subscribe((evt: SseStatusEvent) => {
                     setNodes((prev) => applyTransitionPatch(prev, evt));
                 });
             } catch {
                 setConnected(false);
+                setActiveClient(null);
             }
         })();
 
         return () => {
             cancelled = true;
+            setActiveClient(null);
             unsubscribe();
         };
     }, [baseUrl, apiKey, clientFactory, enabled, isConfigured, getUserAuth]);
@@ -112,6 +119,7 @@ export function useOrchestratorBridge(
     return {
         connected,
         nodes,
+        client: activeClient,
         runNode: async (id) => {
             await clientRef.current?.runNode(id);
         },

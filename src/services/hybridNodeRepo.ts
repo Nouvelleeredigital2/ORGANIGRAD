@@ -8,6 +8,19 @@ import type {
 } from '../types/hybridNode';
 import type { Database } from '../types/supabase';
 import { hybridNodeStore } from './hybridNodeStore';
+import type { OrchestratorClient } from './orchestratorService';
+
+/**
+ * Sentinelle renvoyée quand un champ est chiffré côté serveur — la SPA
+ * ne peut pas le déchiffrer (pas de clé). L'UI doit afficher un indicateur
+ * "Configuré (chiffré)" et permettre une mise à jour sans montrer la valeur.
+ */
+export const ENCRYPTED_PLACEHOLDER = '__encrypted__' as const;
+
+function maskEncryptedField<T>(v: T | string | null | undefined): T | typeof ENCRYPTED_PLACEHOLDER | null | undefined {
+    if (typeof v === 'string' && v.startsWith('enc:v1:')) return ENCRYPTED_PLACEHOLDER;
+    return v as T | null | undefined;
+}
 
 type Row = Database['public']['Tables']['hybrid_nodes']['Row'];
 type Insert = Database['public']['Tables']['hybrid_nodes']['Insert'];
@@ -21,6 +34,19 @@ type Insert = Database['public']['Tables']['hybrid_nodes']['Insert'];
  */
 
 function rowToNode(row: Row): HybridNode {
+    // Champs potentiellement chiffrés par l'orchestrateur : si la valeur commence
+    // par `enc:v1:`, on la remplace par la sentinelle — la SPA n'a pas la clé.
+    const rawPrompt = row.system_prompt ?? undefined;
+    const systemPrompt = rawPrompt !== undefined ? (maskEncryptedField(rawPrompt) ?? undefined) : undefined;
+
+    const rawMcp = (row.mcp_config as McpConfig | null) ?? undefined;
+    const mcpRaw = rawMcp !== undefined ? maskEncryptedField(rawMcp) : undefined;
+    const mcpConfig = mcpRaw === ENCRYPTED_PLACEHOLDER ? undefined : (mcpRaw as McpConfig | undefined);
+
+    const rawNotif = (row.notification_channels as NotificationChannels | null) ?? undefined;
+    const notifRaw = rawNotif !== undefined ? maskEncryptedField(rawNotif) : undefined;
+    const notificationChannels = notifRaw === ENCRYPTED_PLACEHOLDER ? undefined : (notifRaw as NotificationChannels | undefined);
+
     return {
         id: row.id,
         type: row.type as NodeType,
@@ -28,11 +54,10 @@ function rowToNode(row: Row): HybridNode {
         roleTitre: row.role_titre,
         parentID: row.parent_id,
         gradeId: row.grade_id,
-        systemPrompt: row.system_prompt ?? undefined,
+        systemPrompt: systemPrompt === ENCRYPTED_PLACEHOLDER ? ENCRYPTED_PLACEHOLDER : systemPrompt,
         skills: row.skills,
-        mcpConfig: (row.mcp_config as McpConfig | null) ?? undefined,
-        notificationChannels:
-            (row.notification_channels as NotificationChannels | null) ?? undefined,
+        mcpConfig,
+        notificationChannels,
         avatarUrl: row.avatar_url ?? undefined,
         status: row.status as NodeStatus,
     };
@@ -58,6 +83,11 @@ function nodeToInsert(node: HybridNode, workspaceId: string): Insert {
 
 export interface RepoContext {
     workspaceId: string | null;
+    /**
+     * Si fourni, les écritures (upsert/remove) passent par l'orchestrateur
+     * (qui chiffre les secrets avant stockage). La lecture reste via Supabase.
+     */
+    orchestratorClient?: OrchestratorClient | null;
 }
 
 /**
@@ -101,6 +131,37 @@ export const hybridNodeRepo = {
     },
 
     async upsert(node: HybridNode, ctx: RepoContext): Promise<HybridNode> {
+        // Chemin orchestrateur : chiffrement côté serveur (audit #1).
+        if (ctx.orchestratorClient && ctx.workspaceId) {
+            const dto = await ctx.orchestratorClient.upsertNode(
+                {
+                    id: node.id,
+                    type: node.type,
+                    nom: node.nom,
+                    roleTitre: node.roleTitre,
+                    parentID: node.parentID,
+                    gradeId: node.gradeId,
+                    systemPrompt: node.systemPrompt !== ENCRYPTED_PLACEHOLDER ? (node.systemPrompt ?? null) : null,
+                    skills: node.skills,
+                    mcpConfig: node.mcpConfig ?? null,
+                    notificationChannels: node.notificationChannels ?? null,
+                    avatarUrl: node.avatarUrl ?? null,
+                },
+                ctx.workspaceId,
+            );
+            // Le DTO retourné n'a pas les secrets (indicateurs seulement) — on
+            // reconstitue un HybridNode minimal pour la mise à jour du cache local.
+            const merged: HybridNode = {
+                ...node,
+                status: dto.status,
+            };
+            hybridNodeStore.save(ctx.workspaceId, [
+                ...hybridNodeStore.list(ctx.workspaceId).filter((n) => n.id !== node.id),
+                merged,
+            ]);
+            return merged;
+        }
+
         if (!supabase || !ctx.workspaceId) {
             const current = hybridNodeStore.list(ctx.workspaceId);
             const idx = current.findIndex((n) => n.id === node.id);
@@ -119,6 +180,16 @@ export const hybridNodeRepo = {
     },
 
     async remove(id: string, ctx: RepoContext): Promise<void> {
+        // Chemin orchestrateur : suppression via API sécurisée (audit #1).
+        if (ctx.orchestratorClient && ctx.workspaceId) {
+            await ctx.orchestratorClient.removeNode(id);
+            hybridNodeStore.save(
+                ctx.workspaceId,
+                hybridNodeStore.list(ctx.workspaceId).filter((n) => n.id !== id),
+            );
+            return;
+        }
+
         if (!supabase || !ctx.workspaceId) {
             hybridNodeStore.save(
                 ctx.workspaceId,

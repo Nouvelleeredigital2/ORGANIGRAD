@@ -8,7 +8,8 @@ import { IllegalTransitionError } from '../domain/stateMachine.js';
 import { NodeNotFoundError } from '../state/pgGraphStore.js';
 import { buildAuthHook } from './auth.js';
 import { assertScope, MissingScopeError, SCOPES } from './scopes.js';
-import { toPublicNodeDTO } from './dto.js';
+import { toPublicNodeDTO, validateNodeMutation, NodeMutationValidationError } from './dto.js';
+import { SecretCipher } from '../security/crypto.js';
 import { SseTicketStore } from './sseTickets.js';
 import { PgAuditTrail } from '../observability/auditLog.js';
 import { dispatchMcpRequest } from '../mcp/mcpServer.js';
@@ -58,6 +59,19 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
     const mcp = deps.mcpClient ?? new McpClient({ timeoutMs: 30_000 });
     const sseTickets = new SseTicketStore();
     const audit = new PgAuditTrail(deps.sql);
+
+    // Chiffrement au repos — optionnel (si la clé n'est pas configurée, les
+    // nœuds sont stockés en clair et restent lisibles, rétro-compatible).
+    let _cipher: SecretCipher | null | undefined;
+    const getCipher = (): SecretCipher | null => {
+        if (_cipher !== undefined) return _cipher;
+        try {
+            _cipher = SecretCipher.fromEnv();
+        } catch {
+            _cipher = null;
+        }
+        return _cipher;
+    };
 
     // Journalise une action sensible (best-effort, n'échoue jamais le flux).
     const recordAudit = (
@@ -179,7 +193,7 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
         const actor = userId
             ? ({ kind: 'user', id: userId } as const)
             : ({ kind: 'api_key', id: apiKeyId } as const);
-        const store = new PgGraphStore(deps.sql, workspaceId, actor);
+        const store = new PgGraphStore(deps.sql, workspaceId, actor, getCipher());
         const nc = deps.notifierOptions;
         // Le notifier doit aussi s'attacher quand SEUL l'e-mail est configuré
         // (auparavant : attaché uniquement si un webhook Slack était présent).
@@ -210,6 +224,89 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
             const nodes = await store.list();
             return { nodes: nodes.map(toPublicNodeDTO) };
         } catch (err) {
+            return handleError(reply, err);
+        }
+    });
+
+    // --- GET /api/nodes/:id — lecture complète déchiffrée (pour l'édition) ---
+    // Exige graph:write : seuls les humains autorisés à écrire peuvent lire les secrets.
+    app.get<{ Params: { id: string } }>('/api/nodes/:id', async (req, reply) => {
+        try {
+            assertScope(req.scopes, SCOPES.graphWrite);
+            const store = storeFor(req.workspaceId!, req.apiKeyId, req.userId);
+            const node = await store.get(req.params.id);
+            return { node };
+        } catch (err) {
+            return handleError(reply, err);
+        }
+    });
+
+    // --- POST /api/nodes — création d'un nœud (chiffrement auto si clé présente) ---
+    app.post<{ Body: unknown }>('/api/nodes', async (req, reply) => {
+        try {
+            assertScope(req.scopes, SCOPES.graphWrite);
+            const body = validateNodeMutation(req.body);
+            const store = storeFor(req.workspaceId!, req.apiKeyId, req.userId);
+            const nodePayload = {
+                ...body,
+                parentID: body.parentID ?? null,
+                systemPrompt: body.systemPrompt ?? undefined,
+                mcpConfig: body.mcpConfig ?? undefined,
+                notificationChannels: body.notificationChannels ?? undefined,
+                avatarUrl: body.avatarUrl ?? undefined,
+                status: 'IDLE' as const,
+            };
+            const node = await store.upsertNode(nodePayload);
+            recordAudit(req, 'graph:create', node.id, 'success');
+            return reply.code(201).send({ node: toPublicNodeDTO(node) });
+        } catch (err) {
+            recordAudit(req, 'graph:create', null, auditResultOf(err));
+            if (err instanceof NodeMutationValidationError) {
+                return reply.code(400).send({ error: 'VALIDATION_ERROR', field: err.field, message: err.message });
+            }
+            return handleError(reply, err);
+        }
+    });
+
+    // --- PUT /api/nodes/:id — mise à jour d'un nœud existant ------------------
+    app.put<{ Params: { id: string }; Body: unknown }>('/api/nodes/:id', async (req, reply) => {
+        try {
+            assertScope(req.scopes, SCOPES.graphWrite);
+            const body = validateNodeMutation({ ...(req.body as object), id: req.params.id });
+            const store = storeFor(req.workspaceId!, req.apiKeyId, req.userId);
+            // Préserve le statut actuel (les mutations structurelles ne changent pas le statut).
+            const existing = await store.get(req.params.id);
+            const updatePayload = {
+                ...body,
+                parentID: body.parentID ?? null,
+                systemPrompt: body.systemPrompt ?? undefined,
+                mcpConfig: body.mcpConfig ?? undefined,
+                notificationChannels: body.notificationChannels ?? undefined,
+                avatarUrl: body.avatarUrl ?? undefined,
+                status: existing.status,
+            };
+            const node = await store.upsertNode(updatePayload);
+            recordAudit(req, 'graph:update', node.id, 'success');
+            return { node: toPublicNodeDTO(node) };
+        } catch (err) {
+            recordAudit(req, 'graph:update', req.params.id, auditResultOf(err));
+            if (err instanceof NodeMutationValidationError) {
+                return reply.code(400).send({ error: 'VALIDATION_ERROR', field: err.field, message: err.message });
+            }
+            return handleError(reply, err);
+        }
+    });
+
+    // --- DELETE /api/nodes/:id — suppression d'un nœud ------------------------
+    app.delete<{ Params: { id: string } }>('/api/nodes/:id', async (req, reply) => {
+        try {
+            assertScope(req.scopes, SCOPES.graphWrite);
+            const store = storeFor(req.workspaceId!, req.apiKeyId, req.userId);
+            await store.deleteNode(req.params.id);
+            recordAudit(req, 'graph:delete', req.params.id, 'success');
+            return reply.code(204).send();
+        } catch (err) {
+            recordAudit(req, 'graph:delete', req.params.id, auditResultOf(err));
             return handleError(reply, err);
         }
     });

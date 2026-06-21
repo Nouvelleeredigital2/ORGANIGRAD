@@ -11,7 +11,7 @@
  * (localStorage / hybridNodeStore).
  */
 
-import type { HybridNode, NodeStatus } from '../types/hybridNode';
+import type { HybridNode, NodeStatus, McpConfig, NotificationChannels } from '../types/hybridNode';
 
 /**
  * Vue PUBLIQUE d'un nœud renvoyée par `GET /api/graph` (cf. DTO côté
@@ -42,6 +42,21 @@ export interface SseStatusEvent {
     to: NodeStatus;
     timestamp: string;
     payload: Record<string, unknown> | null;
+}
+
+/** Corps envoyé à POST /api/nodes ou PUT /api/nodes/:id. */
+export interface NodeMutationPayload {
+    id: string;
+    type: HybridNode['type'];
+    nom: string;
+    roleTitre: string;
+    parentID?: string | null;
+    gradeId: string;
+    systemPrompt?: string | null;
+    skills?: string[];
+    mcpConfig?: McpConfig | null;
+    notificationChannels?: NotificationChannels | null;
+    avatarUrl?: string | null;
 }
 
 export interface UserAuth {
@@ -137,6 +152,57 @@ export class OrchestratorClient {
 
     async reset(id: string): Promise<void> {
         await this.postAction(id, 'reset');
+    }
+
+    /** Crée ou met à jour un nœud (chiffrement côté serveur). Exige graph:write. */
+    async upsertNode(node: NodeMutationPayload, workspaceId: string): Promise<OrchestratorGraphNode> {
+        const headers = await this.humanHeaders();
+        const isCreate = !(await this.nodeExists(node.id));
+        const method = isCreate ? 'POST' : 'PUT';
+        const url = isCreate ? `${this.baseUrl}/nodes` : `${this.baseUrl}/nodes/${node.id}`;
+        const res = await this.fetchImpl(url, {
+            method,
+            headers: { 'content-type': 'application/json', ...headers },
+            body: JSON.stringify({ ...node, workspaceId }),
+        });
+        if (!res.ok) {
+            const detail = await res.json().catch(() => ({}));
+            throw new OrchestratorClientError(`HTTP_${res.status}`, res.status, detail);
+        }
+        const body = (await res.json()) as { node: OrchestratorGraphNode };
+        return body.node;
+    }
+
+    /** Supprime un nœud. Exige graph:write. */
+    async removeNode(id: string): Promise<void> {
+        const headers = await this.humanHeaders();
+        const res = await this.fetchImpl(`${this.baseUrl}/nodes/${id}`, {
+            method: 'DELETE',
+            headers,
+        });
+        if (res.status === 404) return; // déjà absent — idempotent
+        if (!res.ok) throw new OrchestratorClientError(`HTTP_${res.status}`, res.status);
+    }
+
+    /**
+     * Récupère la configuration complète d'un nœud avec secrets déchiffrés
+     * (pour l'édition seulement). Exige graph:write.
+     */
+    async getNodeConfig(id: string): Promise<HybridNode | null> {
+        const headers = await this.humanHeaders();
+        const res = await this.fetchImpl(`${this.baseUrl}/nodes/${id}`, {
+            headers: { ...headers },
+        });
+        if (res.status === 404) return null;
+        if (!res.ok) throw new OrchestratorClientError(`HTTP_${res.status}`, res.status);
+        const body = (await res.json()) as { node: HybridNode };
+        return body.node;
+    }
+
+    private async nodeExists(id: string): Promise<boolean> {
+        const headers = await this.humanHeaders();
+        const res = await this.fetchImpl(`${this.baseUrl}/nodes/${id}`, { headers });
+        return res.status !== 404;
     }
 
     private async postAction(

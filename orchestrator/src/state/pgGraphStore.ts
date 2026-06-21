@@ -1,7 +1,9 @@
 import postgres, { type Sql } from 'postgres';
 import { transition, type NodeStatus } from '../domain/stateMachine.js';
-import type { HybridNode, JsonObject, NodeType } from '../domain/types.js';
+import type { HybridNode, JsonObject, McpConfig, NotificationChannels, NodeType } from '../domain/types.js';
 import { type GraphStore, type TransitionEvent } from './graphStore.js';
+import type { SecretCipher } from '../security/crypto.js';
+import { decryptText, decryptJson, encryptText, encryptJson } from '../security/nodeSecrets.js';
 
 /**
  * GraphStore Postgres-backed — alternative pour la production.
@@ -39,27 +41,10 @@ interface DbRow {
     grade_id: string;
     system_prompt: string | null;
     skills: string[];
-    mcp_config: { serverUrl: string; connectedTo: string[] } | null;
-    notification_channels: Record<string, string> | null;
+    mcp_config: unknown;
+    notification_channels: unknown;
     avatar_url: string | null;
     status: NodeStatus;
-}
-
-function rowToNode(r: DbRow): HybridNode {
-    return {
-        id: r.id,
-        type: r.type,
-        nom: r.nom,
-        roleTitre: r.role_titre,
-        parentID: r.parent_id,
-        gradeId: r.grade_id,
-        systemPrompt: r.system_prompt ?? undefined,
-        skills: r.skills,
-        mcpConfig: r.mcp_config ?? undefined,
-        notificationChannels: r.notification_channels ?? undefined,
-        avatarUrl: r.avatar_url ?? undefined,
-        status: r.status,
-    };
 }
 
 export class PgGraphStore implements GraphStore {
@@ -71,7 +56,26 @@ export class PgGraphStore implements GraphStore {
         private readonly actor: { kind: 'user' | 'api_key' | 'orchestrator'; id?: string } = {
             kind: 'orchestrator',
         },
+        private readonly cipher: SecretCipher | null = null,
     ) {}
+
+    /** Déchiffre les champs sensibles d'une ligne DB vers HybridNode. */
+    private rowToNode(r: DbRow): HybridNode {
+        return {
+            id: r.id,
+            type: r.type,
+            nom: r.nom,
+            roleTitre: r.role_titre,
+            parentID: r.parent_id,
+            gradeId: r.grade_id,
+            systemPrompt: decryptText(this.cipher, r.system_prompt) ?? undefined,
+            skills: r.skills,
+            mcpConfig: decryptJson<McpConfig>(this.cipher, r.mcp_config) ?? undefined,
+            notificationChannels: decryptJson<NotificationChannels>(this.cipher, r.notification_channels) ?? undefined,
+            avatarUrl: r.avatar_url ?? undefined,
+            status: r.status,
+        };
+    }
 
     /** Charge tous les nœuds du workspace. */
     async list(): Promise<readonly HybridNode[]> {
@@ -80,7 +84,7 @@ export class PgGraphStore implements GraphStore {
              where workspace_id = ${this.workspaceId}
              order by created_at asc
         `;
-        return rows.map(rowToNode);
+        return rows.map((r) => this.rowToNode(r));
     }
 
     async get(id: string): Promise<HybridNode> {
@@ -91,7 +95,7 @@ export class PgGraphStore implements GraphStore {
         `;
         const row = rows[0];
         if (!row) throw new NodeNotFoundError(id);
-        return rowToNode(row);
+        return this.rowToNode(row);
     }
 
     async has(id: string): Promise<boolean> {
@@ -102,6 +106,57 @@ export class PgGraphStore implements GraphStore {
             ) as exists
         `;
         return rows[0]?.exists ?? false;
+    }
+
+    /**
+     * Crée ou met à jour un nœud. Chiffre les champs sensibles avant stockage.
+     * Le `status` est TOUJOURS forcé à IDLE à la création ; la machine à états
+     * interdit de créer un nœud dans un état autre que IDLE.
+     */
+    async upsertNode(node: HybridNode): Promise<HybridNode> {
+        const encPrompt = encryptText(this.cipher, node.systemPrompt ?? null);
+        const encMcp = encryptJson(this.cipher, node.mcpConfig ?? null) as JsonObject | null;
+        const encNotif = encryptJson(this.cipher, node.notificationChannels ?? null) as JsonObject | null;
+
+        const rows = await this.sql<DbRow[]>`
+            insert into public.hybrid_nodes
+                (id, workspace_id, type, nom, role_titre, parent_id, grade_id,
+                 system_prompt, skills, mcp_config, notification_channels, avatar_url, status)
+            values
+                (${node.id}, ${this.workspaceId}, ${node.type}, ${node.nom}, ${node.roleTitre},
+                 ${node.parentID ?? null}, ${node.gradeId},
+                 ${encPrompt ?? null},
+                 ${this.sql.array(node.skills ?? [])},
+                 ${encMcp != null ? this.sql.json(encMcp) : null},
+                 ${encNotif != null ? this.sql.json(encNotif) : null},
+                 ${node.avatarUrl ?? null},
+                 'IDLE')
+            on conflict (id) do update set
+                type                  = excluded.type,
+                nom                   = excluded.nom,
+                role_titre            = excluded.role_titre,
+                parent_id             = excluded.parent_id,
+                grade_id              = excluded.grade_id,
+                system_prompt         = excluded.system_prompt,
+                skills                = excluded.skills,
+                mcp_config            = excluded.mcp_config,
+                notification_channels = excluded.notification_channels,
+                avatar_url            = excluded.avatar_url,
+                updated_at            = now()
+            where public.hybrid_nodes.workspace_id = ${this.workspaceId}
+            returning *
+        `;
+        const row = rows[0];
+        if (!row) throw new NodeNotFoundError(node.id);
+        return this.rowToNode(row);
+    }
+
+    /** Supprime un nœud du workspace. */
+    async deleteNode(id: string): Promise<void> {
+        await this.sql`
+            delete from public.hybrid_nodes
+             where workspace_id = ${this.workspaceId} and id = ${id}
+        `;
     }
 
     /**
@@ -140,7 +195,7 @@ export class PgGraphStore implements GraphStore {
                      ${this.actor.kind}, ${this.actor.id ?? null})
             `;
 
-            const updated: HybridNode = rowToNode({ ...row, status: nextStatus });
+            const updated: HybridNode = this.rowToNode({ ...row, status: nextStatus });
 
             const evt: TransitionEvent = {
                 nodeId,
