@@ -41,6 +41,33 @@ export const HUMAN_SCOPES: readonly Scope[] = [
     SCOPES.workspaceAdmin,
 ];
 
+/**
+ * Scopes accordés à un utilisateur HUMAIN selon son rôle workspace. Contrairement
+ * aux clés techniques, un humain authentifié (session vérifiée) PEUT obtenir les
+ * scopes de validation humaine.
+ */
+export function scopesForRole(role: string): Scope[] {
+    switch (role) {
+        case 'owner':
+        case 'admin':
+            return [...ALL_SCOPES];
+        case 'member':
+            return [
+                SCOPES.graphRead,
+                SCOPES.nodeRead,
+                SCOPES.nodeRun,
+                SCOPES.executionRead,
+                SCOPES.humanApprove,
+                SCOPES.humanReject,
+                SCOPES.nodeReset,
+            ];
+        case 'viewer':
+            return [SCOPES.graphRead, SCOPES.nodeRead, SCOPES.executionRead];
+        default:
+            return [];
+    }
+}
+
 export class MissingScopeError extends Error {
     constructor(public readonly required: Scope) {
         super(`Scope requis manquant : ${required}`);

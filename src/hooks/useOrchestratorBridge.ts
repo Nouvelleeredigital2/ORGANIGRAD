@@ -1,11 +1,14 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { NodeStatus } from '../types/hybridNode';
 import {
     OrchestratorClient,
     type SseStatusEvent,
     type OrchestratorGraphNode,
+    type UserAuth,
 } from '../services/orchestratorService';
 import { useOrchestratorConfig } from './useOrchestratorConfig';
+import { useWorkspaceContext } from '../contexts/WorkspaceContext';
+import { supabase } from '../lib/supabase';
 
 /**
  * Hook de pont entre la SPA et l'orchestrateur.
@@ -45,9 +48,19 @@ export function useOrchestratorBridge(
 
     // Configuration persistée (Paramètres). Les options explicites priment.
     const { config, isConfigured } = useOrchestratorConfig();
+    const { activeId } = useWorkspaceContext();
     const baseUrl = opts.baseUrl ?? config.baseUrl;
     const apiKey = opts.apiKey ?? config.apiKey;
     const { clientFactory, enabled } = opts;
+
+    // Session utilisateur (JWT) pour les actions humaines — l'orchestrateur exige
+    // une session vérifiée pour approve/reject/reset.
+    const getUserAuth = useCallback(async (): Promise<UserAuth | null> => {
+        if (!supabase || !activeId) return null;
+        const { data } = await supabase.auth.getSession();
+        const token = data.session?.access_token;
+        return token ? { token, workspaceId: activeId } : null;
+    }, [activeId]);
 
     useEffect(() => {
         const disabled =
@@ -67,7 +80,7 @@ export function useOrchestratorBridge(
             }
             const client = clientFactory
                 ? clientFactory()
-                : new OrchestratorClient({ baseUrl, apiKey });
+                : new OrchestratorClient({ baseUrl, apiKey, getUserAuth });
             clientRef.current = client;
 
             const reachable = await client.isReachable();
@@ -93,7 +106,7 @@ export function useOrchestratorBridge(
             cancelled = true;
             unsubscribe();
         };
-    }, [baseUrl, apiKey, clientFactory, enabled, isConfigured]);
+    }, [baseUrl, apiKey, clientFactory, enabled, isConfigured, getUserAuth]);
 
     return {
         connected,

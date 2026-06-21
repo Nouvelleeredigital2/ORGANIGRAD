@@ -38,6 +38,15 @@ Deux identités distinctes accèdent au système.
 `MISSING_BEARER_TOKEN`/`INVALID_OR_REVOKED_KEY`/`EXPIRED_KEY` → 401 ·
 `INSUFFICIENT_SCOPE` → 403 · `NODE_NOT_FOUND` → 404 · `ILLEGAL_TRANSITION` → 409.
 
-## Reste à faire
-Vérification forte par **session utilisateur (JWT Supabase)** côté orchestrateur
-pour `approve/reject` (aujourd'hui protégé par scopes) — cf. rapport final.
+## Session utilisateur (JWT) pour la validation humaine
+`approve/reject/reset` exigent une **session humaine vérifiée**, pas une clé
+technique :
+- Le SPA envoie le JWT Supabase de l'utilisateur (`Authorization: Bearer eyJ…`) +
+  l'en-tête `X-Workspace-Id` pour ces actions (`orchestratorService.humanHeaders`).
+- L'orchestrateur (`auth.ts` + `userAuth.ts`) **vérifie le JWT** (signature HS256
+  via `SUPABASE_JWT_SECRET`, expiration), résout le **rôle** dans
+  `workspace_members`, et accorde les scopes via `scopesForRole` (owner/admin =
+  tout ; member = lecture + run + human:* + reset ; viewer = lecture).
+- Une clé technique (`ok_…`) suit la voie scopes et n'obtient jamais `human:*` →
+  un agent ne peut pas approuver. `run` reste une action de clé technique.
+- L'audit enregistre l'acteur réel (`user` avec son id, ou `api_key`).

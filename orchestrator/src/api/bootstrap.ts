@@ -23,6 +23,7 @@ export async function startOrchestrator() {
         const app = buildPgServer({
             sql,
             allowedOrigins: env.corsAllowedOrigins,
+            jwtSecret: env.supabaseJwtSecret,
             notifierOptions: {
                 validationsWebhook: env.slackValidations,
                 fluxWebhook: env.slackFlux,

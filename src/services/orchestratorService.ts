@@ -44,10 +44,23 @@ export interface SseStatusEvent {
     payload: Record<string, unknown> | null;
 }
 
+export interface UserAuth {
+    /** JWT de session Supabase de l'utilisateur. */
+    token: string;
+    /** Workspace courant (envoyé en en-tête X-Workspace-Id). */
+    workspaceId: string;
+}
+
 export interface OrchestratorClientOptions {
     baseUrl?: string;
     /** Clé API workspace (format `ok_xxx`). Envoyée en `Authorization: Bearer`. */
     apiKey?: string;
+    /**
+     * Fournit la session utilisateur (JWT) pour les actions HUMAINES
+     * (approve/reject/reset) — l'orchestrateur exige une session vérifiée, pas
+     * une clé technique. Si absent, on retombe sur la clé API.
+     */
+    getUserAuth?: () => Promise<UserAuth | null>;
     fetchImpl?: typeof fetch;
     eventSourceImpl?: typeof EventSource;
 }
@@ -55,18 +68,33 @@ export interface OrchestratorClientOptions {
 export class OrchestratorClient {
     private readonly baseUrl: string;
     private readonly apiKey: string | null;
+    private readonly getUserAuth?: () => Promise<UserAuth | null>;
     private readonly fetchImpl: typeof fetch;
     private readonly eventSourceImpl: typeof EventSource;
 
     constructor(opts: OrchestratorClientOptions = {}) {
         this.baseUrl = opts.baseUrl ?? '/api';
         this.apiKey = opts.apiKey ?? null;
+        this.getUserAuth = opts.getUserAuth;
         this.fetchImpl = opts.fetchImpl ?? fetch.bind(globalThis);
         this.eventSourceImpl = opts.eventSourceImpl ?? globalThis.EventSource;
     }
 
     private authHeaders(): Record<string, string> {
         return this.apiKey ? { authorization: `Bearer ${this.apiKey}` } : {};
+    }
+
+    /**
+     * En-têtes pour une action HUMAINE : session utilisateur (JWT + workspace) si
+     * disponible, sinon repli sur la clé API (qui, sans scope humain, sera refusée
+     * par l'orchestrateur — comportement voulu).
+     */
+    private async humanHeaders(): Promise<Record<string, string>> {
+        const u = this.getUserAuth ? await this.getUserAuth() : null;
+        if (u) {
+            return { authorization: `Bearer ${u.token}`, 'x-workspace-id': u.workspaceId };
+        }
+        return this.authHeaders();
     }
 
     async isReachable(): Promise<boolean> {
@@ -111,9 +139,13 @@ export class OrchestratorClient {
         action: 'run' | 'approve' | 'reject' | 'reset',
         body?: Record<string, unknown>,
     ): Promise<void> {
+        // run = action technique (clé API) ; approve/reject/reset = action humaine
+        // (session utilisateur vérifiée requise par l'orchestrateur).
+        const headers =
+            action === 'run' ? this.authHeaders() : await this.humanHeaders();
         const res = await this.fetchImpl(`${this.baseUrl}/nodes/${id}/${action}`, {
             method: 'POST',
-            headers: { 'content-type': 'application/json', ...this.authHeaders() },
+            headers: { 'content-type': 'application/json', ...headers },
             body: JSON.stringify(body ?? {}),
         });
         if (res.status === 404) throw new OrchestratorClientError('NODE_NOT_FOUND', 404);

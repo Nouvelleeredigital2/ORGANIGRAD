@@ -1,6 +1,8 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import { createHash } from 'node:crypto';
 import type { Sql } from 'postgres';
+import { verifySupabaseJwt } from './userAuth.js';
+import { scopesForRole } from './scopes.js';
 
 /**
  * Authentification par clé d'API workspace.
@@ -22,11 +24,18 @@ declare module 'fastify' {
         workspaceId?: string;
         apiKeyId?: string;
         scopes?: string[];
+        /** Présent si la requête est authentifiée par une session utilisateur (JWT). */
+        userId?: string;
     }
 }
 
 export interface AuthDeps {
     sql: Sql;
+    /**
+     * Secret JWT Supabase (HS256). Si fourni, les requêtes avec un Bearer JWT
+     * utilisateur (≠ clé `ok_…`) sont authentifiées comme session humaine.
+     */
+    jwtSecret?: string;
 }
 
 interface ApiKeyRow {
@@ -44,6 +53,34 @@ export function buildAuthHook(deps: AuthDeps) {
         if (!rawKey) {
             return reply.code(401).send({ error: 'MISSING_BEARER_TOKEN' });
         }
+
+        // ── Session utilisateur (JWT) : tout Bearer qui n'est PAS une clé `ok_…` ──
+        // Validation humaine : la session est vérifiée (signature + expiration) et
+        // le rôle dans le workspace détermine les scopes (un humain PEUT approuver).
+        if (!rawKey.startsWith('ok_') && deps.jwtSecret) {
+            const user = verifySupabaseJwt(rawKey, deps.jwtSecret);
+            if (!user) {
+                return reply.code(401).send({ error: 'INVALID_USER_TOKEN' });
+            }
+            const workspaceId = (req.headers['x-workspace-id'] as string | undefined)?.trim();
+            if (!workspaceId) {
+                return reply.code(400).send({ error: 'MISSING_WORKSPACE_ID' });
+            }
+            const memberRows = await deps.sql<{ role: string }[]>`
+                select role from public.workspace_members
+                 where workspace_id = ${workspaceId} and user_id = ${user.sub}
+                 limit 1
+            `;
+            const role = memberRows[0]?.role;
+            if (!role) {
+                return reply.code(403).send({ error: 'NOT_A_WORKSPACE_MEMBER' });
+            }
+            req.workspaceId = workspaceId;
+            req.userId = user.sub;
+            req.scopes = scopesForRole(role);
+            return;
+        }
+
         const hash = createHash('sha256').update(rawKey).digest('hex');
 
         const rows = await deps.sql<ApiKeyRow[]>`

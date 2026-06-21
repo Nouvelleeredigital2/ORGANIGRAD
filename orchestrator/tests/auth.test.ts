@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createHash } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import Fastify from 'fastify';
 import { buildAuthHook } from '../src/api/auth.js';
 
@@ -125,6 +125,77 @@ describe('buildAuthHook', () => {
         });
         expect(res.statusCode).toBe(200);
         expect(res.json().scopes).toEqual(['graph:read', 'node:run']);
+        await app.close();
+    });
+});
+
+describe('buildAuthHook — session utilisateur (JWT)', () => {
+    const JWT_SECRET = 'jwt-secret-test';
+    const future = Math.floor(Date.now() / 1000) + 3600;
+    const signJwt = (payload: Record<string, unknown>) => {
+        const h = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
+        const p = Buffer.from(JSON.stringify(payload)).toString('base64url');
+        const s = createHmac('sha256', JWT_SECRET).update(`${h}.${p}`).digest('base64url');
+        return `${h}.${p}.${s}`;
+    };
+    const sqlWithRole = (role: string | null) =>
+        vi.fn((strings: TemplateStringsArray) => {
+            const t = strings.join(' ').toLowerCase();
+            if (t.includes('workspace_members')) return Promise.resolve(role ? [{ role }] : []);
+            return Promise.resolve([]);
+        }) as unknown as import('postgres').Sql;
+
+    it('accepte un JWT valide + membre et applique les scopes du rôle', async () => {
+        const app = Fastify();
+        app.addHook('onRequest', buildAuthHook({ sql: sqlWithRole('admin'), jwtSecret: JWT_SECRET }));
+        app.get('/api/x', async (req) => ({ userId: req.userId, ws: req.workspaceId, scopes: req.scopes }));
+        const res = await app.inject({
+            method: 'GET',
+            url: '/api/x',
+            headers: { authorization: `Bearer ${signJwt({ sub: 'user-9', exp: future })}`, 'x-workspace-id': 'ws-7' },
+        });
+        expect(res.statusCode).toBe(200);
+        expect(res.json().userId).toBe('user-9');
+        expect(res.json().scopes).toContain('human:approve');
+        await app.close();
+    });
+
+    it('403 si l\'utilisateur n\'est pas membre du workspace', async () => {
+        const app = Fastify();
+        app.addHook('onRequest', buildAuthHook({ sql: sqlWithRole(null), jwtSecret: JWT_SECRET }));
+        app.get('/api/x', async () => ({}));
+        const res = await app.inject({
+            method: 'GET',
+            url: '/api/x',
+            headers: { authorization: `Bearer ${signJwt({ sub: 'u', exp: future })}`, 'x-workspace-id': 'ws-7' },
+        });
+        expect(res.statusCode).toBe(403);
+        await app.close();
+    });
+
+    it('400 si X-Workspace-Id manque', async () => {
+        const app = Fastify();
+        app.addHook('onRequest', buildAuthHook({ sql: sqlWithRole('admin'), jwtSecret: JWT_SECRET }));
+        app.get('/api/x', async () => ({}));
+        const res = await app.inject({
+            method: 'GET',
+            url: '/api/x',
+            headers: { authorization: `Bearer ${signJwt({ sub: 'u', exp: future })}` },
+        });
+        expect(res.statusCode).toBe(400);
+        await app.close();
+    });
+
+    it('401 si le JWT est invalide', async () => {
+        const app = Fastify();
+        app.addHook('onRequest', buildAuthHook({ sql: sqlWithRole('admin'), jwtSecret: JWT_SECRET }));
+        app.get('/api/x', async () => ({}));
+        const res = await app.inject({
+            method: 'GET',
+            url: '/api/x',
+            headers: { authorization: 'Bearer eyJ.invalid.token', 'x-workspace-id': 'ws-7' },
+        });
+        expect(res.statusCode).toBe(401);
         await app.close();
     });
 });

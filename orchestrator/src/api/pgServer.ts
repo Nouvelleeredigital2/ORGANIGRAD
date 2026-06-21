@@ -43,6 +43,8 @@ export interface PgServerDeps {
      * Jamais de wildcard `*` : on renvoie l'origine seulement si elle matche.
      */
     allowedOrigins?: string[];
+    /** Secret JWT Supabase (HS256) — active l'auth par session utilisateur. */
+    jwtSecret?: string;
 }
 
 const PUBLIC_PATHS = new Set(['/healthz']);
@@ -66,8 +68,8 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
     ): void => {
         void audit.record({
             workspaceId: req.workspaceId ?? 'unknown',
-            actorKind: 'api_key',
-            actorId: req.apiKeyId ?? null,
+            actorKind: req.userId ? 'user' : 'api_key',
+            actorId: req.userId ?? req.apiKeyId ?? null,
             action,
             resourceType: 'node',
             resourceId,
@@ -106,7 +108,7 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
 
     // Auth hook par Bearer sur /api/* et /mcp — SAUF le flux SSE (ticket) et les
     // chemins publics.
-    const authHook = buildAuthHook({ sql: deps.sql });
+    const authHook = buildAuthHook({ sql: deps.sql, jwtSecret: deps.jwtSecret });
     app.addHook('onRequest', async (req, reply) => {
         const path = req.url.split('?')[0]!;
         if (PUBLIC_PATHS.has(path)) return;

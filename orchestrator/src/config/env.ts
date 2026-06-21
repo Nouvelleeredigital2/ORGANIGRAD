@@ -19,6 +19,7 @@ export interface OrchestratorEnv {
     slackFlux?: string;
     corsAllowedOrigins: string[];
     integrationEncryptionKey?: string;
+    supabaseJwtSecret?: string;
 }
 
 export class EnvValidationError extends Error {
@@ -106,5 +107,6 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): OrchestratorEn
             .map((o) => o.trim())
             .filter(Boolean),
         integrationEncryptionKey: encKey,
+        supabaseJwtSecret: source.SUPABASE_JWT_SECRET?.trim() || undefined,
     };
 }
