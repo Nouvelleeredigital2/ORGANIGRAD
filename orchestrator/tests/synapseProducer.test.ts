@@ -2,8 +2,10 @@ import { describe, it, expect, vi } from 'vitest';
 import { parseEvent } from '@apps2026/contracts';
 import {
     buildValidationRequestedEvent,
+    buildValidationDecisionEvent,
     createSynapseProducer,
     type HumanGateNotifier,
+    type ValidationDecision,
 } from '../src/synapse/producer.js';
 import { OrchestrationEngine } from '../src/orchestration/engine.js';
 import { InMemoryGraphStore } from '../src/state/graphStore.js';
@@ -119,5 +121,64 @@ describe('OrchestrationEngine — émission au nœud HUMAN', () => {
         const res = await engine.runFlow('node-approval-1');
         expect(res.ok).toBe(true);
         expect(res.waitingHumanAt).toBe('node-approval-1');
+    });
+});
+
+describe('buildValidationDecisionEvent', () => {
+    it('approved → enveloppe validation.approved canonique', () => {
+        const evt = buildValidationDecisionEvent('node-7', 'approved');
+        expect(() => parseEvent(evt)).not.toThrow();
+        expect(evt.type).toBe('validation.approved');
+        expect(evt.sourceApp).toBe('organigrad');
+        expect(evt.validationId).toBe('node-7');
+        expect(evt.correlationId).toBe('val-node-7'); // même corrélation que la demande
+        expect(evt.targetApps).toEqual(['link', 'memoire-vive-connect']);
+        expect(evt.payload.decision).toBe('approved');
+    });
+
+    it('rejected → validation.rejected avec la raison', () => {
+        const evt = buildValidationDecisionEvent('node-8', 'rejected', { reason: 'incomplet' });
+        expect(evt.type).toBe('validation.rejected');
+        expect(evt.payload.reason).toBe('incomplet');
+    });
+});
+
+describe('OrchestrationEngine — émission de la décision', () => {
+    const waitingNode: HybridNode = { ...humanNode, id: 'node-wait', status: 'WAITING_HUMAN_APPROVAL' };
+
+    function captureNotifier(sink: Array<[string, ValidationDecision, string?]>): HumanGateNotifier {
+        return {
+            async onHumanGate() {},
+            async onDecision(nodeId, decision, reason) {
+                sink.push([nodeId, decision, reason]);
+            },
+        };
+    }
+
+    it('approve émet validation.approved (onDecision)', async () => {
+        const store = new InMemoryGraphStore();
+        store.load([waitingNode]);
+        const calls: Array<[string, ValidationDecision, string?]> = [];
+        const engine = new OrchestrationEngine(store, mcpStub, captureNotifier(calls));
+        await engine.approve('node-wait');
+        expect(calls).toEqual([['node-wait', 'approved', undefined]]);
+    });
+
+    it('reject émet validation.rejected avec feedback', async () => {
+        const store = new InMemoryGraphStore();
+        store.load([waitingNode]);
+        const calls: Array<[string, ValidationDecision, string?]> = [];
+        const engine = new OrchestrationEngine(store, mcpStub, captureNotifier(calls));
+        await engine.reject('node-wait', 'à corriger');
+        expect(calls).toEqual([['node-wait', 'rejected', 'à corriger']]);
+    });
+
+    it('sans onDecision, approve fonctionne (notifier legacy)', async () => {
+        const store = new InMemoryGraphStore();
+        store.load([waitingNode]);
+        const engine = new OrchestrationEngine(store, mcpStub, {
+            async onHumanGate() {},
+        });
+        await expect(engine.approve('node-wait')).resolves.toBeUndefined();
     });
 });

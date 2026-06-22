@@ -127,11 +127,14 @@ export class OrchestrationEngine {
     /** L'humain approuve — sortie de WAITING_HUMAN_APPROVAL vers IDLE. */
     async approve(nodeId: string, payload?: JsonObject): Promise<void> {
         await this.store.applyTransition(nodeId, 'IDLE', payload);
+        // Décision officielle prise → annonce au bus (validation.approved).
+        await this.emitDecision(nodeId, 'approved');
     }
 
     /** L'humain rejette avec feedback — passe en ERROR. */
     async reject(nodeId: string, feedback: string): Promise<void> {
         await this.store.applyTransition(nodeId, 'ERROR', { feedback });
+        await this.emitDecision(nodeId, 'rejected', feedback);
     }
 
     /** Reset d'un nœud en ERROR après correction. */
@@ -149,6 +152,23 @@ export class OrchestrationEngine {
             await this.notifier.onHumanGate(node);
         } catch {
             /* émission de bus best-effort — silencieuse par conception */
+        }
+    }
+
+    /**
+     * Émet `validation.approved` / `validation.rejected` sur le bus après une
+     * décision. Best-effort : ne doit jamais interrompre le flux de décision.
+     */
+    private async emitDecision(
+        nodeId: string,
+        decision: 'approved' | 'rejected',
+        reason?: string,
+    ): Promise<void> {
+        if (!this.notifier?.onDecision) return;
+        try {
+            await this.notifier.onDecision(nodeId, decision, reason);
+        } catch {
+            /* best-effort — silencieux par conception */
         }
     }
 
