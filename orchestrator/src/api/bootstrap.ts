@@ -9,6 +9,8 @@ import { McpClient } from '../mcp/mcpClient.js';
 import { Notifier } from '../observability/notifier.js';
 import { buildServer } from './server.js';
 import { buildPgServer } from './pgServer.js';
+import { registerSynapseConsumer } from '../synapse/consumer.js';
+import { createSynapseProducer } from '../synapse/producer.js';
 import { getSql } from '../state/pgGraphStore.js';
 import { loadEnv } from '../config/env.js';
 
@@ -43,7 +45,10 @@ export async function startOrchestrator() {
     store.load([]);
 
     const mcpClient = new McpClient({ timeoutMs: 30_000 });
-    const engine = new OrchestrationEngine(store, mcpClient);
+    // Producteur de bus APPS-2026 : émet `validation.requested` au nœud HUMAN.
+    // Auto-inactif si SYNAPSE_URL absent. Symétrique du consumer ci-dessous.
+    const synapseProducer = createSynapseProducer({ appUrl });
+    const engine = new OrchestrationEngine(store, mcpClient, synapseProducer);
 
     // En mode mémoire, on n'a pas de workspace DB — l'audit SQL est optionnel.
     const notifier = new Notifier({
@@ -57,6 +62,9 @@ export async function startOrchestrator() {
     notifier.attach();
 
     const app = buildServer({ store, engine });
+    // Participation au bus APPS-2026 (consomme validation.requested, ré-émet la
+    // décision). Auto-inactif si SYNAPSE_URL absent. Dev/in-memory uniquement.
+    registerSynapseConsumer(app);
     await app.listen({ port, host: '0.0.0.0' });
     console.log(`[orchestrator] mode in-memory sur http://0.0.0.0:${port}`);
     return { app, store, engine, notifier, mode: 'memory' as const };

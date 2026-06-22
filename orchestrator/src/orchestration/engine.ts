@@ -1,6 +1,7 @@
 import type { GraphStore } from '../state/graphStore.js';
 import type { HybridNode, JsonObject } from '../domain/types.js';
 import type { RunResult } from '../mcp/mcpClient.js';
+import type { HumanGateNotifier } from '../synapse/producer.js';
 
 /**
  * Moteur d'orchestration — applique les règles HITL en s'appuyant sur :
@@ -34,6 +35,12 @@ export class OrchestrationEngine {
     constructor(
         private readonly store: GraphStore,
         private readonly mcp: MinimalMcpClient,
+        /**
+         * Notifier de bus optionnel (APPS-2026). S'il est fourni, le moteur émet
+         * `validation.requested` quand un nœud HUMAN est atteint. Optionnel :
+         * sans lui, le comportement est strictement inchangé.
+         */
+        private readonly notifier?: HumanGateNotifier,
     ) {}
 
     /**
@@ -51,6 +58,8 @@ export class OrchestrationEngine {
                 // puis fige en WAITING_HUMAN_APPROVAL en attendant l'action HITL.
                 await this.store.applyTransition(current.id, 'EXECUTING');
                 await this.store.applyTransition(current.id, 'WAITING_HUMAN_APPROVAL');
+                // Annonce au bus APPS-2026 qu'un humain doit valider (best-effort).
+                await this.emitHumanGate(current);
                 return { ok: true, waitingHumanAt: current.id };
             }
 
@@ -128,6 +137,19 @@ export class OrchestrationEngine {
     /** Reset d'un nœud en ERROR après correction. */
     async reset(nodeId: string): Promise<void> {
         await this.store.applyTransition(nodeId, 'IDLE');
+    }
+
+    /**
+     * Émet `validation.requested` sur le bus pour un nœud HUMAN. Best-effort :
+     * une panne du notifier/bus ne doit JAMAIS interrompre l'orchestration.
+     */
+    private async emitHumanGate(node: HybridNode): Promise<void> {
+        if (!this.notifier) return;
+        try {
+            await this.notifier.onHumanGate(node);
+        } catch {
+            /* émission de bus best-effort — silencieuse par conception */
+        }
     }
 
     private async findDownstream(parentId: string): Promise<HybridNode | null> {
