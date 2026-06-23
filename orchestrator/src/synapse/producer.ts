@@ -95,13 +95,17 @@ export function buildValidationDecisionEvent(
 export function createSynapseProducer(opts: {
   synapseUrl?: string;
   appUrl?: string;
+  memoireViveUrl?: string;
+  memoireViveKey?: string;
   log?: (msg: string) => void;
 } = {}): HumanGateNotifier {
   const base = (opts.synapseUrl ?? process.env.SYNAPSE_URL)?.replace(/\/$/, "");
   const appUrl = opts.appUrl ?? process.env.APP_URL;
+  const mvUrl = (opts.memoireViveUrl ?? process.env.SUPABASE_MEMOIRE_VIVE_URL)?.replace(/\/$/, "");
+  const mvKey = opts.memoireViveKey ?? process.env.SUPABASE_MEMOIRE_VIVE_KEY;
 
   const post = async (evt: SynapseEvent): Promise<void> => {
-    if (!base) return; // hors démo : aucun effet
+    if (!base) return;
     try {
       const res = await fetch(`${base}/api/events`, {
         method: "POST",
@@ -111,6 +115,38 @@ export function createSynapseProducer(opts: {
       if (!res.ok) opts.log?.(`[synapse-producer] bus a répondu ${res.status}`);
     } catch (e) {
       opts.log?.(`[synapse-producer] émission échouée : ${e instanceof Error ? e.message : e}`);
+    }
+  };
+
+  // Hop 6 — archive la décision dans Mémoire Vive (best-effort, idempotent).
+  const archiveDecision = async (
+    nodeId: string,
+    decision: ValidationDecision,
+    reason?: string,
+  ): Promise<void> => {
+    if (!mvUrl || !mvKey) return;
+    try {
+      await fetch(`${mvUrl}/rest/v1/archived_decisions`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "apikey": mvKey,
+          "authorization": `Bearer ${mvKey}`,
+          "prefer": "resolution=ignore-duplicates,return=minimal",
+        },
+        body: JSON.stringify({
+          correlation_key: `val-${nodeId}`,
+          validation_id: nodeId,
+          decision,
+          source_app: "organigrad",
+          decided_by: "organigrad-orchestrator",
+          correlation_id: `val-${nodeId}`,
+          causation_id: `val-${nodeId}`,
+          ...(reason ? { reason } : {}),
+        }),
+      });
+    } catch (e) {
+      opts.log?.(`[synapse-producer] archivage échoué : ${e instanceof Error ? e.message : e}`);
     }
   };
 
@@ -125,6 +161,7 @@ export function createSynapseProducer(opts: {
       reason?: string,
     ): Promise<void> {
       await post(buildValidationDecisionEvent(nodeId, decision, { reason }));
+      await archiveDecision(nodeId, decision, reason);
     },
   };
 }
