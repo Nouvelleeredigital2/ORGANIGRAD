@@ -4,6 +4,7 @@ import type { Sql } from 'postgres';
 import { McpClient } from '../mcp/mcpClient.js';
 import { PgGraphStore } from '../state/pgGraphStore.js';
 import { OrchestrationEngine } from '../orchestration/engine.js';
+import { createSynapseProducer } from '../synapse/producer.js';
 import { IllegalTransitionError } from '../domain/stateMachine.js';
 import { NodeNotFoundError } from '../state/pgGraphStore.js';
 import { buildAuthHook } from './auth.js';
@@ -57,6 +58,8 @@ function isSseStreamPath(url: string): boolean {
 export function buildPgServer(deps: PgServerDeps): FastifyInstance {
     const app = Fastify({ logger: false });
     const mcp = deps.mcpClient ?? new McpClient({ timeoutMs: 30_000 });
+    // Producteur de bus APPS-2026 (hop 1 + hop 5). Auto-inactif sans SYNAPSE_URL.
+    const synapseProducer = createSynapseProducer({ appUrl: deps.notifierOptions?.appUrl });
     const sseTickets = new SseTicketStore();
     const audit = new PgAuditTrail(deps.sql);
 
@@ -316,7 +319,7 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
         try {
             assertScope(req.scopes, SCOPES.nodeRun);
             const store = storeFor(req.workspaceId!, req.apiKeyId, req.userId);
-            const engine = new OrchestrationEngine(store, mcp);
+            const engine = new OrchestrationEngine(store, mcp, synapseProducer);
             const result = await engine.runNode(req.params.id);
             if (!result.ok) {
                 // Échec MCP : le nœud est en ERROR. On rapporte l'échec réel.
@@ -336,7 +339,7 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
         try {
             assertScope(req.scopes, SCOPES.nodeRun);
             const store = storeFor(req.workspaceId!, req.apiKeyId, req.userId);
-            const engine = new OrchestrationEngine(store, mcp);
+            const engine = new OrchestrationEngine(store, mcp, synapseProducer);
             const result = await engine.runFlow(req.params.id);
             if (!result.ok) {
                 recordAudit(req, 'flow:run', req.params.id, 'error');
@@ -360,11 +363,13 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
             const store = storeFor(req.workspaceId!, req.apiKeyId, req.userId);
             await store.applyTransition(req.params.id, 'IDLE');
             recordAudit(req, 'human:approve', req.params.id, 'success');
+            // Hop 5 — annonce la décision officielle sur le bus (best-effort).
+            await synapseProducer.onDecision?.(req.params.id, 'approved');
             // Reprise du workflow après validation humaine (best-effort : un échec
             // de reprise n'invalide pas l'approbation déjà persistée).
             let resume: Awaited<ReturnType<OrchestrationEngine['resumeFromChildOf']>> = null;
             try {
-                const engine = new OrchestrationEngine(store, mcp);
+                const engine = new OrchestrationEngine(store, mcp, synapseProducer);
                 resume = await engine.resumeFromChildOf(req.params.id);
             } catch (resumeErr) {
                 recordAudit(req, 'flow:resume', req.params.id, 'error');
@@ -388,6 +393,8 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
                     feedback: req.body?.feedback ?? '',
                 });
                 recordAudit(req, 'human:reject', req.params.id, 'success');
+                // Hop 5 — annonce le rejet officiel sur le bus (best-effort).
+                await synapseProducer.onDecision?.(req.params.id, 'rejected', req.body?.feedback ?? '');
                 return { ok: true };
             } catch (err) {
                 recordAudit(req, 'human:reject', req.params.id, auditResultOf(err));
