@@ -12,6 +12,7 @@
  * `SYNAPSE_URL` est absent : aucune émission réseau hors démo.
  */
 import { createEvent, type SynapseEvent } from "@apps2026/contracts";
+import { log } from "../lib/logger.js";
 
 /** Forme minimale d'un nœud HUMAN (structurellement compatible avec HybridNode). */
 export interface HumanGateNode {
@@ -112,9 +113,9 @@ export function createSynapseProducer(opts: {
         headers: { "content-type": "application/json" },
         body: JSON.stringify(evt),
       });
-      if (!res.ok) opts.log?.(`[synapse-producer] bus a répondu ${res.status}`);
+      if (!res.ok) log('warn', 'synapse-producer.bus.error', { status: res.status });
     } catch (e) {
-      opts.log?.(`[synapse-producer] émission échouée : ${e instanceof Error ? e.message : e}`);
+      log('warn', 'synapse-producer.emit.failed', { error: e instanceof Error ? e.message : String(e) });
     }
   };
 
@@ -146,12 +147,14 @@ export function createSynapseProducer(opts: {
         }),
       });
     } catch (e) {
-      opts.log?.(`[synapse-producer] archivage échoué : ${e instanceof Error ? e.message : e}`);
+      log('warn', 'synapse-producer.archive.failed', { nodeId, error: e instanceof Error ? e.message : String(e) });
     }
   };
 
   return {
     async onHumanGate(node: HumanGateNode): Promise<void> {
+      const correlationId = `val-${node.id}`;
+      log('info', 'validation.requested', { correlationId, nodeId: node.id });
       const actionUrl = appUrl ? `${appUrl}?view=orchestration&nodeId=${node.id}` : undefined;
       await post(buildValidationRequestedEvent(node, { actionUrl }));
     },
@@ -160,6 +163,8 @@ export function createSynapseProducer(opts: {
       decision: ValidationDecision,
       reason?: string,
     ): Promise<void> {
+      const correlationId = `val-${nodeId}`;
+      log('info', 'decision', { correlationId, causationId: correlationId, nodeId, decision });
       await post(buildValidationDecisionEvent(nodeId, decision, { reason }));
       await archiveDecision(nodeId, decision, reason);
     },
