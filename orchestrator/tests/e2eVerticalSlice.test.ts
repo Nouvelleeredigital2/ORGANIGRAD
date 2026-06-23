@@ -504,7 +504,7 @@ describe('B4 — Tests de panne', () => {
     // dans le try/catch de emitDecision (best-effort silencieux).
     const slowSynapseBase = 'http://synapse-slow.internal';
 
-    vi.stubGlobal('fetch', async (input: RequestInfo | URL, _init?: RequestInit) => {
+    vi.stubGlobal('fetch', async (input: Parameters<typeof fetch>[0], _init?: Parameters<typeof fetch>[1]) => {
       const url =
         typeof input === 'string'
           ? input
