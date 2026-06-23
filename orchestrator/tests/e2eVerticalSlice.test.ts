@@ -10,6 +10,10 @@
 //   3. UN SEUL correlationId traverse toute la chaîne.
 //   4. rejouer la décision ne change pas la corrélation (idempotence de clé).
 //
+// Suites B2 / B5 — idempotence réelle (archived_decisions Supabase).
+// Nécessitent SUPABASE_MEMOIRE_VIVE_URL + SUPABASE_MEMOIRE_VIVE_KEY dans
+// l'environnement. Sans eux, les tests sont skippés (vitest run passe au vert).
+//
 // Ne nécessite ni Supabase ni le serveur Synapse complet — exécutable en CI.
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { createServer, type Server } from 'node:http';
@@ -144,4 +148,153 @@ describe('E2E tranche verticale — spine Organigrad → bus (HTTP réel)', () =
     expect(rejected?.payload.decision).toBe('rejected');
     expect(rejected?.payload.reason).toBe('contenu incomplet');
   });
+});
+
+// ---------------------------------------------------------------------------
+// Helpers Supabase (utilisés par B2 et B5)
+// ---------------------------------------------------------------------------
+
+const SUPABASE_URL = process.env['SUPABASE_MEMOIRE_VIVE_URL'];
+const SUPABASE_KEY = process.env['SUPABASE_MEMOIRE_VIVE_KEY'];
+const hasSupabase = Boolean(SUPABASE_URL && SUPABASE_KEY);
+
+/**
+ * Interroge `archived_decisions` et retourne le nombre de lignes dont le
+ * `correlation_id` correspond à `correlationId`.
+ * Utilise l'API REST PostgREST exposée par Supabase (count exact).
+ */
+async function countArchivedDecisions(correlationId: string): Promise<number> {
+  if (!SUPABASE_URL || !SUPABASE_KEY) {
+    throw new Error('SUPABASE_MEMOIRE_VIVE_URL / SUPABASE_MEMOIRE_VIVE_KEY absents');
+  }
+  const url = `${SUPABASE_URL}/rest/v1/archived_decisions?correlation_id=eq.${encodeURIComponent(correlationId)}&select=id`;
+  const res = await fetch(url, {
+    headers: {
+      apikey: SUPABASE_KEY,
+      Authorization: `Bearer ${SUPABASE_KEY}`,
+      // Demande le décompte exact dans l'en-tête Content-Range.
+      Prefer: 'count=exact',
+    },
+  });
+  if (!res.ok) {
+    throw new Error(`Supabase REST a répondu ${res.status} pour correlationId=${correlationId}`);
+  }
+  // PostgREST retourne Content-Range: 0-N/total
+  const range = res.headers.get('content-range');
+  if (!range) {
+    // Fallback : compter les items JSON retournés.
+    const rows = (await res.json()) as unknown[];
+    return rows.length;
+  }
+  // Format : "0-N/total" ou "*/total"
+  const total = range.split('/')[1];
+  return total !== undefined ? parseInt(total, 10) : 0;
+}
+
+/**
+ * Attend (avec polling toutes les 500 ms, timeout 10 s) que le compte dans
+ * `archived_decisions` atteigne `expected`.
+ */
+async function waitForArchivedCount(
+  correlationId: string,
+  expected: number,
+  timeoutMs = 10_000,
+): Promise<number> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const count = await countArchivedDecisions(correlationId);
+    if (count >= expected) return count;
+    await new Promise<void>((r) => setTimeout(r, 500));
+  }
+  return countArchivedDecisions(correlationId);
+}
+
+// ---------------------------------------------------------------------------
+// B2 — Idempotence 20× (même correlationId)
+// ---------------------------------------------------------------------------
+
+describe('B2 — idempotence 20× (même correlationId)', () => {
+  it.skipIf(!hasSupabase)(
+    'envoie 20 approbations consécutives, attend 1 seul archived_decisions',
+    async () => {
+      vi.unstubAllGlobals(); // restaure le vrai fetch
+
+      // Nœud dédié à cette suite pour éviter toute collision avec B5 ou les
+      // suites existantes (le correlationId dérivé est val-<nodeId>).
+      const nodeId = 'node-b2-idempotence';
+      const correlationId = `val-${nodeId}`;
+
+      const store = new InMemoryGraphStore();
+      store.load([
+        {
+          ...humanNode,
+          id: nodeId,
+          status: 'WAITING_HUMAN_APPROVAL',
+        },
+      ]);
+      const producer = createSynapseProducer({ synapseUrl: baseUrl });
+      const engine = new OrchestrationEngine(store, mcpStub, producer);
+
+      // 20 approbations consécutives sur le même nodeId.
+      // Le store in-memory autorise une seule transition légale
+      // WAITING_HUMAN_APPROVAL → IDLE ; les suivantes lèvent
+      // IllegalTransitionError que le moteur absorbe (best-effort).
+      // L'important est que le bus (Supabase) n'archive qu'une seule décision.
+      for (let i = 0; i < 20; i++) {
+        try {
+          await engine.approve(nodeId);
+        } catch {
+          // Transitions illégales après la première — attendu et ignoré.
+        }
+      }
+
+      // Attente courte puis vérification dans Supabase.
+      const count = await waitForArchivedCount(correlationId, 1);
+      expect(count).toBe(1);
+    },
+    15_000, // timeout vitest étendu à 15 s (polling + latence réseau Supabase)
+  );
+});
+
+// ---------------------------------------------------------------------------
+// B5 — Idempotence cross-service (même commande envoyée 2×)
+// ---------------------------------------------------------------------------
+
+describe('B5 — idempotence cross-service (même commande 2×)', () => {
+  it.skipIf(!hasSupabase)(
+    'deux approbations du même nodeId ne créent qu\'une archive',
+    async () => {
+      vi.unstubAllGlobals(); // restaure le vrai fetch
+
+      const nodeId = 'node-b5-cross-service';
+      const correlationId = `val-${nodeId}`;
+
+      const store = new InMemoryGraphStore();
+      store.load([
+        {
+          ...humanNode,
+          id: nodeId,
+          status: 'WAITING_HUMAN_APPROVAL',
+        },
+      ]);
+      const producer = createSynapseProducer({ synapseUrl: baseUrl });
+      const engine = new OrchestrationEngine(store, mcpStub, producer);
+
+      // Première approbation : transition légale, événement émis sur le bus.
+      await engine.approve(nodeId);
+
+      // Deuxième approbation : transition illégale dans le store (absorbée),
+      // mais on voudrait s'assurer que même si le bus reçoit l'événement une
+      // seconde fois, Supabase n'archive qu'une ligne.
+      try {
+        await engine.approve(nodeId);
+      } catch {
+        // IllegalTransitionError attendue — ignorée.
+      }
+
+      const count = await waitForArchivedCount(correlationId, 1);
+      expect(count).toBe(1);
+    },
+    15_000,
+  );
 });
