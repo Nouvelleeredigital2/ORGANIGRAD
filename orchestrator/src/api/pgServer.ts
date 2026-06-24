@@ -364,7 +364,12 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
             await store.applyTransition(req.params.id, 'IDLE');
             recordAudit(req, 'human:approve', req.params.id, 'success');
             // Hop 5 — annonce la décision officielle sur le bus (best-effort).
-            await synapseProducer.onDecision?.(req.params.id, 'approved');
+            // Enveloppé dans try/catch : une panne Synapse ne doit jamais échouer la réponse HTTP.
+            try {
+                await synapseProducer.onDecision?.(req.params.id, 'approved');
+            } catch (synapseErr) {
+                console.warn('[approve] Synapse onDecision failed (best-effort)', synapseErr);
+            }
             // Reprise du workflow après validation humaine (best-effort : un échec
             // de reprise n'invalide pas l'approbation déjà persistée).
             let resume: Awaited<ReturnType<OrchestrationEngine['resumeFromChildOf']>> = null;
@@ -394,7 +399,12 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
                 });
                 recordAudit(req, 'human:reject', req.params.id, 'success');
                 // Hop 5 — annonce le rejet officiel sur le bus (best-effort).
-                await synapseProducer.onDecision?.(req.params.id, 'rejected', req.body?.feedback ?? '');
+                // Enveloppé dans try/catch : une panne Synapse ne doit jamais échouer la réponse HTTP.
+                try {
+                    await synapseProducer.onDecision?.(req.params.id, 'rejected', req.body?.feedback ?? '');
+                } catch (synapseErr) {
+                    console.warn('[reject] Synapse onDecision failed (best-effort)', synapseErr);
+                }
                 return { ok: true };
             } catch (err) {
                 recordAudit(req, 'human:reject', req.params.id, auditResultOf(err));
