@@ -130,8 +130,13 @@ describe('pgServer HTTP — Hop 5 : onDecision émis après approve/reject', () 
 
         // La réponse HTTP doit être un succès
         expect([200, 409]).toContain(res.statusCode); // 409 si nœud pas en WAITING — acceptable
-        // Le hop 5 doit avoir été tenté
-        expect(onDecisionSpy).toHaveBeenCalledWith('n1', 'approved');
+        // Le hop 5 doit avoir été tenté — avec le décideur réel (clé API) en meta
+        expect(onDecisionSpy).toHaveBeenCalledWith(
+            'n1',
+            'approved',
+            undefined,
+            expect.objectContaining({ decidedBy: 'key-1' }),
+        );
     });
 
     it('POST /api/nodes/:id/reject appelle onDecision("rejected") sur le bus Synapse', async () => {
@@ -146,7 +151,12 @@ describe('pgServer HTTP — Hop 5 : onDecision émis après approve/reject', () 
         });
 
         expect([200, 409]).toContain(res.statusCode);
-        expect(onDecisionSpy).toHaveBeenCalledWith('n2', 'rejected', 'besoin de révision');
+        expect(onDecisionSpy).toHaveBeenCalledWith(
+            'n2',
+            'rejected',
+            'besoin de révision',
+            expect.objectContaining({ decidedBy: 'key-1' }),
+        );
     });
 
     it("une panne de Synapse ne bloque pas la réponse HTTP (best-effort)", async () => {

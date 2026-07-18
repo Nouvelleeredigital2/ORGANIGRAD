@@ -23,6 +23,17 @@ export interface HumanGateNode {
 
 export type ValidationDecision = "approved" | "rejected";
 
+/** Métadonnées optionnelles d'une décision (contrat annuaire : titre + décideur si dispo). */
+export interface DecisionMeta {
+  /** Identité du décideur (userId Supabase ou id de clé API). */
+  decidedBy?: string;
+  /** Titre/résumé lisible du nœud validé (ex. son nom). */
+  title?: string;
+}
+
+/** Timeout court des appels réseau vers le bus — jamais bloquer le flux métier. */
+const SYNAPSE_TIMEOUT_MS = 2_000;
+
 /** Abstraction injectée dans le moteur d'orchestration. */
 export interface HumanGateNotifier {
   /** Appelé quand le flux atteint un garant humain. Ne doit jamais lever. */
@@ -32,7 +43,12 @@ export interface HumanGateNotifier {
    * `validation.approved` / `validation.rejected` sur le bus pour fermer la
    * boucle (LINK, Mémoire Vive). Optionnel — ne doit jamais lever.
    */
-  onDecision?(nodeId: string, decision: ValidationDecision, reason?: string): Promise<void>;
+  onDecision?(
+    nodeId: string,
+    decision: ValidationDecision,
+    reason?: string,
+    meta?: DecisionMeta,
+  ): Promise<void>;
 }
 
 /**
@@ -70,7 +86,7 @@ export function buildValidationRequestedEvent(
 export function buildValidationDecisionEvent(
   nodeId: string,
   decision: ValidationDecision,
-  opts: { reason?: string; decidedBy?: string } = {},
+  opts: { reason?: string; decidedBy?: string; title?: string } = {},
 ): SynapseEvent {
   return createEvent({
     type: decision === "approved" ? "validation.approved" : "validation.rejected",
@@ -83,6 +99,7 @@ export function buildValidationDecisionEvent(
       nodeId,
       decision,
       decidedBy: opts.decidedBy ?? "organigrad-orchestrator",
+      ...(opts.title ? { title: opts.title } : {}),
       ...(opts.reason ? { reason: opts.reason } : {}),
     },
   });
@@ -112,6 +129,8 @@ export function createSynapseProducer(opts: {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(evt),
+        // Timeout court : le bus ne doit jamais retarder le flux métier.
+        signal: AbortSignal.timeout(SYNAPSE_TIMEOUT_MS),
       });
       if (!res.ok) log('warn', 'synapse-producer.bus.error', { status: res.status });
     } catch (e) {
@@ -124,6 +143,7 @@ export function createSynapseProducer(opts: {
     nodeId: string,
     decision: ValidationDecision,
     reason?: string,
+    decidedBy?: string,
   ): Promise<void> => {
     if (!mvUrl || !mvKey) return;
     try {
@@ -140,11 +160,12 @@ export function createSynapseProducer(opts: {
           validation_id: nodeId,
           decision,
           source_app: "organigrad",
-          decided_by: "organigrad-orchestrator",
+          decided_by: decidedBy ?? "organigrad-orchestrator",
           correlation_id: `val-${nodeId}`,
           causation_id: `val-${nodeId}`,
           ...(reason ? { reason } : {}),
         }),
+        signal: AbortSignal.timeout(SYNAPSE_TIMEOUT_MS),
       });
     } catch (e) {
       log('warn', 'synapse-producer.archive.failed', { nodeId, error: e instanceof Error ? e.message : String(e) });
@@ -162,11 +183,18 @@ export function createSynapseProducer(opts: {
       nodeId: string,
       decision: ValidationDecision,
       reason?: string,
+      meta?: DecisionMeta,
     ): Promise<void> {
       const correlationId = `val-${nodeId}`;
       log('info', 'decision', { correlationId, causationId: correlationId, nodeId, decision });
-      await post(buildValidationDecisionEvent(nodeId, decision, { reason }));
-      await archiveDecision(nodeId, decision, reason);
+      await post(
+        buildValidationDecisionEvent(nodeId, decision, {
+          reason,
+          decidedBy: meta?.decidedBy,
+          title: meta?.title,
+        }),
+      );
+      await archiveDecision(nodeId, decision, reason, meta?.decidedBy);
     },
   };
 }

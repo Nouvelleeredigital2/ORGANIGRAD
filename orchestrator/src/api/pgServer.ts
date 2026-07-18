@@ -366,7 +366,10 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
             // Hop 5 — annonce la décision officielle sur le bus (best-effort).
             // Enveloppé dans try/catch : une panne Synapse ne doit jamais échouer la réponse HTTP.
             try {
-                await synapseProducer.onDecision?.(req.params.id, 'approved');
+                await synapseProducer.onDecision?.(req.params.id, 'approved', undefined, {
+                    decidedBy: req.userId ?? req.apiKeyId ?? undefined,
+                    title: await nodeTitleOf(store, req.params.id),
+                });
             } catch (synapseErr) {
                 console.warn('[approve] Synapse onDecision failed (best-effort)', synapseErr);
             }
@@ -401,7 +404,10 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
                 // Hop 5 — annonce le rejet officiel sur le bus (best-effort).
                 // Enveloppé dans try/catch : une panne Synapse ne doit jamais échouer la réponse HTTP.
                 try {
-                    await synapseProducer.onDecision?.(req.params.id, 'rejected', req.body?.feedback ?? '');
+                    await synapseProducer.onDecision?.(req.params.id, 'rejected', req.body?.feedback ?? '', {
+                        decidedBy: req.userId ?? req.apiKeyId ?? undefined,
+                        title: await nodeTitleOf(store, req.params.id),
+                    });
                 } catch (synapseErr) {
                     console.warn('[reject] Synapse onDecision failed (best-effort)', synapseErr);
                 }
@@ -502,6 +508,23 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
     });
 
     return app;
+}
+
+/**
+ * Titre lisible d'un nœud pour le payload de décision Synapse (contrat annuaire :
+ * « titre/résumé si dispo »). Best-effort : ne lève jamais — `undefined` si le
+ * nœud est introuvable ou si le store échoue (l'émission reste valide sans titre).
+ */
+async function nodeTitleOf(
+    store: { get(id: string): Promise<{ nom?: string; roleTitre?: string }> },
+    nodeId: string,
+): Promise<string | undefined> {
+    try {
+        const node = await store.get(nodeId);
+        return node.nom ?? node.roleTitre ?? undefined;
+    } catch {
+        return undefined;
+    }
 }
 
 function handleError(reply: import('fastify').FastifyReply, err: unknown) {
