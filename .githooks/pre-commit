@@ -1,0 +1,10 @@
+#!/bin/sh
+# Pre-commit — self-test conformité d'émission Synapse (sans GitHub Action).
+# Ne s'exécute QUE si la surface d'émission change → non intrusif.
+changed=$(git diff --cached --name-only)
+case "$changed" in
+  *synapseEmittedTypes*|*synapse-emit-conformance*)
+    echo "[synapse] verification emissions vs registre partage…"
+    ( cd orchestrator __TESTCMD____TESTCMD__ npx vitest run tests/synapse-emit-conformance.test.ts ) || { echo "[synapse] type non declare au registre — commit bloque."; exit 1; }
+    ;;
+esac
