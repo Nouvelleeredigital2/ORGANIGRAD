@@ -8,6 +8,7 @@ import type { CsvSourceInfo } from '../utils/csvSource';
 import { buildPoleDirectory, getPoleKey } from '../utils/poleDirectory';
 import { buildPoleHierarchy } from '../utils/poleHierarchy';
 import { importAgentsFromFile } from '../services/importService';
+import { findAgentPath } from '../utils/treeSearch';
 
 export type AppView = 'orgchart' | 'dashboard' | 'orchestration' | 'members' | 'api-keys' | 'settings';
 
@@ -192,6 +193,25 @@ export const useOrgChartController = () => {
         }
     };
 
+    /**
+     * Localise un agent dans l'organigramme : bascule sur son pole, deplie la
+     * branche jusqu'a lui et le met en evidence.
+     *
+     * Equivalent programmatique de la selection Spotlight, pour les appelants qui
+     * ne connaissent que l'identifiant (fiche profil, liens entrants...).
+     * Retourne false si l'agent est introuvable dans l'arbre courant.
+     */
+    const locateAgent = (agentId: string): boolean => {
+        const poleKey = agentPoleKeyMap.get(agentId);
+        if (!poleKey) return false;
+
+        const path = findAgentPath(viewTree, agentId);
+        setSelectedPoleKey(poleKey);
+        setActiveView('orgchart');
+        setHighlightedSearch({ id: agentId, path: new Set(path ?? [agentId]) });
+        return true;
+    };
+
     return {
         loading,
         activeView,
@@ -219,6 +239,7 @@ export const useOrgChartController = () => {
         selectedPole,
         poleDirectory,
         focusAgentPole,
+        locateAgent,
         isImportedSourceActive: Boolean(importedFileName),
     };
 };

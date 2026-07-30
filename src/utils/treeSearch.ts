@@ -51,3 +51,23 @@ export const searchTree = (nodes: TreeNode[], term: string): SearchResultItem[] 
     traverse(nodes, []);
     return results;
 };
+
+/**
+ * Retourne le chemin racine → agent (identifiants des ancetres inclus, agent compris).
+ *
+ * Meme forme que `SearchResultItem.path` : c'est ce chemin que `highlightedPath`
+ * consomme pour deplier la branche jusqu'au noeud vise (cf. OrgChartNode).
+ * Retourne null si l'agent n'est pas present dans l'arbre.
+ */
+export const findAgentPath = (nodes: TreeNode[], agentId: string): string[] | null => {
+    for (const node of nodes) {
+        if (node.id === agentId) return [node.id];
+
+        if (node.children) {
+            const childPath = findAgentPath(node.children, agentId);
+            if (childPath) return [node.id, ...childPath];
+        }
+    }
+
+    return null;
+};

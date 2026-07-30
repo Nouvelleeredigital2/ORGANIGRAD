@@ -1,5 +1,5 @@
 import { useState, useRef, lazy, Suspense } from 'react';
-import { AlertCircle, RefreshCw, MapPin } from 'lucide-react';
+import { AlertCircle, RefreshCw, MapPin, Settings, X } from 'lucide-react';
 import { useOrgChartController } from './hooks/useOrgChartController';
 import { SpotlightSearch } from './components/spotlight/SpotlightSearch';
 import { ProfileModal } from './components/ProfileModal';
@@ -44,11 +44,26 @@ import { AuthScreen } from './components/auth/AuthScreen';
 import { WorkspaceProvider } from './contexts/WorkspaceProvider';
 import { isSupabaseConfigured } from './lib/supabase';
 
+/**
+ * Résultat observable d'un export (PDF simple ou par lots).
+ *
+ * Un export ne doit jamais se conclure en « succès » silencieux : chaque échec
+ * remonte ici et reste affiché jusqu'à ce que l'utilisateur le referme.
+ */
+type ExportFeedback = {
+    tone: 'success' | 'warning' | 'error';
+    message: string;
+} | null;
+
+const describeError = (err: unknown): string =>
+    err instanceof Error ? err.message : String(err);
+
 function AppContent() {
     const { setFilamentState } = useOrigin();
     const {
         loading,
         error,
+        refresh,
         csvUrl,
         sourceInfo,
         applyCsvUrl,
@@ -72,6 +87,7 @@ function AppContent() {
         selectedPole,
         poleDirectory,
         focusAgentPole,
+        locateAgent,
         isImportedSourceActive,
     } = useOrgChartController();
 
@@ -80,6 +96,7 @@ function AppContent() {
     const [printPreviewOpen, setPrintPreviewOpen] = useState(false);
     const [useHybridCard, setUseHybridCard] = useState(false);
     const [activeModal, setActiveModal] = useState<{ type: 'profile' | 'contact'; agent: Agent } | null>(null);
+    const [exportFeedback, setExportFeedback] = useState<ExportFeedback>(null);
     const orgChartRef = useRef<OrgChartRef>(null);
 
     /**
@@ -94,18 +111,40 @@ function AppContent() {
         setPrintPreviewOpen(false);
         setIsExporting(true);
         setIsPdfMode(true);
+        setExportFeedback(null);
         setFilamentState('loading');
 
         await new Promise((resolve) => setTimeout(resolve, 800));
 
         const { exportToPdf } = await import('./services/exportPdf');
-        await exportToPdf(orgChartRef, { poleLabel: selectedPole?.pole }).catch((err) => {
+        const poleLabel = selectedPole?.pole;
+
+        let failure: unknown = null;
+        try {
+            await exportToPdf(orgChartRef, { poleLabel });
+        } catch (err) {
+            failure = err;
             console.error('[export]', err);
-        });
+        }
 
         setIsPdfMode(false);
         setIsExporting(false);
-        setFilamentState('success');
+
+        // Le succès n'est affiché que si l'export a réellement abouti (ORG-003).
+        if (failure) {
+            setExportFeedback({
+                tone: 'error',
+                message: `Export PDF échoué${poleLabel ? ` — ${poleLabel}` : ''} : ${describeError(failure)}. Aucun fichier n'a été téléchargé.`,
+            });
+            setFilamentState('error');
+        } else {
+            setExportFeedback({
+                tone: 'success',
+                message: `Export PDF terminé${poleLabel ? ` — ${poleLabel}` : ''}.`,
+            });
+            setFilamentState('success');
+        }
+
         setTimeout(() => setFilamentState('idle'), 3000);
     };
 
@@ -115,18 +154,24 @@ function AppContent() {
         const previousPoleKey = selectedPoleKey;
         setIsExporting(true);
         setIsPdfMode(true);
+        setExportFeedback(null);
         setFilamentState('loading');
         setActiveView('orgchart');
 
         const { exportToPdf } = await import('./services/exportPdf');
 
+        const failedPoles: string[] = [];
+
         for (const pole of poleDirectory) {
             setSelectedPoleKey(pole.key);
             // Laisser le temps au DOM de se mettre à jour
             await new Promise((resolve) => setTimeout(resolve, 1200));
-            await exportToPdf(orgChartRef, { poleLabel: pole.pole }).catch((err) => {
-                console.error('[batch export]', err);
-            });
+            try {
+                await exportToPdf(orgChartRef, { poleLabel: pole.pole });
+            } catch (err) {
+                failedPoles.push(pole.pole);
+                console.error('[batch export]', pole.pole, err);
+            }
         }
 
         if (previousPoleKey) {
@@ -135,7 +180,31 @@ function AppContent() {
 
         setIsPdfMode(false);
         setIsExporting(false);
-        setFilamentState('success');
+
+        // Bilan explicite : un lot partiel ne doit jamais passer pour complet (ORG-004).
+        const total = poleDirectory.length;
+        const exported = total - failedPoles.length;
+
+        if (failedPoles.length === 0) {
+            setExportFeedback({
+                tone: 'success',
+                message: `Export par lots terminé : ${total} pôle${total > 1 ? 's' : ''} exporté${total > 1 ? 's' : ''}.`,
+            });
+            setFilamentState('success');
+        } else if (exported === 0) {
+            setExportFeedback({
+                tone: 'error',
+                message: `Export par lots échoué : aucun des ${total} pôles n'a été exporté.`,
+            });
+            setFilamentState('error');
+        } else {
+            setExportFeedback({
+                tone: 'warning',
+                message: `Export par lots incomplet : ${exported}/${total} pôles exportés. Échecs : ${failedPoles.join(', ')}.`,
+            });
+            setFilamentState('warning');
+        }
+
         setTimeout(() => setFilamentState('idle'), 3000);
     };
 
@@ -186,11 +255,33 @@ function AppContent() {
             >
                 {loading ? (
                     <OriginLoader />
-                ) : error ? (
+                ) : error && activeView !== 'settings' ? (
+                    /* L'écran d'erreur reste une impasse tant qu'il n'offre pas de sortie :
+                       on propose donc un nouvel essai et l'accès aux Paramètres, seule vue
+                       encore utile sans données (changement de source / import). (ORG-005) */
                     <div className="absolute inset-0 flex flex-col items-center justify-center z-50">
                         <div className="p-10 rounded-3xl bg-red-50 border border-red-100 flex flex-col items-center text-red-500 shadow-xl">
                             <AlertCircle className="w-16 h-16 mb-6" />
                             <p className="text-lg font-black tracking-tight">{error}</p>
+                            <p className="mt-3 max-w-sm text-center text-xs font-bold text-red-400">
+                                La source de données n'a pas pu être chargée.
+                            </p>
+                            <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+                                <button
+                                    onClick={() => void refresh()}
+                                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-red-500 text-white text-[10px] font-black uppercase tracking-widest hover:bg-red-600 transition-all shadow-lg shadow-red-200/50"
+                                >
+                                    <RefreshCw className="w-3.5 h-3.5" />
+                                    Réessayer
+                                </button>
+                                <button
+                                    onClick={() => setActiveView('settings')}
+                                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white text-red-500 text-[10px] font-black uppercase tracking-widest border border-red-200 hover:bg-red-50 transition-all"
+                                >
+                                    <Settings className="w-3.5 h-3.5" />
+                                    Changer de source
+                                </button>
+                            </div>
                         </div>
                     </div>
                 ) : (
@@ -281,6 +372,31 @@ function AppContent() {
                 )}
             </AppShell>
 
+            {/* Bilan d'export — rendu hors de #exportable-org-chart pour ne jamais
+                se retrouver capturé dans le PDF suivant. */}
+            {exportFeedback && (
+                <div
+                    role="status"
+                    className={`fixed bottom-6 left-1/2 z-[60] -translate-x-1/2 flex items-start gap-3 max-w-xl px-5 py-4 rounded-2xl shadow-xl backdrop-blur-md print:hidden ${
+                        exportFeedback.tone === 'success'
+                            ? 'bg-green-50/95 border border-green-200 text-green-700'
+                            : exportFeedback.tone === 'warning'
+                              ? 'bg-orange-50/95 border border-orange-200 text-orange-700'
+                              : 'bg-red-50/95 border border-red-200 text-red-600'
+                    }`}
+                >
+                    <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                    <p className="text-xs font-bold leading-relaxed">{exportFeedback.message}</p>
+                    <button
+                        onClick={() => setExportFeedback(null)}
+                        aria-label="Fermer le bilan d'export"
+                        className="ml-2 shrink-0 opacity-60 hover:opacity-100 transition-opacity"
+                    >
+                        <X className="w-4 h-4" />
+                    </button>
+                </div>
+            )}
+
             {/* Mode lecture → fiche v2 (avatar 72, chips, sections, 3 actions footer)
                 Mode édition → modal legacy avec formulaire */}
             {isEditMode ? (
@@ -297,7 +413,12 @@ function AppContent() {
                     agent={activeModal?.agent || null}
                     onClose={() => setActiveModal(null)}
                     onContact={(agent) => setActiveModal({ type: 'contact', agent })}
-                    onLocate={() => setActiveModal(null)}
+                    onLocate={(agent) => {
+                        // Bascule sur le pôle de l'agent, déplie la branche et le
+                        // met en évidence — puis referme la fiche (ORG-001).
+                        locateAgent(agent.id);
+                        setActiveModal(null);
+                    }}
                 />
             )}
             <ContactModal

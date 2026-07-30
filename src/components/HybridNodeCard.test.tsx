@@ -61,6 +61,23 @@ describe('HybridNodeCard', () => {
         expect(onValidate).toHaveBeenCalledOnce();
     });
 
+    it('demande confirmation avant de supprimer (parité avec la carte RH)', () => {
+        const onDelete = vi.fn();
+        const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+
+        render(<HybridNodeCard node={baseNode} isEditMode onDelete={onDelete} />);
+        fireEvent.click(screen.getByRole('button', { name: /Supprimer/i }));
+
+        expect(confirmSpy).toHaveBeenCalledOnce();
+        expect(onDelete).not.toHaveBeenCalled();
+
+        confirmSpy.mockReturnValue(true);
+        fireEvent.click(screen.getByRole('button', { name: /Supprimer/i }));
+        expect(onDelete).toHaveBeenCalledOnce();
+
+        confirmSpy.mockRestore();
+    });
+
     it('affiche les infos MCP pour un nœud SOFTWARE_MCP', () => {
         const node: HybridNode = {
             ...baseNode,

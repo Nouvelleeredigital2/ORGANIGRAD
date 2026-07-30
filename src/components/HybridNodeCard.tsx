@@ -313,7 +313,11 @@ export default function HybridNodeCard({
                             label="Supprimer"
                             onClick={(e) => {
                                 e.stopPropagation();
-                                onDelete(node);
+                                // Même garde que la carte RH (AgentCard) : une action
+                                // destructive ne doit pas dépendre du mode d'affichage. (ORG-006)
+                                if (confirm(`Supprimer ${node.nom} ?`)) {
+                                    onDelete(node);
+                                }
                             }}
                         >
                             <Trash2 size={13} strokeWidth={1.6} />
