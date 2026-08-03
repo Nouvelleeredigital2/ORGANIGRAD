@@ -10,7 +10,9 @@ import { test, expect, type Page } from '@playwright/test';
  * backend pour valider le câblage front.
  */
 
-const STORAGE_KEY = 'organigrad_hybrid_nodes_v1';
+// Clé namespacée par workspace (cf. hybridNodeStore.keyFor) : hors Supabase,
+// l'espace est `local`. Sans le suffixe, la fixture n'est jamais lue.
+const STORAGE_KEY = 'organigrad_hybrid_nodes_v1::local';
 const CONFIG_KEY = 'organigrad_orchestrator_config_v1';
 
 const UUID_V4 =
@@ -133,7 +135,9 @@ test('Bug #2 fix — quand connecté, "Lancer la chaîne" POST sur l\'orchestrat
             body: ': connected\n\n',
         }),
     );
-    await page.route(`http://mock-orch.local/api/nodes/${ROOT_ID}/run`, (route) => {
+    // « Lancer la chaîne » poste sur run-flow (exécution de la chaîne complète),
+    // pas sur run (nœud isolé) — cf. orchestratorService.runFlow.
+    await page.route(`http://mock-orch.local/api/nodes/${ROOT_ID}/run-flow`, (route) => {
         capturedAuth = route.request().headers()['authorization'];
         runCalled = true;
         return route.fulfill({

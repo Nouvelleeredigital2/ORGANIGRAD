@@ -15,7 +15,30 @@ describe('validateNodeMutation — validation des corps de mutation de nœud', (
         expect(result.id).toBe('n1');
         expect(result.type).toBe('AGENT_IA');
         expect(result.skills).toEqual([]);
-        expect(result.systemPrompt).toBeNull();
+        // Champ sensible absent ⇒ undefined (conserver), pas null (effacer).
+        expect(result.systemPrompt).toBeUndefined();
+    });
+
+    /**
+     * Risque couvert : la SPA ne peut pas lire un champ chiffré. Si « absent »
+     * valait « effacer », tout enregistrement depuis l'éditeur de nœud
+     * détruirait le prompt système et les canaux de notification.
+     */
+    it('distingue champ absent (conserver) et null explicite (effacer)', () => {
+        const absent = validateNodeMutation(valid);
+        expect(absent.systemPrompt).toBeUndefined();
+        expect(absent.mcpConfig).toBeUndefined();
+        expect(absent.notificationChannels).toBeUndefined();
+
+        const cleared = validateNodeMutation({
+            ...valid,
+            systemPrompt: null,
+            mcpConfig: null,
+            notificationChannels: null,
+        });
+        expect(cleared.systemPrompt).toBeNull();
+        expect(cleared.mcpConfig).toBeNull();
+        expect(cleared.notificationChannels).toBeNull();
     });
 
     it('accepte systemPrompt long (< 32 000)', () => {

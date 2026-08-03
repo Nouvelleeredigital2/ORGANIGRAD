@@ -25,7 +25,10 @@ test('Mobile · le scénario reste utilisable (fixture)', async ({ page }) => {
     await page.setViewportSize(MOBILE);
     await page.addInitScript(() => {
         window.localStorage.setItem(
-            'organigrad_hybrid_nodes_v1',
+            // Clé namespacée par workspace (cf. hybridNodeStore.keyFor) : hors
+            // Supabase, l'espace est `local`. Sans le suffixe, la fixture n'est
+            // jamais lue et l'app démarre vide.
+            'organigrad_hybrid_nodes_v1::local',
             JSON.stringify([
                 { id: 'ia-m', type: 'AGENT_IA', nom: 'IA', roleTitre: 'r', parentID: null, gradeId: 'E', status: 'IDLE' },
                 { id: 'hum-m', type: 'HUMAN', nom: 'H', roleTitre: 'g', parentID: 'ia-m', gradeId: 'D', status: 'IDLE' },

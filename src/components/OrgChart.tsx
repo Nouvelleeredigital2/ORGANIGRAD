@@ -10,7 +10,8 @@ interface OrgChartProps {
     data: TreeNode[];
     isPdfMode: boolean;
     isEditMode: boolean;
-    onToggleEditMode: () => void;
+    /** Absent quand le rôle ne permet pas d'éditer : la bascule reste inerte. */
+    onToggleEditMode?: () => void;
     highlightedId: string | null;
     highlightedPath: Set<string>;
     onDeleteAgent?: (id: string) => void;
@@ -111,6 +112,9 @@ export const OrgChart = forwardRef<OrgChartRef, OrgChartProps>(({
                             </button>
                         </div>
 
+                        {/* Bascule Navigation/Édition — absente quand le rôle ne
+                            permet pas d'éditer, plutôt qu'inerte. */}
+                        {onToggleEditMode && (
                         <div className="pointer-events-none absolute bottom-8 left-1/2 z-50 -translate-x-1/2 print:hidden">
                             <div className="pointer-events-auto flex items-center gap-5 rounded-full border border-white/80 bg-white/88 px-5 py-2.5 text-slate-600 shadow-[0_18px_50px_rgba(148,163,184,0.2)] backdrop-blur-xl">
                                 <div
@@ -130,6 +134,7 @@ export const OrgChart = forwardRef<OrgChartRef, OrgChartProps>(({
                                 </div>
                             </div>
                         </div>
+                        )}
 
                         <TransformComponent wrapperStyle={{ width: '100%', height: '100%' }}>
                             <div className="flex min-w-max cursor-grab flex-col items-center justify-start px-36 py-28 active:cursor-grabbing">

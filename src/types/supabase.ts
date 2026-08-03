@@ -56,6 +56,64 @@ export type Database = {
                 Update: Partial<Database['public']['Tables']['hybrid_nodes']['Insert']>;
                 Relationships: [];
             };
+            /**
+             * Fiches RH de l'organigramme (migration 20260803120000_org_agents).
+             * Migration appliquée en production le 2026-08-03 ; ce bloc a été
+             * confronté à `generate_typescript_types` — colonnes, nullabilité et
+             * valeurs par défaut concordent.
+             */
+            org_agents: {
+                Row: {
+                    id: string;
+                    workspace_id: string;
+                    source_kind: string;
+                    source_ref: string;
+                    external_key: string;
+                    nom: string;
+                    prenom: string;
+                    fonction: string;
+                    titre: string;
+                    service: string;
+                    pole: string;
+                    rattachement_id: string | null;
+                    grade_style: string;
+                    type_temps: string;
+                    nbi: string | null;
+                    avatar_url: string | null;
+                    email: string | null;
+                    phone: string | null;
+                    created_by: string | null;
+                    updated_by: string | null;
+                    created_at: string;
+                    updated_at: string;
+                };
+                Insert: {
+                    id?: string;
+                    workspace_id: string;
+                    source_kind?: string;
+                    source_ref?: string;
+                    external_key: string;
+                    nom?: string;
+                    prenom?: string;
+                    fonction?: string;
+                    titre?: string;
+                    service?: string;
+                    pole?: string;
+                    rattachement_id?: string | null;
+                    grade_style?: string;
+                    type_temps?: string;
+                    nbi?: string | null;
+                    avatar_url?: string | null;
+                    email?: string | null;
+                    phone?: string | null;
+                    created_by?: string | null;
+                    updated_by?: string | null;
+                    created_at?: string;
+                    updated_at?: string;
+                };
+                Update: Partial<Database['public']['Tables']['org_agents']['Insert']>;
+                Relationships: [];
+            };
             profiles: {
                 Row: {
                     created_at: string;
@@ -247,6 +305,17 @@ export type Database = {
             invite_workspace_member: {
                 Args: { p_workspace_id: string; p_email: string; p_role?: WorkspaceRole };
                 Returns: Array<{ id: string; token: string; expires_at: string }>;
+            };
+            /** Import transactionnel de fiches RH (20260803120200). */
+            import_org_agents: {
+                Args: {
+                    p_workspace_id: string;
+                    p_source_kind: string;
+                    p_source_ref: string;
+                    p_agents: Json;
+                    p_mode?: string;
+                };
+                Returns: Array<{ inserted: number; updated: number; deleted: number }>;
             };
             accept_workspace_invitation: {
                 Args: { p_token: string };

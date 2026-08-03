@@ -1,5 +1,5 @@
 import { useState, useRef, lazy, Suspense } from 'react';
-import { AlertCircle, RefreshCw, MapPin } from 'lucide-react';
+import { AlertCircle, RefreshCw, MapPin, Settings } from 'lucide-react';
 import { useOrgChartController } from './hooks/useOrgChartController';
 import { SpotlightSearch } from './components/spotlight/SpotlightSearch';
 import { ProfileModal } from './components/ProfileModal';
@@ -43,12 +43,27 @@ import { useSession } from './hooks/useSession';
 import { AuthScreen } from './components/auth/AuthScreen';
 import { WorkspaceProvider } from './contexts/WorkspaceProvider';
 import { isSupabaseConfigured } from './lib/supabase';
+import { useFeedback } from './feedback/FeedbackContext';
+import { FeedbackProvider } from './feedback/FeedbackProvider';
+import { describeError } from './utils/asyncGuard';
+import { usePermissions } from './auth/usePermissions';
+import { ImportPreviewModal } from './components/import/ImportPreviewModal';
 
 function AppContent() {
     const { setFilamentState } = useOrigin();
+    // Canal de retour unifié : un export ne se conclut jamais en « succès »
+    // silencieux, chaque échec reste affiché jusqu'à lecture.
+    const feedback = useFeedback();
+    // Un viewer pouvait activer le mode édition et « supprimer » des agents en
+    // croyant agir pour tout le monde. La suppression suit la même règle que
+    // côté serveur : réservée à owner/admin.
+    const { can, isAdmin } = usePermissions();
+    const peutEditerAgents = can('graph:write');
+    const peutSupprimerAgents = isAdmin;
     const {
         loading,
         error,
+        refresh,
         csvUrl,
         sourceInfo,
         applyCsvUrl,
@@ -66,14 +81,25 @@ function AppContent() {
         activeView,
         setActiveView,
         handleImportFile,
-        clearImportedSource,
         selectedPoleKey,
         setSelectedPoleKey,
         selectedPole,
         poleDirectory,
         focusAgentPole,
-        isImportedSourceActive,
+        locateAgent,
+        importPreview,
+        importMode,
+        setImportMode,
+        allowInvalidImport,
+        setAllowInvalidImport,
+        isCommittingImport,
+        importCommitError,
+        confirmImport,
+        cancelImport,
     } = useOrgChartController();
+
+    const { activeWorkspace } = useWorkspaceContext();
+    const activeWorkspaceName = activeWorkspace?.name ?? null;
 
     const [isExporting, setIsExporting] = useState(false);
     const [isPdfMode, setIsPdfMode] = useState(false);
@@ -99,13 +125,30 @@ function AppContent() {
         await new Promise((resolve) => setTimeout(resolve, 800));
 
         const { exportToPdf } = await import('./services/exportPdf');
-        await exportToPdf(orgChartRef, { poleLabel: selectedPole?.pole }).catch((err) => {
+        const poleLabel = selectedPole?.pole;
+
+        let failure: unknown = null;
+        try {
+            await exportToPdf(orgChartRef, { poleLabel });
+        } catch (err) {
+            failure = err;
             console.error('[export]', err);
-        });
+        }
 
         setIsPdfMode(false);
         setIsExporting(false);
-        setFilamentState('success');
+
+        // Le succès n'est affiché que si l'export a réellement abouti (ORG-003).
+        if (failure) {
+            feedback.error(
+                `Export PDF échoué${poleLabel ? ` — ${poleLabel}` : ''} : ${describeError(failure)}. Aucun fichier n'a été téléchargé.`,
+            );
+            setFilamentState('error');
+        } else {
+            feedback.success(`Export PDF terminé${poleLabel ? ` — ${poleLabel}` : ''}.`);
+            setFilamentState('success');
+        }
+
         setTimeout(() => setFilamentState('idle'), 3000);
     };
 
@@ -120,13 +163,18 @@ function AppContent() {
 
         const { exportToPdf } = await import('./services/exportPdf');
 
+        const failedPoles: string[] = [];
+
         for (const pole of poleDirectory) {
             setSelectedPoleKey(pole.key);
             // Laisser le temps au DOM de se mettre à jour
             await new Promise((resolve) => setTimeout(resolve, 1200));
-            await exportToPdf(orgChartRef, { poleLabel: pole.pole }).catch((err) => {
-                console.error('[batch export]', err);
-            });
+            try {
+                await exportToPdf(orgChartRef, { poleLabel: pole.pole });
+            } catch (err) {
+                failedPoles.push(pole.pole);
+                console.error('[batch export]', pole.pole, err);
+            }
         }
 
         if (previousPoleKey) {
@@ -135,7 +183,26 @@ function AppContent() {
 
         setIsPdfMode(false);
         setIsExporting(false);
-        setFilamentState('success');
+
+        // Bilan explicite : un lot partiel ne doit jamais passer pour complet (ORG-004).
+        const total = poleDirectory.length;
+        const exported = total - failedPoles.length;
+
+        if (failedPoles.length === 0) {
+            feedback.success(
+                `Export par lots terminé : ${total} pôle${total > 1 ? 's' : ''} exporté${total > 1 ? 's' : ''}.`,
+            );
+            setFilamentState('success');
+        } else if (exported === 0) {
+            feedback.error(`Export par lots échoué : aucun des ${total} pôles n'a été exporté.`);
+            setFilamentState('error');
+        } else {
+            feedback.warning(
+                `Export par lots incomplet : ${exported}/${total} pôles exportés. Échecs : ${failedPoles.join(', ')}.`,
+            );
+            setFilamentState('warning');
+        }
+
         setTimeout(() => setFilamentState('idle'), 3000);
     };
 
@@ -186,11 +253,33 @@ function AppContent() {
             >
                 {loading ? (
                     <OriginLoader />
-                ) : error ? (
+                ) : error && activeView !== 'settings' ? (
+                    /* L'écran d'erreur reste une impasse tant qu'il n'offre pas de sortie :
+                       on propose donc un nouvel essai et l'accès aux Paramètres, seule vue
+                       encore utile sans données (changement de source / import). (ORG-005) */
                     <div className="absolute inset-0 flex flex-col items-center justify-center z-50">
                         <div className="p-10 rounded-3xl bg-red-50 border border-red-100 flex flex-col items-center text-red-500 shadow-xl">
                             <AlertCircle className="w-16 h-16 mb-6" />
                             <p className="text-lg font-black tracking-tight">{error}</p>
+                            <p className="mt-3 max-w-sm text-center text-xs font-bold text-red-400">
+                                La source de données n'a pas pu être chargée.
+                            </p>
+                            <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+                                <button
+                                    onClick={() => void refresh()}
+                                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-red-500 text-white text-[10px] font-black uppercase tracking-widest hover:bg-red-600 transition-all shadow-lg shadow-red-200/50"
+                                >
+                                    <RefreshCw className="w-3.5 h-3.5" />
+                                    Réessayer
+                                </button>
+                                <button
+                                    onClick={() => setActiveView('settings')}
+                                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white text-red-500 text-[10px] font-black uppercase tracking-widest border border-red-200 hover:bg-red-50 transition-all"
+                                >
+                                    <Settings className="w-3.5 h-3.5" />
+                                    Changer de source
+                                </button>
+                            </div>
                         </div>
                     </div>
                 ) : (
@@ -221,19 +310,21 @@ function AppContent() {
                                 handleResetData={handleResetData}
                                 sourceInfo={sourceInfo}
                                 handleImportFile={handleImportFile}
-                                clearImportedSource={clearImportedSource}
-                                isImportedSourceActive={isImportedSourceActive}
+                                sourceError={error}
+                                retrySource={() => void refresh()}
                             />
                         ) : (
                             <PoleOrgChartView
                                 selectedPole={selectedPole}
                                 orgChartRef={orgChartRef}
                                 isPdfMode={isPdfMode}
-                                isEditMode={isEditMode}
-                                onToggleEditMode={() => setIsEditMode(!isEditMode)}
+                                isEditMode={isEditMode && peutEditerAgents}
+                                onToggleEditMode={
+                                    peutEditerAgents ? () => setIsEditMode(!isEditMode) : undefined
+                                }
                                 highlightedId={highlightedSearch.id}
                                 highlightedPath={highlightedSearch.path}
-                                onDeleteAgent={handleDeleteAgent}
+                                onDeleteAgent={peutSupprimerAgents ? handleDeleteAgent : undefined}
                                 onProfileClick={(agent) => setActiveModal({ type: 'profile', agent })}
                                 onContactClick={(agent) => setActiveModal({ type: 'contact', agent })}
                                 useHybridCard={useHybridCard}
@@ -297,7 +388,12 @@ function AppContent() {
                     agent={activeModal?.agent || null}
                     onClose={() => setActiveModal(null)}
                     onContact={(agent) => setActiveModal({ type: 'contact', agent })}
-                    onLocate={() => setActiveModal(null)}
+                    onLocate={(agent) => {
+                        // Bascule sur le pôle de l'agent, déplie la branche et le
+                        // met en évidence — puis referme la fiche (ORG-001).
+                        locateAgent(agent.id);
+                        setActiveModal(null);
+                    }}
                 />
             )}
             <ContactModal
@@ -306,6 +402,29 @@ function AppContent() {
                 agent={activeModal?.agent || null}
                 isEditMode={isEditMode}
                 onSave={handleUpdateAgent}
+            />
+
+            {/* Instance UNIQUE : handleImportFile est passé à la fois à la
+                Topbar et aux Paramètres ; deux montages donneraient deux
+                modales concurrentes. */}
+            <ImportPreviewModal
+                isOpen={importPreview !== null}
+                fileName={importPreview?.fileName ?? null}
+                preview={importPreview?.preview ?? null}
+                targetLabel={
+                    activeWorkspaceName
+                        ? `Workspace ${activeWorkspaceName}`
+                        : 'Session locale (hors ligne)'
+                }
+                canWrite={peutEditerAgents}
+                mode={importMode}
+                onModeChange={setImportMode}
+                allowInvalid={allowInvalidImport}
+                onAllowInvalidChange={setAllowInvalidImport}
+                isCommitting={isCommittingImport}
+                commitError={importCommitError}
+                onConfirm={() => void confirmImport()}
+                onCancel={cancelImport}
             />
 
             <Suspense fallback={null}>
@@ -364,9 +483,13 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 function App() {
     return (
         <OriginProvider>
-            <AuthGate>
-                <AppContent />
-            </AuthGate>
+            {/* Au-dessus d'AuthGate : l'écran d'authentification doit lui aussi
+                pouvoir signaler ses échecs. */}
+            <FeedbackProvider>
+                <AuthGate>
+                    <AppContent />
+                </AuthGate>
+            </FeedbackProvider>
         </OriginProvider>
     );
 }

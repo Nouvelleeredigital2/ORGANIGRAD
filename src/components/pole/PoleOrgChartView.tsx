@@ -9,10 +9,12 @@ interface PoleOrgChartViewProps {
     orgChartRef: React.RefObject<OrgChartRef | null>;
     isPdfMode: boolean;
     isEditMode: boolean;
-    onToggleEditMode: () => void;
+    /** Absent quand le rôle ne permet pas d'éditer : la bascule n'est pas rendue. */
+    onToggleEditMode?: () => void;
     highlightedId: string | null;
     highlightedPath: Set<string>;
-    onDeleteAgent: (id: string) => void;
+    /** Absent quand le rôle ne permet pas de supprimer. */
+    onDeleteAgent?: (id: string) => void;
     onProfileClick: (agent: Agent) => void;
     onContactClick: (agent: Agent) => void;
     useHybridCard?: boolean;

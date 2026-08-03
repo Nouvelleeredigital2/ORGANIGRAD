@@ -9,7 +9,10 @@ describe('loadEnv (validation des variables d\'environnement)', () => {
     });
 
     it('mode pg avec une connection string postgres valide', () => {
-        const env = loadEnv({ SUPABASE_DB_URL: 'postgresql://u:p@h:5432/db' });
+        // Hôte `localhost` volontaire : un DSN de test ne doit pas ressembler à
+        // une chaîne de connexion réelle, sous peine de faire hurler le contrôle
+        // anti-secrets de la CI pour rien.
+        const env = loadEnv({ SUPABASE_DB_URL: 'postgresql://user:pass@localhost:5432/db' });
         expect(env.mode).toBe('pg');
         expect(env.supabaseDbUrl).toContain('postgresql://');
     });

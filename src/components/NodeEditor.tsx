@@ -39,10 +39,42 @@ function emptyNode(type: NodeType = 'AGENT_IA'): HybridNode {
     };
 }
 
+/**
+ * Champ dont la valeur est chiffrée côté serveur : la SPA n'a pas la clé.
+ *
+ * On n'affiche donc aucun champ de saisie tant que l'utilisateur n'a pas
+ * demandé un remplacement explicite — et tant qu'il ne l'a pas fait, la valeur
+ * n'est pas envoyée au serveur, donc conservée.
+ */
+function EncryptedFieldNotice({ label, onReplace }: { label: string; onReplace: () => void }) {
+    // Volontairement PAS dans un <FormField> : celui-ci enveloppe son contenu
+    // dans un <label>, ce qui absorberait le nom accessible du bouton. Il n'y a
+    // d'ailleurs aucun champ de saisie à étiqueter tant que rien n'est remplacé.
+    return (
+        <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <p className="text-xs font-semibold text-slate-500">
+                    Configuré (chiffré) · la valeur n'est pas lisible depuis le navigateur.
+                </p>
+                <Button tone="slate" variant="soft" size="sm" onClick={onReplace}>
+                    Remplacer
+                </Button>
+            </div>
+        </div>
+    );
+}
+
+/** Champs chiffrables, pour typer l'état de remplacement. */
+type SecretField = 'systemPrompt' | 'mcpConfig' | 'notificationChannels';
+
 export function NodeEditor({ isOpen, node, availableNodes = [], onClose, onSave }: NodeEditorProps) {
     const parentOptions: HybridNode[] = useMemo(() => availableNodes, [availableNodes]);
     const [draft, setDraft] = useState<HybridNode>(() => node ?? emptyNode());
     const [skillsInput, setSkillsInput] = useState<string>((node?.skills ?? []).join(', '));
+    // Champs chiffrés que l'utilisateur a choisi de remplacer. Tant qu'un champ
+    // n'y figure pas, sa valeur n'est pas envoyée et le serveur la conserve.
+    const [replacing, setReplacing] = useState<Partial<Record<SecretField, boolean>>>({});
 
     // Réinitialise le brouillon quand la modale s'ouvre sur un nœud différent —
     // ajustement d'état PENDANT le rendu (pattern React recommandé) plutôt qu'un
@@ -54,6 +86,7 @@ export function NodeEditor({ isOpen, node, availableNodes = [], onClose, onSave 
         if (isOpen) {
             setDraft(node ?? emptyNode());
             setSkillsInput((node?.skills ?? []).join(', '));
+            setReplacing({});
         }
     }
 
@@ -67,6 +100,12 @@ export function NodeEditor({ isOpen, node, availableNodes = [], onClose, onSave 
     const update = <K extends keyof HybridNode>(key: K, value: HybridNode[K]) =>
         setDraft((d) => ({ ...d, [key]: value }));
 
+    /** Champ chiffré côté serveur ET non encore remplacé : on ne le montre pas. */
+    const isSecret = (field: SecretField): boolean =>
+        Boolean(draft.encrypted?.[field]) && !replacing[field];
+
+    const startReplacing = (field: SecretField) => setReplacing((r) => ({ ...r, [field]: true }));
+
     const parseSkills = (raw: string) =>
         raw
             .split(',')
@@ -78,7 +117,20 @@ export function NodeEditor({ isOpen, node, availableNodes = [], onClose, onSave 
     };
 
     const handleSave = () => {
-        const finalNode: HybridNode = { ...draft, skills: parseSkills(skillsInput) };
+        // Un champ remplacé cesse d'être « chiffré non lisible » : on retire son
+        // drapeau pour que la nouvelle valeur soit bien transmise. Les autres
+        // gardent le leur, donc restent omis de la charge — et conservés.
+        const encrypted = { ...(draft.encrypted ?? {}) };
+        (Object.keys(replacing) as SecretField[]).forEach((field) => {
+            if (replacing[field]) delete encrypted[field];
+        });
+        const stillEncrypted = Object.keys(encrypted).length > 0;
+
+        const finalNode: HybridNode = {
+            ...draft,
+            skills: parseSkills(skillsInput),
+            ...(stillEncrypted ? { encrypted } : { encrypted: undefined }),
+        };
         if (!finalNode.nom.trim() || !finalNode.roleTitre.trim()) return;
         // Validation URLs
         const mcpUrl = finalNode.mcpConfig?.serverUrl;
@@ -211,33 +263,59 @@ export function NodeEditor({ isOpen, node, availableNodes = [], onClose, onSave 
                         </FormField>
                     )}
 
-                    {draft.type === 'AGENT_IA' && (
-                        <FormField label="Prompt système" hint="Visible au survol de la carte">
-                            <Textarea
-                                value={draft.systemPrompt ?? ''}
-                                onChange={(e) => update('systemPrompt', e.target.value)}
-                                rows={3}
-                                placeholder="Tu es un expert en…"
+                    {draft.type === 'AGENT_IA' &&
+                        (isSecret('systemPrompt') ? (
+                            <EncryptedFieldNotice
+                                label="Prompt système"
+                                onReplace={() => startReplacing('systemPrompt')}
                             />
-                        </FormField>
-                    )}
-
-                    {draft.type === 'SOFTWARE_MCP' && (
-                        <FormField label="URL du serveur MCP">
-                            <Input
-                                value={draft.mcpConfig?.serverUrl ?? ''}
-                                onChange={(e) =>
-                                    update('mcpConfig', {
-                                        serverUrl: e.target.value,
-                                        connectedTo: draft.mcpConfig?.connectedTo ?? [],
-                                    })
+                        ) : (
+                            <FormField
+                                label="Prompt système"
+                                hint={
+                                    replacing.systemPrompt
+                                        ? 'La valeur saisie remplacera définitivement la précédente'
+                                        : 'Visible au survol de la carte'
                                 }
-                                placeholder="mcp://brand-guard.local"
+                            >
+                                <Textarea
+                                    value={draft.systemPrompt ?? ''}
+                                    onChange={(e) => update('systemPrompt', e.target.value)}
+                                    rows={3}
+                                    placeholder="Tu es un expert en…"
+                                />
+                            </FormField>
+                        ))}
+
+                    {draft.type === 'SOFTWARE_MCP' &&
+                        (isSecret('mcpConfig') ? (
+                            <EncryptedFieldNotice
+                                label="URL du serveur MCP"
+                                onReplace={() => startReplacing('mcpConfig')}
                             />
-                        </FormField>
+                        ) : (
+                            <FormField label="URL du serveur MCP">
+                                <Input
+                                    value={draft.mcpConfig?.serverUrl ?? ''}
+                                    onChange={(e) =>
+                                        update('mcpConfig', {
+                                            serverUrl: e.target.value,
+                                            connectedTo: draft.mcpConfig?.connectedTo ?? [],
+                                        })
+                                    }
+                                    placeholder="mcp://brand-guard.local"
+                                />
+                            </FormField>
+                        ))}
+
+                    {draft.type === 'HUMAN' && isSecret('notificationChannels') && (
+                        <EncryptedFieldNotice
+                            label="Canaux de notification"
+                            onReplace={() => startReplacing('notificationChannels')}
+                        />
                     )}
 
-                    {draft.type === 'HUMAN' && (
+                    {draft.type === 'HUMAN' && !isSecret('notificationChannels') && (
                         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                             <FormField label="Email (HITL)">
                                 <Input

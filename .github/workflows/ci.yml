@@ -23,6 +23,31 @@ jobs:
       - name: npm audit (high+)
         run: npm audit --audit-level=high || true
 
+  # Les 18 specs Playwright existaient depuis des mois sans jamais tourner en
+  # intégration : 8 d'entre elles échouaient silencieusement. Ce job ferme
+  # cette brèche. Il tourne sans Supabase (`--mode test` charge .env.test, qui
+  # vide volontairement les variables) : aucun secret n'est requis.
+  e2e:
+    name: E2E (Playwright · chromium)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - name: Installer chromium
+        run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - name: Rapport en cas d'échec
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
   orchestrator:
     name: Orchestrateur (typecheck · test · build)
     runs-on: ubuntu-latest
@@ -56,6 +81,19 @@ jobs:
             echo "::error::Artefacts de build versionnés"; exit 1; fi
       - name: Aucune valeur secrète évidente
         run: |
-          if git ls-files | grep -vE 'package-lock|\.env\.example' \
-            | xargs grep -lEi 'eyJ[A-Za-z0-9_-]{30,}|postgres(ql)?://[a-z0-9_]+:[^@ ]+@|hooks\.slack\.com/services/T[A-Z0-9]+/B' 2>/dev/null; then
-            echo "::error::Valeur secrète potentielle détectée"; exit 1; fi
+          # Le contrôle liste désormais les LIGNES fautives (et non les fichiers)
+          # afin d'écarter les valeurs qui ne sont pas des secrets : un DSN vers
+          # localhost, un mot de passe entre crochets, un jeton d'exemple dans
+          # un test de masquage. Une règle qui crie au loup finit ignorée — et
+          # celle-ci l'était : elle échouait sur master depuis des semaines.
+          motif='eyJ[A-Za-z0-9_-]{30,}|postgres(ql)?://[a-z0-9_]+:[^@ ]+@|hooks\.slack\.com/services/T[A-Z0-9]+/B'
+          # Domaines réservés (RFC 2606) et marqueurs explicites uniquement :
+          # un simple « example » quelque part dans la ligne ne suffit pas.
+          exceptions='@localhost|@127\.0\.0\.1|:\[[A-Z_]+\]@|/T00/B00/|@example\.(com|org|net)|\.invalid|REDACTED|A_CONSERVER_DANS_LE_COFFRE_FORT'
+          suspects=$(git ls-files | grep -vE 'package-lock|\.env\.example' \
+            | xargs grep -nEi "$motif" 2>/dev/null \
+            | grep -vEi "$exceptions" || true)
+          if [ -n "$suspects" ]; then
+            echo "$suspects"
+            echo "::error::Valeur secrète potentielle détectée"; exit 1
+          fi

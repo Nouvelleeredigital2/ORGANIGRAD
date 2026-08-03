@@ -1,25 +1,35 @@
 /**
- * Service to manage local storage for the application.
- * Phase 1 pivot : Light UI Premium exclusif — toute trace de dark mode est purgée.
+ * Préférences locales de l'application.
+ *
+ * Ne contient plus que l'URL de la source CSV. Les surcharges et suppressions
+ * d'agents vivaient ici sous des clés GLOBALES, non qualifiées par workspace ni
+ * par source : une suppression enregistrée sur un fichier s'appliquait à un
+ * autre dès que les identifiants se recoupaient, faisant disparaître un agent
+ * en silence. Elles sont remplacées par `agentRepo` / `agentStore`, cloisonnés
+ * par workspace et par source.
  */
-import type { Agent } from '../types/agent';
 
 const STORAGE_KEYS = {
     CSV_URL: 'orgchart_csv_url',
-    DELETED_IDS: 'orgchart_deleted_ids',
-    AGENT_OVERRIDES: 'orgchart_agent_overrides',
+    // Clés héritées, purgées au chargement (voir ci-dessous).
+    LEGACY_DELETED_IDS: 'orgchart_deleted_ids',
+    LEGACY_AGENT_OVERRIDES: 'orgchart_agent_overrides',
     LEGACY_DARK_MODE: 'orgchart_dark_mode',
 };
 
-// Nettoyage one-shot de la clé legacy darkMode héritée d'avant le pivot.
+// Nettoyage one-shot des clés héritées. Elles ne sont PAS reprises : leurs
+// identifiants dépendaient de la position des lignes dans le fichier, donc rien
+// ne permet de savoir à quel agent — ni à quelle source — ils se rapportaient.
+// Les rejouer à l'aveugle rejouerait précisément le défaut qu'on supprime.
 try {
     localStorage.removeItem(STORAGE_KEYS.LEGACY_DARK_MODE);
+    localStorage.removeItem(STORAGE_KEYS.LEGACY_DELETED_IDS);
+    localStorage.removeItem(STORAGE_KEYS.LEGACY_AGENT_OVERRIDES);
 } catch {
     /* SSR / sandbox : ignore */
 }
 
 export const storageService = {
-    // CSV URL
     getCsvUrl: (): string => {
         return localStorage.getItem(STORAGE_KEYS.CSV_URL) || '';
     },
@@ -27,29 +37,7 @@ export const storageService = {
         localStorage.setItem(STORAGE_KEYS.CSV_URL, url);
     },
 
-    // Local Edits (Deleted IDs)
-    getDeletedIds: (): string[] => {
-        const data = localStorage.getItem(STORAGE_KEYS.DELETED_IDS);
-        return data ? JSON.parse(data) : [];
-    },
-    setDeletedIds: (ids: string[]): void => {
-        localStorage.setItem(STORAGE_KEYS.DELETED_IDS, JSON.stringify(ids));
-    },
-
-    // Local Edits (Agent Overrides) — legacy RH, conservé jusqu'à migration HybridNode
-    getAgentOverrides: (): Record<string, Partial<Agent>> => {
-        const data = localStorage.getItem(STORAGE_KEYS.AGENT_OVERRIDES);
-        return data ? JSON.parse(data) : {};
-    },
-    setAgentOverrides: (overrides: Record<string, Partial<Agent>>): void => {
-        localStorage.setItem(STORAGE_KEYS.AGENT_OVERRIDES, JSON.stringify(overrides));
-    },
-
-    // Clear all
     clearAll: (): void => {
-        localStorage.removeItem(STORAGE_KEYS.CSV_URL);
-        localStorage.removeItem(STORAGE_KEYS.DELETED_IDS);
-        localStorage.removeItem(STORAGE_KEYS.AGENT_OVERRIDES);
-        localStorage.removeItem(STORAGE_KEYS.LEGACY_DARK_MODE);
-    }
+        Object.values(STORAGE_KEYS).forEach((key) => localStorage.removeItem(key));
+    },
 };

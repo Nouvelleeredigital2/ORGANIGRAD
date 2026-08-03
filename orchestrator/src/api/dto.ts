@@ -4,6 +4,16 @@ import type { HybridNode, McpConfig, NotificationChannels, NodeType } from '../d
  * Corps d'une requête de création/mise à jour de nœud.
  * Valeurs inconnues ignorées ; les secrets sont acceptés en clair côté client
  * (le serveur les chiffre avant stockage).
+ *
+ * SÉMANTIQUE DES CHAMPS SENSIBLES (systemPrompt, mcpConfig,
+ * notificationChannels) :
+ *   - propriété ABSENTE  → `undefined` → CONSERVER la valeur existante
+ *   - propriété à `null` → EFFACER explicitement
+ *
+ * Cette distinction est indispensable : la SPA ne peut pas lire un champ
+ * chiffré (elle n'a pas la clé). Sans elle, tout enregistrement depuis
+ * l'éditeur de nœud écrasait le secret par null — y compris quand
+ * l'utilisateur n'avait pas touché au champ.
  */
 export interface NodeMutationBody {
     id: string;
@@ -12,10 +22,10 @@ export interface NodeMutationBody {
     roleTitre: string;
     parentID?: string | null;
     gradeId: string;
-    systemPrompt?: string | null;
+    systemPrompt?: string | null | undefined;
     skills?: string[];
-    mcpConfig?: McpConfig | null;
-    notificationChannels?: NotificationChannels | null;
+    mcpConfig?: McpConfig | null | undefined;
+    notificationChannels?: NotificationChannels | null | undefined;
     avatarUrl?: string | null;
 }
 
@@ -61,10 +71,16 @@ export function validateNodeMutation(raw: unknown): NodeMutationBody {
         roleTitre: b['roleTitre'] as string,
         parentID: typeof b['parentID'] === 'string' ? b['parentID'] : null,
         gradeId: b['gradeId'] as string,
-        systemPrompt: typeof b['systemPrompt'] === 'string' ? b['systemPrompt'] : null,
+        // Champs sensibles : absent ⇒ undefined (conserver). Présent mais
+        // malformé ⇒ null (effacer), comportement historique conservé.
+        systemPrompt: 'systemPrompt' in b
+            ? (typeof b['systemPrompt'] === 'string' ? b['systemPrompt'] : null)
+            : undefined,
         skills: Array.isArray(b['skills']) ? (b['skills'] as string[]).filter((s) => typeof s === 'string') : [],
-        mcpConfig: isMcpConfig(b['mcpConfig']) ? b['mcpConfig'] : null,
-        notificationChannels: isNotifChannels(b['notificationChannels']) ? b['notificationChannels'] : null,
+        mcpConfig: 'mcpConfig' in b ? (isMcpConfig(b['mcpConfig']) ? b['mcpConfig'] : null) : undefined,
+        notificationChannels: 'notificationChannels' in b
+            ? (isNotifChannels(b['notificationChannels']) ? b['notificationChannels'] : null)
+            : undefined,
         avatarUrl: typeof b['avatarUrl'] === 'string' ? b['avatarUrl'] : null,
     };
 }

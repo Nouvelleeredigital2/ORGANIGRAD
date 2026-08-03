@@ -21,15 +21,33 @@ const getRowValue = (row: Record<string, unknown>, candidates: string[]): string
     return '';
 };
 
-const buildImportedAgentId = (index: number, pole: string, service: string, nom: string, prenom: string): string => {
-    const slug = `${pole}-${service}-${nom}-${prenom}`
+/**
+ * Clé métier stable d'un agent, indépendante de sa position dans le fichier.
+ *
+ * Même définition que la déduplication de `previewImport` (nom|prénom|fonction) :
+ * les « doublons » annoncés à l'utilisateur sont donc exactement les collisions
+ * d'identité, sans écart entre ce qui est annoncé et ce qui est appliqué.
+ */
+export const buildExternalKey = (parts: { nom: string; prenom: string; fonction: string }): string =>
+    `${parts.nom.trim().toLowerCase()}|${parts.prenom.trim().toLowerCase()}|${parts.fonction.trim().toLowerCase()}`;
+
+/**
+ * Identifiant d'un agent importé.
+ *
+ * Il ne doit PAS dépendre de l'index de ligne : insérer une ligne en tête
+ * décalait tous les identifiants suivants, si bien qu'une modification ou une
+ * suppression enregistrée localement se réappliquait à un autre agent lors
+ * d'un import ultérieur.
+ */
+const buildImportedAgentId = (nom: string, prenom: string, fonction: string): string => {
+    const slug = buildExternalKey({ nom, prenom, fonction })
         .normalize('NFD')
         .replace(/\p{Diacritic}/gu, '')
         .replace(/[^a-zA-Z0-9]+/g, '-')
         .replace(/^-+|-+$/g, '')
         .toLowerCase();
 
-    return `import-${index}-${slug || 'agent'}`;
+    return `import:${slug || 'agent'}`;
 };
 
 export const deriveGradeStyleFromImportedRow = ({
@@ -80,7 +98,11 @@ export const deriveGradeStyleFromImportedRow = ({
     return 'Agent';
 };
 
-export const mapImportedRowToAgent = (row: Record<string, unknown>, index: number): Agent => {
+/**
+ * L'index de ligne n'entre plus dans l'identité de l'agent : il reste géré par
+ * l'appelant, uniquement pour situer une ligne dans le rapport d'import.
+ */
+export const mapImportedRowToAgent = (row: Record<string, unknown>): Agent => {
     const pole = getRowValue(row, ['Pôle / Direction', 'Pole / Direction', 'pole']);
     const service = getRowValue(row, ['Service / Secteur', 'Service', 'service']);
     const nom = getRowValue(row, ['Nom', 'nom']);
@@ -92,7 +114,7 @@ export const mapImportedRowToAgent = (row: Record<string, unknown>, index: numbe
     const typeTemps = getRowValue(row, ['Temps', 'temps']) || 'Complet';
 
     return {
-        id: buildImportedAgentId(index, pole, service, nom, prenom),
+        id: buildImportedAgentId(nom, prenom, fonction),
         nom,
         prenom,
         fonction,

@@ -279,12 +279,21 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
             const store = storeFor(req.workspaceId!, req.apiKeyId, req.userId);
             // Préserve le statut actuel (les mutations structurelles ne changent pas le statut).
             const existing = await store.get(req.params.id);
+            // Champs sensibles : propriété absente ⇒ on reprend la valeur
+            // existante (déjà déchiffrée par le store), elle sera rechiffrée
+            // à l'écriture. `null` explicite ⇒ effacement demandé.
+            // Sans cela, un client qui ne peut pas lire un secret chiffré
+            // l'effacerait à chaque enregistrement.
             const updatePayload = {
                 ...body,
                 parentID: body.parentID ?? null,
-                systemPrompt: body.systemPrompt ?? undefined,
-                mcpConfig: body.mcpConfig ?? undefined,
-                notificationChannels: body.notificationChannels ?? undefined,
+                systemPrompt:
+                    body.systemPrompt === undefined ? existing.systemPrompt : (body.systemPrompt ?? undefined),
+                mcpConfig: body.mcpConfig === undefined ? existing.mcpConfig : (body.mcpConfig ?? undefined),
+                notificationChannels:
+                    body.notificationChannels === undefined
+                        ? existing.notificationChannels
+                        : (body.notificationChannels ?? undefined),
                 avatarUrl: body.avatarUrl ?? undefined,
                 status: existing.status,
             };
