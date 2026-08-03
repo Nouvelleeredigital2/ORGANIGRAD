@@ -58,9 +58,9 @@ export type Database = {
             };
             /**
              * Fiches RH de l'organigramme (migration 20260803120000_org_agents).
-             * Saisi à la main : le projet Supabase était hiberné au moment de
-             * l'écriture, `generate_typescript_types` était donc indisponible.
-             * À REGÉNÉRER une fois la migration appliquée.
+             * Migration appliquée en production le 2026-08-03 ; ce bloc a été
+             * confronté à `generate_typescript_types` — colonnes, nullabilité et
+             * valeurs par défaut concordent.
              */
             org_agents: {
                 Row: {
