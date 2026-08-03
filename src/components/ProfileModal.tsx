@@ -2,6 +2,7 @@ import React from 'react';
 import { BaseModal } from './BaseModal';
 import type { Agent } from '../types/agent';
 import { User, Building, MapPin, Clock, Award, CheckCircle2, Mail, Phone } from 'lucide-react';
+import { useFeedback } from '../feedback/FeedbackContext';
 
 interface ProfileModalProps {
     isOpen: boolean;
@@ -12,6 +13,7 @@ interface ProfileModalProps {
 }
 
 export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose, agent, isEditMode = false, onSave }) => {
+    const feedback = useFeedback();
     const [formData, setFormData] = React.useState<Partial<Agent>>({});
     const fileInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -38,6 +40,10 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose, age
             return;
         }
         onSave(agent.id, formData);
+        // La sauvegarde est locale a cette session tant que les donnees RH ne
+        // sont pas persistees cote serveur : on le dit plutot que de fermer
+        // en silence et laisser un doute.
+        feedback.success(`Fiche mise a jour · ${agent.prenom} ${agent.nom}.`);
         onClose();
     };
 

@@ -19,6 +19,24 @@ const TYPE_FILTERS: Array<{ key: NodeType | 'ALL'; label: string }> = [
     { key: 'SOFTWARE_MCP', label: '⚙️ MCP' },
 ];
 
+/** Libellés français des types et statuts, pour que la recherche les trouve. */
+const TYPE_LABELS: Record<HybridNode['type'], string> = {
+    HUMAN: 'humain',
+    AGENT_IA: 'ia agent intelligence',
+    SOFTWARE_MCP: 'mcp logiciel serveur',
+};
+
+const STATUS_LABELS: Record<string, string> = {
+    IDLE: 'repos inactif',
+    EXECUTING: 'execution en cours',
+    CONTROL_PENDING_IA: 'controle verification',
+    WAITING_HUMAN_APPROVAL: 'attente validation approbation',
+    ERROR: 'erreur echec',
+};
+
+/** Nombre de résultats affichés — au-delà, on annonce le reste. */
+const MAX_RESULTS = 8;
+
 function score(node: HybridNode, q: string): number {
     if (!q) return 1;
     const lc = q.toLowerCase();
@@ -26,6 +44,10 @@ function score(node: HybridNode, q: string): number {
     if (node.nom.toLowerCase().includes(lc)) s += 5;
     if (node.roleTitre.toLowerCase().includes(lc)) s += 3;
     if (node.skills?.some((sk) => sk.toLowerCase().includes(lc))) s += 4;
+    // La doc du composant annonce l'indexation du type et du statut ; elle
+    // n'existait pas : chercher « humain » ou « erreur » ne donnait rien.
+    if (TYPE_LABELS[node.type].includes(lc)) s += 2;
+    if ((STATUS_LABELS[node.status] ?? '').includes(lc)) s += 2;
     if (node.id.toLowerCase().includes(lc)) s += 1;
     return s;
 }
@@ -34,14 +56,16 @@ export function HybridSpotlight({ nodes, onSelect, placeholder = 'Rechercher un 
     const [query, setQuery] = useState('');
     const [filter, setFilter] = useState<NodeType | 'ALL'>('ALL');
 
-    const results = useMemo(() => {
+    const { results, hidden } = useMemo(() => {
         const filtered = filter === 'ALL' ? nodes : nodes.filter((n) => n.type === filter);
         const ranked = filtered
             .map((n) => ({ n, s: score(n, query) }))
             .filter(({ s }) => s > 0)
-            .sort((a, b) => b.s - a.s)
-            .slice(0, 8);
-        return ranked.map(({ n }) => n);
+            .sort((a, b) => b.s - a.s);
+        return {
+            results: ranked.slice(0, MAX_RESULTS).map(({ n }) => n),
+            hidden: Math.max(0, ranked.length - MAX_RESULTS),
+        };
     }, [nodes, query, filter]);
 
     return (
@@ -110,6 +134,13 @@ export function HybridSpotlight({ nodes, onSelect, placeholder = 'Rechercher un 
                                 </button>
                             </li>
                         ))
+                    )}
+                    {/* Sans cette ligne, une recherche large tronquée à 8 laissait
+                        conclure qu'une personne n'existe pas. */}
+                    {hidden > 0 && (
+                        <li className="px-4 py-2 text-xs text-slate-400">
+                            + {hidden} autre{hidden > 1 ? 's' : ''} — affine ta recherche.
+                        </li>
                     )}
                 </ul>
             )}

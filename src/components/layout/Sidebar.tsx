@@ -5,6 +5,7 @@ import type { CsvSourceInfo } from '../../utils/csvSource';
 import type { PoleDirectoryEntry } from '../../utils/poleDirectory';
 import { useWorkspaceContext } from '../../contexts/WorkspaceContext';
 import { supabase } from '../../lib/supabase';
+import { useFeedback } from '../../feedback/FeedbackContext';
 
 /**
  * Sidebar — Apple-style refinement.
@@ -38,6 +39,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
     const [mobileOpen, setMobileOpen] = useState(false);
     const [wsDropdownOpen, setWsDropdownOpen] = useState(false);
+    const [signingOut, setSigningOut] = useState(false);
+    const feedback = useFeedback();
+
+    /**
+     * La déconnexion n'était ni attendue ni catchée : en cas d'échec,
+     * l'utilisateur restait connecté sans le moindre message.
+     */
+    const handleSignOut = async () => {
+        if (!supabase) return;
+        setSigningOut(true);
+        const { error } = await supabase.auth.signOut();
+        setSigningOut(false);
+        if (error) feedback.error(`Déconnexion échouée : ${error.message}`);
+    };
     const ws = useWorkspaceContext();
 
     // Ferme le menu mobile lors d'une navigation — ajustement pendant le rendu
@@ -174,12 +189,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             ))}
                             <div className="my-1 h-px" style={{ background: 'var(--hairline)' }} />
                             <button
-                                onClick={() => supabase?.auth.signOut()}
+                                disabled={signingOut}
+                                onClick={() => void handleSignOut()}
                                 className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] transition hover:bg-white"
                                 style={{ color: 'var(--system-red)' }}
                             >
                                 <LogOut size={13} strokeWidth={1.6} />
-                                Se déconnecter
+                                {signingOut ? 'Déconnexion…' : 'Se déconnecter'}
                             </button>
                         </div>
                     )}

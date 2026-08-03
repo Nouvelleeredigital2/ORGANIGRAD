@@ -23,6 +23,31 @@ jobs:
       - name: npm audit (high+)
         run: npm audit --audit-level=high || true
 
+  # Les 18 specs Playwright existaient depuis des mois sans jamais tourner en
+  # intégration : 8 d'entre elles échouaient silencieusement. Ce job ferme
+  # cette brèche. Il tourne sans Supabase (`--mode test` charge .env.test, qui
+  # vide volontairement les variables) : aucun secret n'est requis.
+  e2e:
+    name: E2E (Playwright · chromium)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - name: Installer chromium
+        run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - name: Rapport en cas d'échec
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
   orchestrator:
     name: Orchestrateur (typecheck · test · build)
     runs-on: ubuntu-latest
