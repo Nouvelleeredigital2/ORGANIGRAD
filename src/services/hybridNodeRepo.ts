@@ -8,19 +8,20 @@ import type {
 } from '../types/hybridNode';
 import type { Database } from '../types/supabase';
 import { hybridNodeStore } from './hybridNodeStore';
-import type { OrchestratorClient } from './orchestratorService';
+import type { NodeMutationPayload, OrchestratorClient } from './orchestratorService';
 
 /**
- * Sentinelle renvoyée quand un champ est chiffré côté serveur — la SPA
- * ne peut pas le déchiffrer (pas de clé). L'UI doit afficher un indicateur
- * "Configuré (chiffré)" et permettre une mise à jour sans montrer la valeur.
+ * Préfixe posé par l'orchestrateur sur une valeur chiffrée au repos.
+ *
+ * Détail interne du mapping : un champ chiffré n'est PAS transformé en valeur
+ * factice, il est laissé `undefined` et signalé par `node.encrypted`. Faire
+ * circuler une sentinelle jusqu'à l'interface avait une conséquence grave :
+ * l'éditeur l'affichait comme une valeur ordinaire puis la réécrivait en base,
+ * détruisant le secret.
  */
-export const ENCRYPTED_PLACEHOLDER = '__encrypted__' as const;
+const ENCRYPTED_PREFIX = 'enc:v1:';
 
-function maskEncryptedField<T>(v: T | string | null | undefined): T | typeof ENCRYPTED_PLACEHOLDER | null | undefined {
-    if (typeof v === 'string' && v.startsWith('enc:v1:')) return ENCRYPTED_PLACEHOLDER;
-    return v as T | null | undefined;
-}
+const isEncrypted = (v: unknown): boolean => typeof v === 'string' && v.startsWith(ENCRYPTED_PREFIX);
 
 type Row = Database['public']['Tables']['hybrid_nodes']['Row'];
 type Insert = Database['public']['Tables']['hybrid_nodes']['Insert'];
@@ -33,19 +34,22 @@ type Insert = Database['public']['Tables']['hybrid_nodes']['Insert'];
  * vers NodeStatus dans les bornes du type union.
  */
 
-function rowToNode(row: Row): HybridNode {
-    // Champs potentiellement chiffrés par l'orchestrateur : si la valeur commence
-    // par `enc:v1:`, on la remplace par la sentinelle — la SPA n'a pas la clé.
-    const rawPrompt = row.system_prompt ?? undefined;
-    const systemPrompt = rawPrompt !== undefined ? (maskEncryptedField(rawPrompt) ?? undefined) : undefined;
+/** Exporté pour les tests : c'est ici que se joue la survie des secrets. */
+export function rowToNode(row: Row): HybridNode {
+    // Un champ chiffré est signalé, jamais matérialisé : la valeur reste
+    // `undefined` pour qu'aucun code d'interface ne puisse la réécrire.
+    const promptEncrypted = isEncrypted(row.system_prompt);
+    const mcpEncrypted = isEncrypted(row.mcp_config);
+    const notifEncrypted = isEncrypted(row.notification_channels);
 
-    const rawMcp = (row.mcp_config as McpConfig | null) ?? undefined;
-    const mcpRaw = rawMcp !== undefined ? maskEncryptedField(rawMcp) : undefined;
-    const mcpConfig = mcpRaw === ENCRYPTED_PLACEHOLDER ? undefined : (mcpRaw as McpConfig | undefined);
-
-    const rawNotif = (row.notification_channels as NotificationChannels | null) ?? undefined;
-    const notifRaw = rawNotif !== undefined ? maskEncryptedField(rawNotif) : undefined;
-    const notificationChannels = notifRaw === ENCRYPTED_PLACEHOLDER ? undefined : (notifRaw as NotificationChannels | undefined);
+    const encrypted: HybridNode['encrypted'] =
+        promptEncrypted || mcpEncrypted || notifEncrypted
+            ? {
+                  ...(promptEncrypted ? { systemPrompt: true } : {}),
+                  ...(mcpEncrypted ? { mcpConfig: true } : {}),
+                  ...(notifEncrypted ? { notificationChannels: true } : {}),
+              }
+            : undefined;
 
     return {
         id: row.id,
@@ -54,17 +58,27 @@ function rowToNode(row: Row): HybridNode {
         roleTitre: row.role_titre,
         parentID: row.parent_id,
         gradeId: row.grade_id,
-        systemPrompt: systemPrompt === ENCRYPTED_PLACEHOLDER ? ENCRYPTED_PLACEHOLDER : systemPrompt,
+        systemPrompt: promptEncrypted ? undefined : (row.system_prompt ?? undefined),
         skills: row.skills,
-        mcpConfig,
-        notificationChannels,
+        mcpConfig: mcpEncrypted ? undefined : ((row.mcp_config as McpConfig | null) ?? undefined),
+        notificationChannels: notifEncrypted
+            ? undefined
+            : ((row.notification_channels as NotificationChannels | null) ?? undefined),
         avatarUrl: row.avatar_url ?? undefined,
         status: row.status as NodeStatus,
+        ...(encrypted ? { encrypted } : {}),
     };
 }
 
-function nodeToInsert(node: HybridNode, workspaceId: string): Insert {
-    return {
+/**
+ * Construit la charge d'écriture Supabase.
+ *
+ * OMISSION = CONSERVATION : une colonne absente de la charge n'est pas touchée
+ * par l'`upsert` PostgREST sur une ligne existante. C'est ainsi qu'un champ
+ * chiffré non remplacé survit à un enregistrement.
+ */
+export function nodeToInsert(node: HybridNode, workspaceId: string): Insert {
+    const base: Insert = {
         id: node.id,
         workspace_id: workspaceId,
         type: node.type,
@@ -72,13 +86,23 @@ function nodeToInsert(node: HybridNode, workspaceId: string): Insert {
         role_titre: node.roleTitre,
         parent_id: node.parentID,
         grade_id: node.gradeId,
-        system_prompt: node.systemPrompt ?? null,
         skills: node.skills ?? [],
-        mcp_config: (node.mcpConfig ?? null) as import('../types/supabase').Json | null,
-        notification_channels: (node.notificationChannels ?? null) as import('../types/supabase').Json | null,
         avatar_url: node.avatarUrl ?? null,
         status: node.status,
     };
+
+    if (!node.encrypted?.systemPrompt) {
+        base.system_prompt = node.systemPrompt ?? null;
+    }
+    if (!node.encrypted?.mcpConfig) {
+        base.mcp_config = (node.mcpConfig ?? null) as import('../types/supabase').Json | null;
+    }
+    if (!node.encrypted?.notificationChannels) {
+        base.notification_channels = (node.notificationChannels ??
+            null) as import('../types/supabase').Json | null;
+    }
+
+    return base;
 }
 
 export interface RepoContext {
@@ -133,22 +157,29 @@ export const hybridNodeRepo = {
     async upsert(node: HybridNode, ctx: RepoContext): Promise<HybridNode> {
         // Chemin orchestrateur : chiffrement côté serveur (audit #1).
         if (ctx.orchestratorClient && ctx.workspaceId) {
-            const dto = await ctx.orchestratorClient.upsertNode(
-                {
-                    id: node.id,
-                    type: node.type,
-                    nom: node.nom,
-                    roleTitre: node.roleTitre,
-                    parentID: node.parentID,
-                    gradeId: node.gradeId,
-                    systemPrompt: node.systemPrompt !== ENCRYPTED_PLACEHOLDER ? (node.systemPrompt ?? null) : null,
-                    skills: node.skills,
-                    mcpConfig: node.mcpConfig ?? null,
-                    notificationChannels: node.notificationChannels ?? null,
-                    avatarUrl: node.avatarUrl ?? null,
-                },
-                ctx.workspaceId,
-            );
+            // Même règle que côté Supabase : une propriété omise est conservée
+            // par le serveur (cf. validateNodeMutation), un `null` efface.
+            const payload: NodeMutationPayload = {
+                id: node.id,
+                type: node.type,
+                nom: node.nom,
+                roleTitre: node.roleTitre,
+                parentID: node.parentID,
+                gradeId: node.gradeId,
+                skills: node.skills,
+                avatarUrl: node.avatarUrl ?? null,
+            };
+            if (!node.encrypted?.systemPrompt) {
+                payload.systemPrompt = node.systemPrompt ?? null;
+            }
+            if (!node.encrypted?.mcpConfig) {
+                payload.mcpConfig = node.mcpConfig ?? null;
+            }
+            if (!node.encrypted?.notificationChannels) {
+                payload.notificationChannels = node.notificationChannels ?? null;
+            }
+
+            const dto = await ctx.orchestratorClient.upsertNode(payload, ctx.workspaceId);
             // Le DTO retourné n'a pas les secrets (indicateurs seulement) — on
             // reconstitue un HybridNode minimal pour la mise à jour du cache local.
             const merged: HybridNode = {

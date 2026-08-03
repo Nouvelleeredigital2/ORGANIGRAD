@@ -56,14 +56,21 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
     // et on observe les statuts via SSE plutôt que de simuler localement.
     const bridge = useOrchestratorBridge();
 
-    // Charge depuis Supabase quand on a un workspace + souscrit aux changements live
-    useEffect(() => {
-        let cancelled = false;
-        // Cloisonnement : on repart IMMÉDIATEMENT du cache namespacé de CE
-        // workspace (jamais celui d'un workspace précédent), puis on rafraîchit.
+    // Cloisonnement : au changement de workspace, on repart IMMÉDIATEMENT du
+    // cache namespacé de CE workspace (jamais celui du précédent). Ajustement
+    // d'état PENDANT le rendu — même motif que NodeEditor — plutôt qu'un
+    // setState synchrone dans un effet.
+    const [syncedWorkspaceId, setSyncedWorkspaceId] = useState(workspaceId);
+    if (syncedWorkspaceId !== workspaceId) {
+        setSyncedWorkspaceId(workspaceId);
         setHybridSource(hybridNodeStore.list(workspaceId));
         setStatuses({});
         setDataState('loading');
+    }
+
+    // Charge depuis Supabase quand on a un workspace + souscrit aux changements live
+    useEffect(() => {
+        let cancelled = false;
         void hybridNodeRepo.list({ workspaceId }).then((res) => {
             if (cancelled) return;
             setHybridSource(res.nodes);
@@ -251,7 +258,13 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
     const handleSaveNode = async (node: HybridNode) => {
         const exists = hybridSource.some((n) => n.id === node.id);
         try {
-            const saved = await hybridNodeRepo.upsert(node, { workspaceId });
+            // `orchestratorClient` route l'écriture via l'orchestrateur, qui
+            // chiffre les secrets avant stockage. Sans lui, la SPA écrivait
+            // directement dans Supabase — prompts et webhooks en clair.
+            const saved = await hybridNodeRepo.upsert(node, {
+                workspaceId,
+                orchestratorClient: bridge.client,
+            });
             // Optimistic local update — realtime fera le merge si workspace branché
             setHybridSource((prev) => {
                 const idx = prev.findIndex((n) => n.id === saved.id);
@@ -263,12 +276,14 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
                 nodeName: saved.nom,
                 message: exists ? 'Nœud mis à jour' : 'Nœud créé',
             });
+            setSaveError(null);
+            setEditorOpen(false);
+            setEditorNode(null);
         } catch (err) {
             console.error('[OrchestrationView] save failed', err);
             setSaveError(err instanceof Error ? err.message : 'Erreur lors de la sauvegarde');
-        } finally {
-            setEditorOpen(false);
-            setEditorNode(null);
+            // L'éditeur RESTE ouvert : le refermer ferait perdre la saisie et
+            // laisserait croire que l'enregistrement a abouti.
         }
     };
 

@@ -14,7 +14,6 @@ describe('mapImportedRowToAgent', () => {
                 Statut: 'T',
                 NBI: '25 pts',
             },
-            12,
         );
 
         expect(agent.pole).toBe('RESSOURCES HUMAINES');
@@ -25,7 +24,36 @@ describe('mapImportedRowToAgent', () => {
         expect(agent.titre).toBe('Adj admin pal 1 cl');
         expect(agent.nbi).toBe('25 pts');
         expect(agent.gradeStyle).toBe('Responsable');
-        expect(agent.id).toContain('import-12');
+        expect(agent.id).toBe('import:segonds-nathalie-responsable');
+    });
+
+    /**
+     * Risque couvert : l'identifiant dépendait de l'index de ligne. Insérer une
+     * ligne en tête décalait tous les suivants, si bien qu'une modification ou
+     * une suppression enregistrée localement se réappliquait à un AUTRE agent
+     * lors d'un import ultérieur — un agent pouvait disparaître en silence.
+     */
+    it('produit le même identifiant quelle que soit la position de la ligne', () => {
+        const ligne = {
+            'Pôle / Direction': 'TECHNIQUE',
+            'Service / Secteur': 'Voirie',
+            Nom: 'DUPONT',
+            'Prénom': 'Jean',
+            'Poste / Fonction': 'Agent',
+        };
+
+        const premier = mapImportedRowToAgent(ligne);
+        const dernier = mapImportedRowToAgent({ ...ligne });
+
+        expect(premier.id).toBe(dernier.id);
+        expect(premier.id).not.toMatch(/\d/);
+    });
+
+    it('distingue deux homonymes de fonctions différentes', () => {
+        const a = mapImportedRowToAgent({ Nom: 'MARTIN', 'Prénom': 'Claude', 'Poste / Fonction': 'Agent' });
+        const b = mapImportedRowToAgent({ Nom: 'MARTIN', 'Prénom': 'Claude', 'Poste / Fonction': 'Responsable' });
+
+        expect(a.id).not.toBe(b.id);
     });
 });
 

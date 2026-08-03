@@ -40,7 +40,7 @@ const parseCsvRows = (buffer: ArrayBuffer): Promise<Agent[]> => {
                     const data = results.data;
                     assertDimensions(data.length, results.meta.fields?.length ?? 0);
                     assertCellLengths(data);
-                    resolve(data.map((row, index) => mapImportedRowToAgent(row, index)));
+                    resolve(data.map((row) => mapImportedRowToAgent(row)));
                 } catch (err) {
                     reject(err);
                 }
@@ -88,7 +88,7 @@ const parseWorkbookRows = async (buffer: ArrayBuffer): Promise<Agent[]> => {
     const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' });
     assertDimensions(rows.length, 0);
     assertCellLengths(rows);
-    return rows.map((row, index) => mapImportedRowToAgent(row, index));
+    return rows.map((row) => mapImportedRowToAgent(row));
 };
 
 /** Parse un fichier → agents mappés non filtrés (CSV ou XLSX selon l'extension). */

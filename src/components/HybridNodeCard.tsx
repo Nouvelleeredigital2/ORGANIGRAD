@@ -220,6 +220,20 @@ export default function HybridNodeCard({
                 <StatusBadge status={node.status} />
             </div>
 
+            {/* Un champ chiffré a une valeur `undefined` côté SPA : sans cet
+                indicateur, la carte laisserait croire qu'il n'est pas configuré. */}
+            {node.type === 'AGENT_IA' && node.encrypted?.systemPrompt && (
+                <div
+                    className="mt-3 rounded-[10px] p-2.5 text-[12px] leading-snug"
+                    style={{ background: 'var(--bg-secondary)', color: 'var(--fg-3)' }}
+                >
+                    <span className="font-semibold" style={{ color: 'var(--fg-1)' }}>
+                        Prompt ·{' '}
+                    </span>
+                    configuré (chiffré)
+                </div>
+            )}
+
             {node.type === 'AGENT_IA' && node.systemPrompt && (
                 <div
                     className="mt-3 max-h-16 overflow-hidden rounded-[10px] p-2.5 text-[12px] leading-snug"
@@ -229,6 +243,18 @@ export default function HybridNodeCard({
                         Prompt ·{' '}
                     </span>
                     <span className="line-clamp-2">{node.systemPrompt}</span>
+                </div>
+            )}
+
+            {node.type === 'SOFTWARE_MCP' && node.encrypted?.mcpConfig && (
+                <div
+                    className="mt-3 rounded-[10px] p-2.5 text-[12px]"
+                    style={{ background: 'var(--bg-secondary)', color: 'var(--fg-3)' }}
+                >
+                    <span className="font-semibold" style={{ color: 'var(--fg-1)' }}>
+                        MCP ·{' '}
+                    </span>
+                    configuré (chiffré)
                 </div>
             )}
 
