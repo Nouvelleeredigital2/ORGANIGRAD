@@ -1,5 +1,5 @@
 import { useState, useRef, lazy, Suspense } from 'react';
-import { AlertCircle, RefreshCw, MapPin, Settings, X } from 'lucide-react';
+import { AlertCircle, RefreshCw, MapPin, Settings } from 'lucide-react';
 import { useOrgChartController } from './hooks/useOrgChartController';
 import { SpotlightSearch } from './components/spotlight/SpotlightSearch';
 import { ProfileModal } from './components/ProfileModal';
@@ -43,23 +43,15 @@ import { useSession } from './hooks/useSession';
 import { AuthScreen } from './components/auth/AuthScreen';
 import { WorkspaceProvider } from './contexts/WorkspaceProvider';
 import { isSupabaseConfigured } from './lib/supabase';
-
-/**
- * Résultat observable d'un export (PDF simple ou par lots).
- *
- * Un export ne doit jamais se conclure en « succès » silencieux : chaque échec
- * remonte ici et reste affiché jusqu'à ce que l'utilisateur le referme.
- */
-type ExportFeedback = {
-    tone: 'success' | 'warning' | 'error';
-    message: string;
-} | null;
-
-const describeError = (err: unknown): string =>
-    err instanceof Error ? err.message : String(err);
+import { useFeedback } from './feedback/FeedbackContext';
+import { FeedbackProvider } from './feedback/FeedbackProvider';
+import { describeError } from './utils/asyncGuard';
 
 function AppContent() {
     const { setFilamentState } = useOrigin();
+    // Canal de retour unifié : un export ne se conclut jamais en « succès »
+    // silencieux, chaque échec reste affiché jusqu'à lecture.
+    const feedback = useFeedback();
     const {
         loading,
         error,
@@ -96,7 +88,6 @@ function AppContent() {
     const [printPreviewOpen, setPrintPreviewOpen] = useState(false);
     const [useHybridCard, setUseHybridCard] = useState(false);
     const [activeModal, setActiveModal] = useState<{ type: 'profile' | 'contact'; agent: Agent } | null>(null);
-    const [exportFeedback, setExportFeedback] = useState<ExportFeedback>(null);
     const orgChartRef = useRef<OrgChartRef>(null);
 
     /**
@@ -111,7 +102,6 @@ function AppContent() {
         setPrintPreviewOpen(false);
         setIsExporting(true);
         setIsPdfMode(true);
-        setExportFeedback(null);
         setFilamentState('loading');
 
         await new Promise((resolve) => setTimeout(resolve, 800));
@@ -132,16 +122,12 @@ function AppContent() {
 
         // Le succès n'est affiché que si l'export a réellement abouti (ORG-003).
         if (failure) {
-            setExportFeedback({
-                tone: 'error',
-                message: `Export PDF échoué${poleLabel ? ` — ${poleLabel}` : ''} : ${describeError(failure)}. Aucun fichier n'a été téléchargé.`,
-            });
+            feedback.error(
+                `Export PDF échoué${poleLabel ? ` — ${poleLabel}` : ''} : ${describeError(failure)}. Aucun fichier n'a été téléchargé.`,
+            );
             setFilamentState('error');
         } else {
-            setExportFeedback({
-                tone: 'success',
-                message: `Export PDF terminé${poleLabel ? ` — ${poleLabel}` : ''}.`,
-            });
+            feedback.success(`Export PDF terminé${poleLabel ? ` — ${poleLabel}` : ''}.`);
             setFilamentState('success');
         }
 
@@ -154,7 +140,6 @@ function AppContent() {
         const previousPoleKey = selectedPoleKey;
         setIsExporting(true);
         setIsPdfMode(true);
-        setExportFeedback(null);
         setFilamentState('loading');
         setActiveView('orgchart');
 
@@ -186,22 +171,17 @@ function AppContent() {
         const exported = total - failedPoles.length;
 
         if (failedPoles.length === 0) {
-            setExportFeedback({
-                tone: 'success',
-                message: `Export par lots terminé : ${total} pôle${total > 1 ? 's' : ''} exporté${total > 1 ? 's' : ''}.`,
-            });
+            feedback.success(
+                `Export par lots terminé : ${total} pôle${total > 1 ? 's' : ''} exporté${total > 1 ? 's' : ''}.`,
+            );
             setFilamentState('success');
         } else if (exported === 0) {
-            setExportFeedback({
-                tone: 'error',
-                message: `Export par lots échoué : aucun des ${total} pôles n'a été exporté.`,
-            });
+            feedback.error(`Export par lots échoué : aucun des ${total} pôles n'a été exporté.`);
             setFilamentState('error');
         } else {
-            setExportFeedback({
-                tone: 'warning',
-                message: `Export par lots incomplet : ${exported}/${total} pôles exportés. Échecs : ${failedPoles.join(', ')}.`,
-            });
+            feedback.warning(
+                `Export par lots incomplet : ${exported}/${total} pôles exportés. Échecs : ${failedPoles.join(', ')}.`,
+            );
             setFilamentState('warning');
         }
 
@@ -372,31 +352,6 @@ function AppContent() {
                 )}
             </AppShell>
 
-            {/* Bilan d'export — rendu hors de #exportable-org-chart pour ne jamais
-                se retrouver capturé dans le PDF suivant. */}
-            {exportFeedback && (
-                <div
-                    role="status"
-                    className={`fixed bottom-6 left-1/2 z-[60] -translate-x-1/2 flex items-start gap-3 max-w-xl px-5 py-4 rounded-2xl shadow-xl backdrop-blur-md print:hidden ${
-                        exportFeedback.tone === 'success'
-                            ? 'bg-green-50/95 border border-green-200 text-green-700'
-                            : exportFeedback.tone === 'warning'
-                              ? 'bg-orange-50/95 border border-orange-200 text-orange-700'
-                              : 'bg-red-50/95 border border-red-200 text-red-600'
-                    }`}
-                >
-                    <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
-                    <p className="text-xs font-bold leading-relaxed">{exportFeedback.message}</p>
-                    <button
-                        onClick={() => setExportFeedback(null)}
-                        aria-label="Fermer le bilan d'export"
-                        className="ml-2 shrink-0 opacity-60 hover:opacity-100 transition-opacity"
-                    >
-                        <X className="w-4 h-4" />
-                    </button>
-                </div>
-            )}
-
             {/* Mode lecture → fiche v2 (avatar 72, chips, sections, 3 actions footer)
                 Mode édition → modal legacy avec formulaire */}
             {isEditMode ? (
@@ -485,9 +440,13 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 function App() {
     return (
         <OriginProvider>
-            <AuthGate>
-                <AppContent />
-            </AuthGate>
+            {/* Au-dessus d'AuthGate : l'écran d'authentification doit lui aussi
+                pouvoir signaler ses échecs. */}
+            <FeedbackProvider>
+                <AuthGate>
+                    <AppContent />
+                </AuthGate>
+            </FeedbackProvider>
         </OriginProvider>
     );
 }
