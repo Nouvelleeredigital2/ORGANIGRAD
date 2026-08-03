@@ -661,6 +661,8 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
 
             {toast && (
                 <div
+                    // Une notification doit être annoncée aux lecteurs d'écran.
+                    role="status"
                     className={`fixed bottom-4 right-4 sm:bottom-6 sm:right-6 ${Z.toast} max-w-[calc(100vw-2rem)] sm:max-w-sm rounded-2xl border border-amber-200 bg-white p-4 shadow-[0_20px_60px_-10px_rgba(245,158,11,0.4)]`}
                 >
                     <p
