@@ -48,3 +48,10 @@ vite-dev.log
 *.tar.gz
 *.tgz
 
+# Exception : le contrat partagé est distribué par tarball vendorée (cf.
+# CLAUDE.md racine §4). Sans elle, `npm ci` tente un clone SSH du dépôt privé
+# apps2026-contracts et échoue sur un runner sans clé.
+# La tarball actuelle était déjà versionnée ; cette règle évite qu'une montée
+# de version soit silencieusement ignorée par `git add`.
+!orchestrator/vendor/*.tgz
+
