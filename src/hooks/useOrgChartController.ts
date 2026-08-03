@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useGoogleSheets } from './useGoogleSheets';
 import type { Agent } from '../types/agent';
 import type { TreeNode } from '../types/orgchart';
@@ -9,6 +9,7 @@ import { buildPoleDirectory, getPoleKey } from '../utils/poleDirectory';
 import { buildPoleHierarchy } from '../utils/poleHierarchy';
 import { importAgentsFromFile } from '../services/importService';
 import { findAgentPath } from '../utils/treeSearch';
+import { useAppRoute } from '../routing/useAppRoute';
 
 export type AppView = 'orgchart' | 'dashboard' | 'orchestration' | 'members' | 'api-keys' | 'settings';
 
@@ -37,18 +38,41 @@ const buildActiveSourceInfo = (
 };
 
 export const useOrgChartController = () => {
-    const [activeView, setActiveView] = useState<AppView>('orgchart');
+    // L'URL porte desormais vue, pole, agent et mode edition : le parcours
+    // survit au rafraichissement, le bouton Precedent fonctionne, et un lien
+    // vers un agent precis est partageable.
+    //
+    // Les signatures exposees ci-dessous ne changent PAS (setActiveView,
+    // setSelectedPoleKey, setIsEditMode gardent leur forme) : App.tsx et la
+    // Sidebar n'ont pas a etre touches.
+    const { route, navigate } = useAppRoute();
+
+    const activeView = route.view;
+    const setActiveView = useCallback(
+        (view: AppView) => navigate({ view }),
+        [navigate],
+    );
+
+    const selectedPoleKey = route.poleKey;
+    const setSelectedPoleKey = useCallback(
+        (key: string) => navigate({ poleKey: key }),
+        [navigate],
+    );
+
+    const isEditMode = route.editMode;
+    const setIsEditMode = useCallback(
+        (next: boolean) => navigate({ editMode: next }),
+        [navigate],
+    );
+
     const [csvUrl, setCsvUrl] = useState(storageService.getCsvUrl());
     const { data: remoteAgents, loading, error, refresh, sourceInfo: remoteSourceInfo } = useGoogleSheets(csvUrl);
     const [importedAgents, setImportedAgents] = useState<Agent[] | null>(null);
     const [importedFileName, setImportedFileName] = useState<string | null>(null);
-    const [selectedPoleKey, setSelectedPoleKey] = useState<string | null>(null);
 
     useEffect(() => {
         storageService.setCsvUrl(csvUrl);
     }, [csvUrl]);
-
-    const [isEditMode, setIsEditMode] = useState(false);
 
     const [deletedIds, setDeletedIds] = useState<Set<string>>(new Set(storageService.getDeletedIds()));
     const [localAgents, setLocalAgents] = useState<Record<string, Partial<Agent>>>(storageService.getAgentOverrides());
@@ -128,14 +152,16 @@ export const useOrgChartController = () => {
 
     useEffect(() => {
         if (!poleDirectory.length) {
-            setSelectedPoleKey(null);
+            if (selectedPoleKey) navigate({ poleKey: null }, { replace: true });
             return;
         }
 
         if (!selectedPoleKey || !poleStateMap.has(selectedPoleKey)) {
-            setSelectedPoleKey(poleDirectory[0]!.key);
+            // `replace` : la sélection AUTOMATIQUE du premier pôle ne doit pas
+            // polluer l'historique, sinon « Précédent » devient inutilisable.
+            navigate({ poleKey: poleDirectory[0]!.key }, { replace: true });
         }
-    }, [selectedPoleKey, poleDirectory, poleStateMap]);
+    }, [selectedPoleKey, poleDirectory, poleStateMap, navigate]);
 
     const selectedPole = useMemo(() => {
         return selectedPoleKey ? poleStateMap.get(selectedPoleKey) ?? null : null;
@@ -185,12 +211,27 @@ export const useOrgChartController = () => {
         path: new Set(),
     });
 
+    /**
+     * Lien profond : `?agent=<id>` doit déplier la branche et surligner l'agent,
+     * y compris dans un onglet neuf. `locateAgent` ne couvre que le cas « déjà
+     * chargé » ; sans cet ajustement, l'URL affichait le bon pôle sans rien
+     * mettre en évidence. Ajustement d'état pendant le rendu, une seule fois par
+     * changement d'identifiant.
+     */
+    const [syncedAgentId, setSyncedAgentId] = useState<string | null>(route.agentId);
+    if (syncedAgentId !== route.agentId) {
+        setSyncedAgentId(route.agentId);
+        if (route.agentId && viewTree.length > 0) {
+            const path = findAgentPath(viewTree, route.agentId);
+            setHighlightedSearch({ id: route.agentId, path: new Set(path ?? [route.agentId]) });
+        }
+    }
+
     const focusAgentPole = (agentId: string) => {
         const poleKey = agentPoleKeyMap.get(agentId);
-        if (poleKey) {
-            setSelectedPoleKey(poleKey);
-            setActiveView('orgchart');
-        }
+        // Une seule navigation au lieu de deux setState : plus de rendu
+        // intermédiaire où la vue et le pôle sont désaccordés.
+        if (poleKey) navigate({ view: 'orgchart', poleKey });
     };
 
     /**
@@ -206,8 +247,7 @@ export const useOrgChartController = () => {
         if (!poleKey) return false;
 
         const path = findAgentPath(viewTree, agentId);
-        setSelectedPoleKey(poleKey);
-        setActiveView('orgchart');
+        navigate({ view: 'orgchart', poleKey, agentId });
         setHighlightedSearch({ id: agentId, path: new Set(path ?? [agentId]) });
         return true;
     };
