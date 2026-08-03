@@ -5,6 +5,8 @@ import { hybridNodeStore } from '../../services/hybridNodeStore';
 import { useOrchestratorConfig } from '../../hooks/useOrchestratorConfig';
 import { useFileImport } from '../../hooks/useFileImport';
 import { useWorkspaceContext } from '../../contexts/WorkspaceContext';
+import { useFeedback } from '../../feedback/FeedbackContext';
+import { OrchestratorClient } from '../../services/orchestratorService';
 
 interface SettingsViewProps {
     csvUrl: string;
@@ -15,6 +17,10 @@ interface SettingsViewProps {
     handleImportFile: (file: File) => Promise<void>;
     clearImportedSource: () => void;
     isImportedSourceActive: boolean;
+    /** Erreur de chargement de la source — l'écran d'erreur global est masqué
+     *  sur cette vue, sans quoi elle serait invisible ici. */
+    sourceError: string | null;
+    retrySource: () => void;
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
@@ -26,6 +32,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     handleImportFile,
     clearImportedSource,
     isImportedSourceActive,
+    sourceError,
+    retrySource,
 }) => {
     const { activeId: workspaceId } = useWorkspaceContext();
     const [tempUrl, setTempUrl] = useState(csvUrl);
@@ -42,6 +50,49 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     const [orchUrl, setOrchUrl] = useState(orchestrator.config.baseUrl);
     const [orchKey, setOrchKey] = useState(orchestrator.config.apiKey);
     const [orchSaved, setOrchSaved] = useState(false);
+    const [orchChecking, setOrchChecking] = useState(false);
+    const feedback = useFeedback();
+
+    // Les champs etaient initialises une seule fois : apres une mise a jour de
+    // la config dans un autre onglet (evenement `storage`), « Enregistrer »
+    // reecrivait la valeur perimee. Resynchronisation pendant le rendu.
+    const [syncedConfig, setSyncedConfig] = useState(orchestrator.config);
+    if (syncedConfig !== orchestrator.config) {
+        setSyncedConfig(orchestrator.config);
+        setOrchUrl(orchestrator.config.baseUrl);
+        setOrchKey(orchestrator.config.apiKey);
+        setOrchSaved(false);
+    }
+
+    /**
+     * Enregistre ET verifie la joignabilite. Auparavant, « Configuration
+     * enregistree » s'affichait sans le moindre appel : une URL ou une cle
+     * totalement fausses produisaient le meme message vert.
+     */
+    const handleSaveOrchestrator = async () => {
+        const baseUrl = orchUrl.trim();
+        const apiKey = orchKey.trim();
+
+        if (!orchestrator.save({ baseUrl, apiKey })) {
+            feedback.error(
+                "Configuration non enregistrée : le stockage local est indisponible (navigation privée ou quota).",
+            );
+            return;
+        }
+
+        setOrchSaved(true);
+        setOrchChecking(true);
+        const joignable = await new OrchestratorClient({ baseUrl, apiKey }).isReachable();
+        setOrchChecking(false);
+
+        if (joignable) {
+            feedback.success('Configuration enregistrée · orchestrateur joignable.');
+        } else {
+            feedback.warning(
+                "Configuration enregistrée · orchestrateur injoignable — vérifie l'URL et la clé.",
+            );
+        }
+    };
 
     const handleSaveUrl = () => {
         if (tempUrl.trim()) {
@@ -129,6 +180,26 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                             <Save className="w-4 h-4" />
                             Utiliser la source distante
                         </button>
+
+                        {/* L'écran d'erreur global est masqué sur cette vue (sinon
+                            elle serait inatteignable en cas d'échec de chargement) :
+                            l'erreur doit donc être rendue ici. */}
+                        {sourceError && (
+                            <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3">
+                                <p className="text-sm font-bold text-red-600">{sourceError}</p>
+                                <p className="mt-1 text-xs text-red-400">
+                                    La source configurée n'a pas pu être chargée. Corrige l'URL ou importe
+                                    un fichier local.
+                                </p>
+                                <button
+                                    onClick={retrySource}
+                                    className="mt-3 flex items-center gap-2 rounded-xl border border-red-200 bg-white px-4 py-2 text-[11px] font-black uppercase tracking-widest text-red-600 transition-all hover:bg-red-50"
+                                >
+                                    <RefreshCw className="h-3.5 w-3.5" />
+                                    Réessayer
+                                </button>
+                            </div>
+                        )}
                     </div>
                 </section>
 
@@ -168,11 +239,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         />
                         <div className="flex flex-wrap items-center gap-3 pt-2">
                             <button
-                                onClick={() => {
-                                    orchestrator.save({ baseUrl: orchUrl.trim(), apiKey: orchKey.trim() });
-                                    setOrchSaved(true);
-                                }}
-                                disabled={!orchUrl.trim() || !orchKey.trim()}
+                                onClick={() => void handleSaveOrchestrator()}
+                                disabled={!orchUrl.trim() || !orchKey.trim() || orchChecking}
                                 className="flex items-center gap-2 px-6 py-3 bg-slate-900 text-white font-bold rounded-xl shadow-[0_16px_34px_rgba(15,23,42,0.18)] hover:bg-slate-800 transition-all disabled:opacity-50"
                             >
                                 <Save className="w-4 h-4" />
@@ -181,7 +249,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                             {orchestrator.isConfigured && (
                                 <button
                                     onClick={() => {
-                                        orchestrator.clear();
+                                        if (orchestrator.clear()) {
+                                            feedback.success('Orchestrateur déconnecté.');
+                                        } else {
+                                            feedback.error(
+                                                'Déconnexion incomplète : le stockage local est indisponible.',
+                                            );
+                                        }
                                         setOrchUrl('');
                                         setOrchKey('');
                                         setOrchSaved(false);
@@ -192,7 +266,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                                 </button>
                             )}
                             {orchSaved && (
-                                <span className="text-sm font-medium text-emerald-700">Configuration enregistrée.</span>
+                                <span className="text-sm font-medium text-emerald-700">
+                                    Configuration enregistrée.
+                                    {orchChecking ? ' Vérification…' : ''}
+                                </span>
                             )}
                         </div>
                     </div>
@@ -204,13 +281,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         Orchestration · Nœuds Hybrides
                     </h3>
                     <p className="text-slate-600 mb-6 max-w-xl text-sm">
-                        Les agents IA et serveurs MCP créés via l'éditeur sont persistés en local
+                        Les nœuds créés via l'éditeur sont mis en cache localement
                         (clé <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs">organigrad_hybrid_nodes_v1</code>).
-                        Réinitialiser supprime tous les nœuds locaux et ramène l'app à l'état vierge.
+                        Vider ce cache force un rechargement depuis le serveur : les nœuds
+                        enregistrés côté serveur réapparaîtront, ce n'est pas une suppression.
                     </p>
                     <button
                         onClick={() => {
-                            if (confirm('Supprimer tous les nœuds hybrides créés localement ?')) {
+                            if (confirm('Vider le cache local des nœuds et recharger ?')) {
                                 hybridNodeStore.reset(workspaceId);
                                 window.location.reload();
                             }
@@ -218,7 +296,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         className="flex items-center gap-2 px-6 py-3 bg-emerald-50 text-emerald-700 font-bold rounded-xl border border-emerald-200 hover:bg-emerald-100 transition-all"
                     >
                         <RotateCcw className="w-4 h-4" />
-                        Vider les nœuds hybrides
+                        Vider le cache local
                     </button>
                 </section>
 

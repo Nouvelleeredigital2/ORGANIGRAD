@@ -294,6 +294,8 @@ function AppContent() {
                                 handleImportFile={handleImportFile}
                                 clearImportedSource={clearImportedSource}
                                 isImportedSourceActive={isImportedSourceActive}
+                                sourceError={error}
+                                retrySource={() => void refresh()}
                             />
                         ) : (
                             <PoleOrgChartView

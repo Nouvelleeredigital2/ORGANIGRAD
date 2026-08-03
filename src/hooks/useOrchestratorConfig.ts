@@ -44,21 +44,28 @@ export function useOrchestratorConfig() {
         return () => window.removeEventListener('storage', onStorage);
     }, []);
 
-    const save = useCallback((next: OrchestratorConfig) => {
+    /**
+     * Renvoie `false` si la persistance a echoue (quota, navigation privee).
+     * Auparavant l'echec etait avale et l'interface affichait quand meme
+     * « Configuration enregistree ».
+     */
+    const save = useCallback((next: OrchestratorConfig): boolean => {
         setConfigState(next);
         try {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+            return true;
         } catch {
-            /* ignore */
+            return false;
         }
     }, []);
 
-    const clear = useCallback(() => {
+    const clear = useCallback((): boolean => {
         setConfigState(DEFAULT);
         try {
             localStorage.removeItem(STORAGE_KEY);
+            return true;
         } catch {
-            /* ignore */
+            return false;
         }
     }, []);
 

@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Copy, Key as KeyIcon, Trash2 } from 'lucide-react';
+import { Ban, Copy, Key as KeyIcon } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useWorkspaceContext } from '../../contexts/WorkspaceContext';
 import { Button, FormField, Input, Surface } from '../../design/ui';
 import { cx } from '../../design/cx';
+import { usePermissions } from '../../auth/usePermissions';
+import { useFeedback } from '../../feedback/FeedbackContext';
+import { useCopyToClipboard } from '../../hooks/useCopyToClipboard';
 
 /**
  * ApiKeysView — gestion des clés API par workspace.
@@ -30,14 +33,30 @@ export function ApiKeysView() {
     const [creating, setCreating] = useState(false);
     const [revealedKey, setRevealedKey] = useState<{ raw: string; name: string } | null>(null);
     const [error, setError] = useState<string | null>(null);
+    /** Raison pour laquelle la vue ne peut rien afficher (ce n'est pas une erreur). */
+    const [unavailable, setUnavailable] = useState<string | null>(null);
+    /** La cle affichee a-t-elle ete copiee au moins une fois avec succes ? */
+    const [copied, setCopied] = useState(false);
 
-    const isAdmin = activeWorkspace?.role === 'owner' || activeWorkspace?.role === 'admin';
+    const { role, isAdmin } = usePermissions();
+    const feedback = useFeedback();
+    const { copy } = useCopyToClipboard();
 
     const refresh = useCallback(async () => {
-        if (!supabase || !activeId) {
+        // Auparavant : liste vidée en silence, donc « Aucune clé pour ce
+        // workspace » alors qu'aucune requête n'avait été tentée.
+        if (!supabase) {
             setKeys([]);
+            setUnavailable("Supabase n'est pas configuré : les clés API sont indisponibles.");
             return;
         }
+        if (!activeId) {
+            setKeys([]);
+            setUnavailable('Aucun workspace actif — sélectionne-en un pour voir ses clés.');
+            return;
+        }
+        setUnavailable(null);
+        setError(null);
         setLoading(true);
         const { data, error: err } = await supabase
             .from('workspace_api_keys')
@@ -78,6 +97,13 @@ export function ApiKeysView() {
         const row = Array.isArray(data) ? data[0] : data;
         if (row?.raw_key) {
             setRevealedKey({ raw: row.raw_key, name: newKeyName.trim() });
+            setCopied(false);
+        } else {
+            // La cle existe en base mais son jeton n'a pas ete renvoye : il est
+            // irrecuperable. Le silence laissait croire a un echec de creation.
+            feedback.error(
+                "Clé créée mais son jeton n'a pas été renvoyé — il est irrécupérable. Révoque-la et recrée-en une.",
+            );
         }
         setNewKeyName('');
         await refresh();
@@ -87,11 +113,17 @@ export function ApiKeysView() {
         if (!supabase || !confirm('Révoquer cette clé ? Les agents qui l\'utilisent seront déconnectés.')) {
             return;
         }
+        setError(null);
         const { error: err } = await supabase
             .from('workspace_api_keys')
             .update({ revoked_at: new Date().toISOString() })
             .eq('id', id);
-        if (err) setError(err.message);
+        if (err) {
+            setError(err.message);
+            feedback.error(`Révocation échouée : ${err.message}`);
+        } else {
+            feedback.success('Clé révoquée.');
+        }
         await refresh();
     };
 
@@ -102,11 +134,19 @@ export function ApiKeysView() {
                     <p className="eyebrow">Workspace · {activeWorkspace?.name}</p>
                     <h1 className="t-h1 mt-2">Clés API.</h1>
                     <p className="t-body mt-2 max-w-2xl">
-                        Une clé d'API authentifie un agent ou un service externe auprès de l'orchestrateur
-                        Organigrad. Le token complet n'est affiché qu'une seule fois à la création — copie-le
-                        immédiatement.
+                        {isAdmin
+                            ? "Une clé d'API authentifie un agent ou un service externe auprès de l'orchestrateur Organigrad. Le token complet n'est affiché qu'une seule fois à la création — copie-le immédiatement."
+                            : `Consultation des clés du workspace. Ton rôle (${role ?? 'inconnu'}) ne permet pas d'en créer ni d'en révoquer.`}
                     </p>
                 </div>
+
+                {unavailable && (
+                    <Surface className="p-5">
+                        <p className="text-[13px]" style={{ color: 'var(--fg-2)' }}>
+                            {unavailable}
+                        </p>
+                    </Surface>
+                )}
 
                 {revealedKey && (
                     <Surface
@@ -131,7 +171,11 @@ export function ApiKeysView() {
                             </code>
                             <button
                                 type="button"
-                                onClick={() => void navigator.clipboard.writeText(revealedKey.raw)}
+                                onClick={() => {
+                                    void copy(revealedKey.raw, 'Clé API').then((ok) => {
+                                        if (ok) setCopied(true);
+                                    });
+                                }}
                                 className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-medium text-white"
                                 style={{ background: 'var(--accent)' }}
                             >
@@ -144,13 +188,26 @@ export function ApiKeysView() {
                             pourras plus la récupérer.
                         </p>
                         <div className="mt-3">
+                            {/* Fermer detruit l'unique exemplaire du jeton. On ne
+                                laisse plus affirmer « j'ai copie » sans preuve :
+                                si aucune copie n'a abouti, on demande confirmation. */}
                             <Button
                                 tone="slate"
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => setRevealedKey(null)}
+                                onClick={() => {
+                                    if (
+                                        copied ||
+                                        confirm(
+                                            "Aucune copie n'a été enregistrée. Fermer maintenant rend la clé définitivement irrécupérable. Continuer ?",
+                                        )
+                                    ) {
+                                        setRevealedKey(null);
+                                        setCopied(false);
+                                    }
+                                }}
                             >
-                                J'ai copié la clé
+                                Fermer — je ne pourrai plus la voir
                             </Button>
                         </div>
                     </Surface>
@@ -251,7 +308,9 @@ export function ApiKeysView() {
                                             }}
                                             title="Révoquer"
                                         >
-                                            <Trash2 size={14} strokeWidth={1.6} />
+                                            {/* Revocation, pas suppression : la ligne
+                                                reste en base pour l'audit. */}
+                                            <Ban size={14} strokeWidth={1.6} />
                                         </button>
                                     ) : null}
                                 </li>

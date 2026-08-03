@@ -42,9 +42,10 @@ describe('transitionsRepo', () => {
     beforeEach(() => vi.clearAllMocks());
 
     it('listRecent() retourne les transitions mappées', async () => {
-        const list = await transitionsRepo.listRecent('ws1', 30);
-        expect(list).toHaveLength(1);
-        expect(list[0]).toEqual({
+        const { rows, error } = await transitionsRepo.listRecent('ws1', 30);
+        expect(error).toBeUndefined();
+        expect(rows).toHaveLength(1);
+        expect(rows[0]).toEqual({
             id: 't1',
             nodeId: 'n1',
             from: 'IDLE',
