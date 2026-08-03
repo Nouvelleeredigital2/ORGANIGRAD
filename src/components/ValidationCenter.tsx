@@ -30,9 +30,19 @@ interface ValidationCenterProps {
     isOpen: boolean;
     items: ValidationItem[];
     onClose: () => void;
-    onApprove: (node: HybridNode) => void;
-    onReject?: (node: HybridNode, feedback: string) => void;
+    /**
+     * Renvoyer `false` (ou une promesse résolue à `false`) signale un échec :
+     * le panneau reste ouvert et la saisie est conservée. Une décision humaine
+     * ne doit jamais être perdue parce que l'appel distant a échoué.
+     */
+    onApprove: (node: HybridNode) => void | Promise<boolean>;
+    onReject?: (node: HybridNode, feedback: string) => void | Promise<boolean>;
     onShowDetails?: (node: HybridNode) => void;
+    /**
+     * Mode d'exécution, pour que le pied de panneau dise la vérité :
+     * en local rien n'est persisté, en distant un appel réel est émis.
+     */
+    mode?: 'local' | 'remote';
 }
 
 const GLYPH_CLASS: Record<HybridNode['type'], 'human' | 'ai' | 'mcp'> = {
@@ -48,19 +58,32 @@ export function ValidationCenter({
     onApprove,
     onReject,
     onShowDetails,
+    mode = 'local',
 }: ValidationCenterProps) {
     const [rejectingId, setRejectingId] = useState<string | null>(null);
     const [rejectFeedback, setRejectFeedback] = useState('');
+    const [pendingId, setPendingId] = useState<string | null>(null);
 
     useEscapeClose(isOpen, onClose);
     if (!isOpen) return null;
 
-    const handleRejectConfirm = (node: HybridNode) => {
+    const handleRejectConfirm = async (node: HybridNode) => {
         const fb = rejectFeedback.trim();
         if (!fb) return;
-        onReject?.(node, fb);
+        setPendingId(node.id);
+        const outcome = await onReject?.(node, fb);
+        setPendingId(null);
+        // On ne vide le motif QUE si le rejet a abouti — sinon l'utilisateur
+        // devrait le ressaisir alors que rien n'a été enregistré.
+        if (outcome === false) return;
         setRejectingId(null);
         setRejectFeedback('');
+    };
+
+    const handleApprove = async (node: HybridNode) => {
+        setPendingId(node.id);
+        await onApprove(node);
+        setPendingId(null);
     };
 
     const count = items.length;
@@ -124,9 +147,11 @@ export function ValidationCenter({
                                         <Button
                                             tone="blue"
                                             size="sm"
-                                            onClick={() => onApprove(it.node)}
+                                            disabled={pendingId === it.node.id}
+                                            onClick={() => void handleApprove(it.node)}
                                         >
-                                            <Check size={12} strokeWidth={2} /> Valider
+                                            <Check size={12} strokeWidth={2} />{' '}
+                                            {pendingId === it.node.id ? 'Envoi…' : 'Valider'}
                                         </Button>
                                         {onReject && rejectingId !== it.node.id && (
                                             <button
@@ -155,7 +180,7 @@ export function ValidationCenter({
                                                 value={rejectFeedback}
                                                 onChange={(e) => setRejectFeedback(e.target.value)}
                                                 onKeyDown={(e) => {
-                                                    if (e.key === 'Enter') handleRejectConfirm(it.node);
+                                                    if (e.key === 'Enter') void handleRejectConfirm(it.node);
                                                     if (e.key === 'Escape') { setRejectingId(null); setRejectFeedback(''); }
                                                 }}
                                                 placeholder="Motif du rejet…"
@@ -171,7 +196,7 @@ export function ValidationCenter({
                                                 }}
                                             />
                                             <button
-                                                onClick={() => handleRejectConfirm(it.node)}
+                                                onClick={() => void handleRejectConfirm(it.node)}
                                                 disabled={!rejectFeedback.trim()}
                                                 style={{
                                                     background: 'var(--system-red)',
@@ -203,8 +228,9 @@ export function ValidationCenter({
                 </div>
 
                 <p className="dsm-vc-foot">
-                    Les approbations sont enregistrées localement. Aucune action distante n'est exécutée
-                    tant qu'une source distante n'est pas configurée.
+                    {mode === 'remote'
+                        ? "Les décisions sont transmises à l'orchestrateur."
+                        : 'Mode local · les décisions ne sont pas persistées et seront perdues au rechargement.'}
                 </p>
             </div>
         </div>

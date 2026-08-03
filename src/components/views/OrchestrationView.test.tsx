@@ -1,10 +1,47 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import { render, screen, fireEvent, act } from '@testing-library/react';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { render, screen, fireEvent, act, waitFor } from '@testing-library/react';
 import { OrchestrationView } from './OrchestrationView';
+import type { HybridNode } from '../../types/hybridNode';
+
+const bridgeMock = vi.hoisted(() => ({
+    connected: false,
+    nodes: [] as HybridNode[],
+    client: null,
+    runNode: vi.fn<(id: string) => Promise<void>>(async () => {}),
+    runFlow: vi.fn<(id: string) => Promise<void>>(async () => {}),
+    approve: vi.fn<(id: string) => Promise<void>>(async () => {}),
+    reject: vi.fn<(id: string, motif: string) => Promise<void>>(async () => {}),
+    reset: vi.fn<(id: string) => Promise<void>>(async () => {}),
+}));
+
+vi.mock('../../hooks/useOrchestratorBridge', () => ({
+    useOrchestratorBridge: () => bridgeMock,
+}));
+
+/** Sème des nœuds dans le cache local (espace offline). */
+const seed = (nodes: Partial<HybridNode>[]) =>
+    localStorage.setItem(
+        'organigrad_hybrid_nodes_v1::local',
+        JSON.stringify(
+            nodes.map((n) => ({
+                type: 'AGENT_IA',
+                roleTitre: 'r',
+                parentID: null,
+                gradeId: 'Expert',
+                status: 'IDLE',
+                ...n,
+            })),
+        ),
+    );
 
 describe('OrchestrationView', () => {
     beforeEach(() => {
         localStorage.clear();
+        bridgeMock.connected = false;
+        bridgeMock.nodes = [];
+        Object.values(bridgeMock).forEach((v) => {
+            if (typeof v === 'function' && 'mockClear' in v) v.mockClear();
+        });
     });
 
     it("démarre vierge — affiche l'état vide quand aucun agent ni nœud", () => {
@@ -70,5 +107,50 @@ describe('OrchestrationView', () => {
         expect(screen.queryByText(/Aucun nœud dans la chaîne/i)).toBeNull();
         // L'agent est rendu (surname en CAPS via HybridNodeCard)
         expect(screen.getAllByText(/MARTIN/).length).toBeGreaterThanOrEqual(1);
+    });
+
+    /**
+     * Risque couvert : « Lancer la chaîne » ne lançait que `roots[0]`. Les
+     * humains issus du CSV étant concaténés en tête, les nœuds IA créés par
+     * l'utilisateur — également racines — n'étaient jamais exécutés, sans le
+     * moindre message.
+     */
+    it('lance TOUTES les racines, pas seulement la première', async () => {
+        seed([
+            { id: 'racine-a', nom: 'A' },
+            { id: 'racine-b', nom: 'B' },
+            { id: 'enfant', nom: 'C', parentID: 'racine-a' },
+        ]);
+        bridgeMock.connected = true;
+
+        render(<OrchestrationView rawAgents={[]} />);
+        fireEvent.click(screen.getByRole('button', { name: /Lancer la chaîne/i }));
+
+        await waitFor(() => expect(bridgeMock.runFlow).toHaveBeenCalledTimes(2));
+        const lances = bridgeMock.runFlow.mock.calls.map((c) => c[0]);
+        expect(lances).toEqual(expect.arrayContaining(['racine-a', 'racine-b']));
+        expect(lances).not.toContain('enfant');
+    });
+
+    /**
+     * Risque couvert : une décision humaine perdue. Le panneau se refermait et
+     * le motif de rejet était vidé même quand l'appel distant avait échoué.
+     */
+    it('conserve le motif et le panneau ouvert quand le rejet échoue', async () => {
+        seed([{ id: 'h1', nom: 'Valideur', type: 'HUMAN', status: 'WAITING_HUMAN_APPROVAL' }]);
+        bridgeMock.connected = true;
+        bridgeMock.reject.mockRejectedValueOnce(new Error('403'));
+
+        render(<OrchestrationView rawAgents={[]} />);
+        fireEvent.click(await screen.findByRole('button', { name: /Valider \(1\)|Valider/i }));
+
+        fireEvent.click(await screen.findByRole('button', { name: /^Rejeter$/i }));
+        const motif = screen.getByPlaceholderText(/Motif du rejet/i);
+        fireEvent.change(motif, { target: { value: 'Incomplet' } });
+        fireEvent.keyDown(motif, { key: 'Enter' });
+
+        await waitFor(() => expect(bridgeMock.reject).toHaveBeenCalled());
+        // Le motif survit à l'échec et le panneau reste ouvert.
+        expect(screen.getByPlaceholderText(/Motif du rejet/i)).toHaveValue('Incomplet');
     });
 });

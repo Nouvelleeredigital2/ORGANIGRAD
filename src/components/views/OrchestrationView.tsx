@@ -18,19 +18,28 @@ import { notifyHuman, NOTIFICATION_EVENT } from '../../services/notificationServ
 import type { NotificationEventDetail } from '../../services/notificationService';
 import { emitActivity, emitTransition } from '../../services/activityBus';
 import { useOrchestratorBridge } from '../../hooks/useOrchestratorBridge';
+import { useFeedback } from '../../feedback/FeedbackContext';
+import { describeError } from '../../utils/asyncGuard';
 
 interface OrchestrationViewProps {
     rawAgents: Agent[];
 }
 
-const CYCLE: NodeStatus[] = [
-    'IDLE',
-    'EXECUTING',
-    'CONTROL_PENDING_IA',
-    'WAITING_HUMAN_APPROVAL',
-    'ERROR',
-];
-const cycleStatus = (s: NodeStatus): NodeStatus => CYCLE[(CYCLE.indexOf(s) + 1) % CYCLE.length]!;
+/**
+ * Horodatage relatif d'une demande de validation.
+ *
+ * Sans cela, le Centre de validation affichait « à l'instant » en dur : une
+ * demande vieille de plusieurs heures paraissait toute fraîche.
+ */
+const formatRelative = (timestamp: number | undefined): string => {
+    if (!timestamp) return '—';
+    const minutes = Math.floor((Date.now() - timestamp) / 60_000);
+    if (minutes < 1) return "à l'instant";
+    if (minutes < 60) return `il y a ${minutes} min`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `il y a ${hours} h`;
+    return `il y a ${Math.floor(hours / 24)} j`;
+};
 
 /**
  * OrchestrationView — vue de coordination Humain · IA · MCP.
@@ -48,8 +57,18 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
     const [hybridSource, setHybridSource] = useState<HybridNode[]>(() =>
         hybridNodeStore.list(workspaceId),
     );
-    const [dataState, setDataState] = useState<'loading' | 'ready' | 'stale'>('loading');
+    // « loading » n'a de sens que s'il y a une source distante à attendre : en
+    // mode local, la liste vient de localStorage, donc immédiatement.
+    const [dataState, setDataState] = useState<'loading' | 'ready' | 'stale'>(() =>
+        workspaceId ? 'loading' : 'ready',
+    );
     const [statuses, setStatuses] = useState<Record<string, NodeStatus>>({});
+    /** Date de dernière transition locale, pour dater les demandes de validation. */
+    const [statusTimestamps, setStatusTimestamps] = useState<Record<string, number>>({});
+    // Miroir synchrone de `statuses` : permet de lire le statut courant sans
+    // effet de bord dans un updater setState (cf. setStatusFor).
+    const statusesRef = useRef<Record<string, NodeStatus>>({});
+    const feedback = useFeedback();
 
     // Pont vers l'orchestrateur backend (config dans Paramètres).
     // Quand `bridge.connected`, on délègue run/approve/reject au service distant
@@ -65,8 +84,15 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
         setSyncedWorkspaceId(workspaceId);
         setHybridSource(hybridNodeStore.list(workspaceId));
         setStatuses({});
-        setDataState('loading');
+        setStatusTimestamps({});
+        setDataState(workspaceId ? 'loading' : 'ready');
     }
+
+    // Miroir du state, resynchronisé après chaque commit (y compris les remises
+    // à zéro). Un ref ne peut pas être muté pendant le rendu.
+    useEffect(() => {
+        statusesRef.current = statuses;
+    }, [statuses]);
 
     // Charge depuis Supabase quand on a un workspace + souscrit aux changements live
     useEffect(() => {
@@ -102,7 +128,16 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
     // Statuts : ceux du bridge SSE quand connecté > statuts locaux > statut DB.
     const allNodes = useMemo<HybridNode[]>(() => {
         const humansFromCsv: HybridNode[] = rawAgents.map((a) => agentToHybridNode(a));
-        const merged = [...humansFromCsv, ...hybridSource];
+        // Déduplication par identifiant : `agentToHybridNode` conserve l'id de
+        // l'agent, si bien qu'éditer un humain issu du CSV produisait DEUX
+        // cartes — celle du CSV (valeurs anciennes) et la version enregistrée,
+        // rendues avec la même clé React. Le CSV n'est qu'une graine : la
+        // version enregistrée prime.
+        const byId = new Map<string, HybridNode>();
+        humansFromCsv.forEach((n) => byId.set(n.id, n));
+        hybridSource.forEach((n) => byId.set(n.id, n));
+        const merged = Array.from(byId.values());
+
         const bridgeStatusById = bridge.connected
             ? new Map(bridge.nodes.map((n) => [n.id, n.status]))
             : null;
@@ -125,10 +160,10 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
                         detail: upstream.length
                             ? upstream.map((u) => u.nom).join(' → ')
                             : undefined,
-                        when: 'à l\'instant',
+                        when: formatRelative(statusTimestamps[n.id]),
                     };
                 }),
-        [allNodes],
+        [allNodes, statusTimestamps],
     );
 
     // Notifications toast
@@ -141,9 +176,20 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
         return () => window.removeEventListener(NOTIFICATION_EVENT, handler);
     }, []);
 
-    // Ping humain quand un nœud HUMAN passe en attente d'approbation
+    // Ping humain quand un nœud HUMAN passe en attente d'approbation.
+    // Dédupliqué : `pendingItems` est recalculé à CHAQUE transition de n'importe
+    // quel nœud, ce qui re-POSTait le webhook Slack en boucle.
+    const notifiedRef = useRef<Set<string>>(new Set());
     useEffect(() => {
+        const stillPending = new Set(pendingItems.map((item) => item.node.id));
+        // Un nœud sorti de l'attente redevient notifiable pour la fois suivante.
+        notifiedRef.current.forEach((id) => {
+            if (!stillPending.has(id)) notifiedRef.current.delete(id);
+        });
+
         pendingItems.forEach((item) => {
+            if (notifiedRef.current.has(item.node.id)) return;
+            notifiedRef.current.add(item.node.id);
             void notifyHuman({
                 node: item.node,
                 message: 'Livrable prêt à valider',
@@ -165,11 +211,21 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
     }, []);
 
     const setStatusFor = useCallback((n: HybridNode, next: NodeStatus) => {
-        setStatuses((prev) => {
-            const from = prev[n.id] ?? n.status;
-            if (from !== next) emitTransition(n, from, next);
-            return { ...prev, [n.id]: next };
-        });
+        const from = statusesRef.current[n.id] ?? n.status;
+        if (from === next) return;
+
+        statusesRef.current = { ...statusesRef.current, [n.id]: next };
+        setStatuses(statusesRef.current);
+        setStatusTimestamps((prev) => ({ ...prev, [n.id]: Date.now() }));
+        // Émission HORS de l'updater : un effet de bord dans une fonction de
+        // mise à jour est rejoué en mode strict et dupliquait le journal.
+        emitTransition(n, from, next);
+    }, []);
+
+    const resetStatuses = useCallback(() => {
+        statusesRef.current = {};
+        setStatuses({});
+        setStatusTimestamps({});
     }, []);
 
     /**
@@ -178,33 +234,67 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
      *     Les transitions reviennent via SSE et alimentent `bridge.nodes`.
      *   - Mode local (offline / non connecté) : simulation chronométrée.
      */
-    const runChain = () => {
+    const runChain = async () => {
+        // TOUTES les racines, pas seulement la première : les humains issus du
+        // CSV sont concaténés en tête, si bien que les nœuds IA créés par
+        // l'utilisateur — également racines — n'étaient jamais lancés.
         const roots = allNodes.filter((n) => !n.parentID);
         if (roots.length === 0) return;
-
-        const first = roots[0]!;
-        emitActivity({
-            kind: 'run',
-            nodeId: first.id,
-            nodeName: first.nom,
-            message: 'Démarrage de la chaîne',
-        });
 
         setIsRunning(true);
 
         if (bridge.connected) {
-            // Exécute la CHAÎNE complète (et non le seul premier nœud).
-            void bridge.runFlow(first.id)
-                .catch((err) => {
-                    console.error('[OrchestrationView] runFlow failed', err);
-                })
-                .finally(() => setIsRunning(false));
+            roots.forEach((root) =>
+                emitActivity({
+                    kind: 'run',
+                    nodeId: root.id,
+                    nodeName: root.nom,
+                    message: 'Démarrage de la chaîne',
+                }),
+            );
+
+            const results = await Promise.allSettled(roots.map((root) => bridge.runFlow(root.id)));
+            setIsRunning(false);
+
+            const failed = results.flatMap((r, i) =>
+                r.status === 'rejected' ? [{ nom: roots[i]!.nom, error: describeError(r.reason) }] : [],
+            );
+
+            if (failed.length === 0) {
+                feedback.success(
+                    `Chaîne lancée : ${roots.length} racine${roots.length > 1 ? 's' : ''}.`,
+                );
+            } else if (failed.length === roots.length) {
+                feedback.error(`Lancement échoué : ${failed[0]!.error}. Aucune chaîne n'a démarré.`);
+            } else {
+                feedback.warning(
+                    `Lancement partiel : ${roots.length - failed.length}/${roots.length} chaînes démarrées. Échecs : ${failed.map((f) => f.nom).join(', ')}.`,
+                );
+            }
             return;
         }
 
         // --- Simulation locale (sans orchestrateur) ---
-        setStatuses({});
-        const order = topoSort(allNodes, first.id);
+        resetStatuses();
+        roots.forEach((root) =>
+            emitActivity({
+                kind: 'run',
+                nodeId: root.id,
+                nodeName: root.nom,
+                message: 'Démarrage de la chaîne',
+            }),
+        );
+
+        // `visited` partagé entre les racines : un nœud rattaché à deux racines
+        // n'est parcouru qu'une fois.
+        const visited = new Set<string>();
+        const order = roots.flatMap((root) =>
+            topoSort(allNodes, root.id).filter((n) => {
+                if (visited.has(n.id)) return false;
+                visited.add(n.id);
+                return true;
+            }),
+        );
         if (order.length === 0) { setIsRunning(false); return; }
 
         let delay = 0;
@@ -230,30 +320,90 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
      * Sinon, mute le statut local via la machine à états.
      */
     const approveNode = useCallback(
-        (n: HybridNode) => {
+        async (n: HybridNode): Promise<boolean> => {
             if (bridge.connected) {
-                void bridge.approve(n.id).catch((err) =>
-                    console.error('[OrchestrationView] approve failed', err),
-                );
-                return;
+                try {
+                    await bridge.approve(n.id);
+                    feedback.success(`Validation transmise · ${n.nom}.`);
+                    return true;
+                } catch (err) {
+                    console.error('[OrchestrationView] approve failed', err);
+                    feedback.error(`Validation non enregistrée · ${n.nom} : ${describeError(err)}`);
+                    return false;
+                }
             }
             setStatusFor(n, 'IDLE');
+            return true;
         },
-        [bridge, setStatusFor],
+        [bridge, setStatusFor, feedback],
     );
 
     const rejectNode = useCallback(
-        (n: HybridNode, feedback: string) => {
+        async (n: HybridNode, motif: string): Promise<boolean> => {
             if (bridge.connected) {
-                void bridge.reject(n.id, feedback).catch((err) =>
-                    console.error('[OrchestrationView] reject failed', err),
-                );
-                return;
+                try {
+                    await bridge.reject(n.id, motif);
+                    feedback.success(`Rejet transmis · ${n.nom}.`);
+                    return true;
+                } catch (err) {
+                    console.error('[OrchestrationView] reject failed', err);
+                    // Le motif saisi est conservé : le panneau reste ouvert.
+                    feedback.error(`Rejet non enregistré · ${n.nom} : ${describeError(err)}`);
+                    return false;
+                }
             }
             setStatusFor(n, 'ERROR');
+            return true;
         },
-        [bridge, setStatusFor],
+        [bridge, setStatusFor, feedback],
     );
+
+    /**
+     * Exécute un nœud isolé. En mode local, le nœud DOIT ressortir d'EXECUTING :
+     * il y restait bloqué indéfiniment, la carte affichant « Exécution » à vie.
+     */
+    const runNode = useCallback(
+        async (n: HybridNode): Promise<void> => {
+            if (bridge.connected) {
+                try {
+                    await bridge.runNode(n.id);
+                    feedback.success(`Exécution lancée · ${n.nom}.`);
+                } catch (err) {
+                    console.error('[OrchestrationView] runNode failed', err);
+                    feedback.error(`Exécution non lancée · ${n.nom} : ${describeError(err)}`);
+                }
+                return;
+            }
+            setStatusFor(n, 'EXECUTING');
+            setTimeout(() => setStatusFor(n, 'IDLE'), 900);
+        },
+        [bridge, setStatusFor, feedback],
+    );
+
+    /** Remet les statuts à zéro — côté orchestrateur aussi quand il est branché. */
+    const resetChain = useCallback(async (): Promise<void> => {
+        setIsRunning(false);
+
+        if (!bridge.connected) {
+            resetStatuses();
+            return;
+        }
+
+        // En mode connecté, vider l'état local n'a aucun effet visible : les
+        // statuts affichés viennent du bridge. Il faut réinitialiser les nœuds.
+        const roots = allNodes.filter((n) => !n.parentID);
+        const results = await Promise.allSettled(roots.map((root) => bridge.reset(root.id)));
+        resetStatuses();
+
+        const failed = results.filter((r) => r.status === 'rejected').length;
+        if (failed === 0) {
+            feedback.success('Chaîne réinitialisée.');
+        } else {
+            feedback.error(
+                `Réinitialisation incomplète : ${failed}/${roots.length} racines n'ont pas répondu.`,
+            );
+        }
+    }, [bridge, allNodes, resetStatuses, feedback]);
 
     const handleSaveNode = async (node: HybridNode) => {
         const exists = hybridSource.some((n) => n.id === node.id);
@@ -331,7 +481,7 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
                         </span>
                     </div>
                     <div className="mt-5 flex flex-wrap gap-2">
-                        <Button tone="blue" onClick={runChain} disabled={!hasAnyNode || isRunning}>
+                        <Button tone="blue" onClick={() => void runChain()} disabled={!hasAnyNode || isRunning}>
                             {isRunning ? (
                                 <span className="flex items-center gap-2">
                                     <span
@@ -347,7 +497,7 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
                         <Button
                             tone="slate"
                             variant="soft"
-                            onClick={() => { setStatuses({}); setIsRunning(false); }}
+                            onClick={() => void resetChain()}
                             disabled={!hasAnyNode}
                         >
                             Réinitialiser
@@ -395,7 +545,14 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
                     ref={stageRef}
                     className="relative rounded-3xl border border-slate-100 bg-slate-50/50 p-4 sm:p-6 lg:p-8 min-h-[300px]"
                 >
-                    {!hasAnyNode ? (
+                    {dataState === 'loading' && !hasAnyNode ? (
+                        /* Sans cet état, on affichait « Aucun nœud dans la chaîne »
+                           pendant tout l'aller-retour Supabase — l'utilisateur
+                           croyait son workspace vide. */
+                        <div className="flex min-h-[240px] items-center justify-center">
+                            <p className="text-sm font-medium text-slate-400">Chargement des nœuds…</p>
+                        </div>
+                    ) : !hasAnyNode ? (
                         <EmptyState onCreate={() => setEditorOpen(true)} />
                     ) : (
                         <>
@@ -408,16 +565,15 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
                                             kicker={kicker}
                                             label={label}
                                             nodes={nodes}
-                                            onOpen={(n) =>
-                                                setStatusFor(n, cycleStatus(n.status))
-                                            }
-                                            onRun={(n) => {
-                                                if (bridge.connected) {
-                                                    void bridge.runNode(n.id);
-                                                } else {
-                                                    setStatusFor(n, 'EXECUTING');
-                                                }
+                                            // Ouvrir la fiche. Auparavant, cliquer
+                                            // une carte faisait DÉFILER son statut :
+                                            // fausse transition au journal et vraie
+                                            // notification Slack déclenchée par un clic.
+                                            onOpen={(n) => {
+                                                setEditorNode(n);
+                                                setEditorOpen(true);
                                             }}
+                                            onRun={(n) => void runNode(n)}
                                             onEdit={(n) => {
                                                 setEditorNode(n);
                                                 setEditorOpen(true);
@@ -459,13 +615,18 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
                 isOpen={validationOpen}
                 items={pendingItems}
                 onClose={() => setValidationOpen(false)}
-                onApprove={(node) => {
-                    approveNode(node);
-                    if (pendingItems.length <= 1) setValidationOpen(false);
+                mode={bridge.connected ? 'remote' : 'local'}
+                onApprove={async (node) => {
+                    // Le panneau ne se referme qu'au SUCCÈS : le refermer sur un
+                    // échec ferait croire que la décision a été enregistrée.
+                    const ok = await approveNode(node);
+                    if (ok && pendingItems.length <= 1) setValidationOpen(false);
+                    return ok;
                 }}
-                onReject={(node, feedback) => {
-                    rejectNode(node, feedback);
-                    if (pendingItems.length <= 1) setValidationOpen(false);
+                onReject={async (node, motif) => {
+                    const ok = await rejectNode(node, motif);
+                    if (ok && pendingItems.length <= 1) setValidationOpen(false);
+                    return ok;
                 }}
             />
 
