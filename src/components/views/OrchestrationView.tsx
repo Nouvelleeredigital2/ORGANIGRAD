@@ -5,6 +5,7 @@ import { ValidationCenter, type ValidationItem } from '../ValidationCenter';
 import { MCPAnchorsOverlay } from '../MCPAnchorsOverlay';
 import { HybridSpotlight } from '../spotlight/HybridSpotlight';
 import { NodeEditor } from '../NodeEditor';
+import { NodeDetailsModal } from '../NodeDetailsModal';
 import { ActivityLog } from '../ActivityLog';
 import { Button, Kbd } from '../../design/ui';
 import { Z } from '../../design/tokens';
@@ -129,6 +130,8 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
     const [editorNode, setEditorNode] = useState<HybridNode | null>(null);
     const [toast, setToast] = useState<NotificationEventDetail | null>(null);
     const [saveError, setSaveError] = useState<string | null>(null);
+    /** Nœud dont on consulte le détail depuis le Centre de validation. */
+    const [detailsNode, setDetailsNode] = useState<HybridNode | null>(null);
     const stageRef = useRef<HTMLDivElement>(null);
     const spotlightRef = useRef<HTMLDivElement>(null);
 
@@ -156,6 +159,8 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
     }, [hybridSource, rawAgents, statuses, bridge.connected, bridge.nodes]);
 
     const hasAnyNode = allNodes.length > 0;
+    /** Seuls les nœuds enregistrés se suppriment ici (le CSV est une graine). */
+    const deletableIds = useMemo(() => new Set(hybridSource.map((n) => n.id)), [hybridSource]);
     const pendingItems: ValidationItem[] = useMemo(
         () =>
             allNodes
@@ -413,6 +418,34 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
         }
     }, [bridge, allNodes, resetStatuses, feedback]);
 
+    /**
+     * Supprime un nœud. `hybridNodeRepo.remove` existait sans aucun appelant :
+     * un nœud créé par erreur ne pouvait être retiré par AUCUN chemin de
+     * l'interface. Réservé aux nœuds enregistrés — les humains issus du CSV ne
+     * sont qu'une graine de lecture, ils se retirent depuis l'organigramme.
+     */
+    const handleDeleteNode = async (node: HybridNode) => {
+        const avant = hybridSource;
+        setHybridSource((prev) => prev.filter((n) => n.id !== node.id));
+
+        try {
+            await hybridNodeRepo.remove(node.id, {
+                workspaceId,
+                orchestratorClient: bridge.client,
+            });
+            emitActivity({
+                kind: 'delete',
+                nodeId: node.id,
+                nodeName: node.nom,
+                message: 'Nœud supprimé',
+            });
+            feedback.success(`Nœud supprimé · ${node.nom}.`);
+        } catch (err) {
+            setHybridSource(avant);
+            feedback.error(`Suppression non enregistrée · ${node.nom} : ${describeError(err)}`);
+        }
+    };
+
     const handleSaveNode = async (node: HybridNode) => {
         const exists = hybridSource.some((n) => n.id === node.id);
         try {
@@ -605,6 +638,10 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
                                                       }
                                                     : undefined
                                             }
+                                            onDelete={peutEcrire ? (n) => void handleDeleteNode(n) : undefined}
+                                            // Seuls les nœuds enregistrés sont
+                                            // supprimables ici (cf. handleDeleteNode).
+                                            deletableIds={deletableIds}
                                             onValidate={
                                                 peutValider ? () => setValidationOpen(true) : undefined
                                             }
@@ -635,16 +672,30 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
                     <p className="mt-1 text-sm font-semibold text-slate-900">{toast.node.nom}</p>
                     <p className="mt-1 text-xs text-slate-500">{toast.message}</p>
                     <p className="mt-2 text-[10px] text-slate-400">
-                        Canaux : {toast.channels.map((c) => c.key).join(', ') || '—'}
+                        {/* On distingue ce qui est réellement parti de ce qui a
+                            échoué et de ce qui ne part pas depuis le navigateur. */}
+                        {toast.channels.length > 0
+                            ? `Envoyé : ${toast.channels.map((c) => c.key).join(', ')}`
+                            : 'Aucun canal joint depuis le navigateur'}
+                        {toast.failed.length > 0 && ` · Échec : ${toast.failed.map((c) => c.key).join(', ')}`}
+                        {toast.deferred.length > 0 &&
+                            ` · Délégué : ${toast.deferred.map((c) => c.key).join(', ')}`}
                     </p>
                 </div>
             )}
+
+            <NodeDetailsModal
+                node={detailsNode}
+                workspaceId={workspaceId}
+                onClose={() => setDetailsNode(null)}
+            />
 
             <ValidationCenter
                 isOpen={validationOpen}
                 items={pendingItems}
                 onClose={() => setValidationOpen(false)}
                 mode={bridge.connected ? 'remote' : 'local'}
+                onShowDetails={(node) => setDetailsNode(node)}
                 onApprove={async (node) => {
                     // Le panneau ne se referme qu'au SUCCÈS : le refermer sur un
                     // échec ferait croire que la décision a été enregistrée.
@@ -718,6 +769,8 @@ function NodeGroup({
     onRun,
     onEdit,
     onValidate,
+    onDelete,
+    deletableIds,
     pendingCount,
 }: {
     kicker: string;
@@ -728,6 +781,9 @@ function NodeGroup({
     onRun?: (n: HybridNode) => void;
     onEdit?: (n: HybridNode) => void;
     onValidate?: (n: HybridNode) => void;
+    onDelete?: (n: HybridNode) => void;
+    /** Identifiants des nœuds réellement supprimables (les autres n'ont pas le bouton). */
+    deletableIds?: Set<string>;
     pendingCount: number;
 }) {
     return (
@@ -746,6 +802,10 @@ function NodeGroup({
                         }
                         onRun={onRun && n.type === 'AGENT_IA' ? () => onRun(n) : undefined}
                         onEdit={onEdit ? () => onEdit(n) : undefined}
+                        isEditMode={Boolean(onDelete && deletableIds?.has(n.id))}
+                        onDelete={
+                            onDelete && deletableIds?.has(n.id) ? () => onDelete(n) : undefined
+                        }
                         onValidate={onValidate && n.type === 'HUMAN' ? () => onValidate(n) : undefined}
                         onOpen={() => onOpen(n)}
                     />

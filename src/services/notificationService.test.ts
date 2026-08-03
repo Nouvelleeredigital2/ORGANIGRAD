@@ -21,10 +21,31 @@ describe('notificationService', () => {
         vi.spyOn(console, 'info').mockImplementation(() => {});
     });
 
-    it('appelle tous les drivers configurés', async () => {
+    /**
+     * Risque couvert : le toast et le journal affirmaient « Canaux : email,
+     * slackWebhook » quel que soit le résultat réel. Un webhook en 404 et un
+     * envoi abouti produisaient exactement le même affichage, et l'e-mail —
+     * qui ne part JAMAIS du navigateur — était compté comme notifié.
+     */
+    it('sépare les canaux réellement joints, échoués et délégués', async () => {
+        // Harnais hermétique : `fetch` échoue par construction, donc Slack rate.
         const detail = await notifyHuman({ node: human, message: 'À valider' });
-        const keys = detail.channels.map((c) => c.key).sort();
-        expect(keys).toEqual(['email', 'slackWebhook']);
+
+        expect(detail.channels).toEqual([]);
+        expect(detail.failed.map((c) => c.key)).toEqual(['slackWebhook']);
+        expect(detail.deferred.map((c) => c.key)).toEqual(['email']);
+    });
+
+    it('compte un canal comme joint uniquement si le driver a abouti', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200 }));
+        const detail = await notifyHuman({
+            node: { ...human, notificationChannels: { slackWebhook: 'https://hooks.slack.com/abc' } },
+            message: 'À valider',
+        });
+
+        expect(detail.channels.map((c) => c.key)).toEqual(['slackWebhook']);
+        expect(detail.failed).toEqual([]);
+        vi.unstubAllGlobals();
     });
 
     it('émet un CustomEvent UI', async () => {

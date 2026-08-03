@@ -91,7 +91,21 @@ export function ActivityLog() {
                         kind: 'notify',
                         nodeId: detail.node.id,
                         nodeName: detail.node.nom,
-                        message: `${detail.message} · ${detail.channels.map((c) => c.key).join(', ') || 'aucun canal'}`,
+                        // Le journal dit ce qui est parti, pas ce qui était configuré.
+                        message: [
+                            detail.message,
+                            detail.channels.length
+                                ? `envoyé : ${detail.channels.map((c) => c.key).join(', ')}`
+                                : 'aucun envoi depuis le navigateur',
+                            detail.failed.length
+                                ? `échec : ${detail.failed.map((c) => c.key).join(', ')}`
+                                : null,
+                            detail.deferred.length
+                                ? `délégué : ${detail.deferred.map((c) => c.key).join(', ')}`
+                                : null,
+                        ]
+                            .filter(Boolean)
+                            .join(' · '),
                         timestamp: detail.timestamp,
                         source: 'local',
                     } as DisplayEvent,
