@@ -46,12 +46,19 @@ import { isSupabaseConfigured } from './lib/supabase';
 import { useFeedback } from './feedback/FeedbackContext';
 import { FeedbackProvider } from './feedback/FeedbackProvider';
 import { describeError } from './utils/asyncGuard';
+import { usePermissions } from './auth/usePermissions';
 
 function AppContent() {
     const { setFilamentState } = useOrigin();
     // Canal de retour unifié : un export ne se conclut jamais en « succès »
     // silencieux, chaque échec reste affiché jusqu'à lecture.
     const feedback = useFeedback();
+    // Un viewer pouvait activer le mode édition et « supprimer » des agents en
+    // croyant agir pour tout le monde. La suppression suit la même règle que
+    // côté serveur : réservée à owner/admin.
+    const { can, isAdmin } = usePermissions();
+    const peutEditerAgents = can('graph:write');
+    const peutSupprimerAgents = isAdmin;
     const {
         loading,
         error,
@@ -302,11 +309,13 @@ function AppContent() {
                                 selectedPole={selectedPole}
                                 orgChartRef={orgChartRef}
                                 isPdfMode={isPdfMode}
-                                isEditMode={isEditMode}
-                                onToggleEditMode={() => setIsEditMode(!isEditMode)}
+                                isEditMode={isEditMode && peutEditerAgents}
+                                onToggleEditMode={
+                                    peutEditerAgents ? () => setIsEditMode(!isEditMode) : undefined
+                                }
                                 highlightedId={highlightedSearch.id}
                                 highlightedPath={highlightedSearch.path}
-                                onDeleteAgent={handleDeleteAgent}
+                                onDeleteAgent={peutSupprimerAgents ? handleDeleteAgent : undefined}
                                 onProfileClick={(agent) => setActiveModal({ type: 'profile', agent })}
                                 onContactClick={(agent) => setActiveModal({ type: 'contact', agent })}
                                 useHybridCard={useHybridCard}

@@ -19,6 +19,7 @@ import type { NotificationEventDetail } from '../../services/notificationService
 import { emitActivity, emitTransition } from '../../services/activityBus';
 import { useOrchestratorBridge } from '../../hooks/useOrchestratorBridge';
 import { useFeedback } from '../../feedback/FeedbackContext';
+import { usePermissions } from '../../auth/usePermissions';
 import { describeError } from '../../utils/asyncGuard';
 
 interface OrchestrationViewProps {
@@ -69,6 +70,13 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
     // effet de bord dans un updater setState (cf. setStatusFor).
     const statusesRef = useRef<Record<string, NodeStatus>>({});
     const feedback = useFeedback();
+    // Les commandes mutantes sont filtrées par rôle : proposer une action qui
+    // finira en 403 muet est pire que ne pas la proposer.
+    const { can, role, isLocalMode } = usePermissions();
+    const peutEcrire = can('graph:write');
+    const peutLancer = can('node:run');
+    const peutValider = can('human:approve');
+    const peutReinitialiser = can('node:reset');
 
     // Pont vers l'orchestrateur backend (config dans Paramètres).
     // Quand `bridge.connected`, on délègue run/approve/reject au service distant
@@ -481,7 +489,11 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
                         </span>
                     </div>
                     <div className="mt-5 flex flex-wrap gap-2">
-                        <Button tone="blue" onClick={() => void runChain()} disabled={!hasAnyNode || isRunning}>
+                        <Button
+                            tone="blue"
+                            onClick={() => void runChain()}
+                            disabled={!hasAnyNode || isRunning || !peutLancer}
+                        >
                             {isRunning ? (
                                 <span className="flex items-center gap-2">
                                     <span
@@ -498,13 +510,14 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
                             tone="slate"
                             variant="soft"
                             onClick={() => void resetChain()}
-                            disabled={!hasAnyNode}
+                            disabled={!hasAnyNode || !peutReinitialiser}
                         >
                             Réinitialiser
                         </Button>
                         <Button
                             tone="slate"
                             variant="soft"
+                            disabled={!peutEcrire}
                             onClick={() => {
                                 setEditorNode(null);
                                 setEditorOpen(true);
@@ -513,6 +526,16 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
                             Nouveau nœud
                         </Button>
                     </div>
+
+                    {/* Masquer sans expliquer laisse l'utilisateur devant une
+                        interface inerte sans savoir pourquoi. */}
+                    {!isLocalMode && !peutEcrire && (
+                        <p className="mt-3 text-xs font-medium text-slate-500">
+                            Ton rôle ({role ?? 'inconnu'}) donne un accès en lecture seule : la
+                            création, l'édition et l'exécution de nœuds sont réservées aux membres
+                            du workspace.
+                        </p>
+                    )}
                 </div>
 
                 <div ref={spotlightRef}>
@@ -573,12 +596,18 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
                                                 setEditorNode(n);
                                                 setEditorOpen(true);
                                             }}
-                                            onRun={(n) => void runNode(n)}
-                                            onEdit={(n) => {
-                                                setEditorNode(n);
-                                                setEditorOpen(true);
-                                            }}
-                                            onValidate={() => setValidationOpen(true)}
+                                            onRun={peutLancer ? (n) => void runNode(n) : undefined}
+                                            onEdit={
+                                                peutEcrire
+                                                    ? (n) => {
+                                                          setEditorNode(n);
+                                                          setEditorOpen(true);
+                                                      }
+                                                    : undefined
+                                            }
+                                            onValidate={
+                                                peutValider ? () => setValidationOpen(true) : undefined
+                                            }
                                             pendingCount={pendingItems.length}
                                         />
                                     ),
@@ -695,9 +724,10 @@ function NodeGroup({
     label: string;
     nodes: HybridNode[];
     onOpen: (n: HybridNode) => void;
-    onRun: (n: HybridNode) => void;
-    onEdit: (n: HybridNode) => void;
-    onValidate: (n: HybridNode) => void;
+    /** Absents quand le rôle ne permet pas l'action — la commande n'est pas rendue. */
+    onRun?: (n: HybridNode) => void;
+    onEdit?: (n: HybridNode) => void;
+    onValidate?: (n: HybridNode) => void;
     pendingCount: number;
 }) {
     return (
@@ -714,9 +744,9 @@ function NodeGroup({
                                 ? pendingCount
                                 : 0
                         }
-                        onRun={n.type === 'AGENT_IA' ? () => onRun(n) : undefined}
-                        onEdit={() => onEdit(n)}
-                        onValidate={n.type === 'HUMAN' ? () => onValidate(n) : undefined}
+                        onRun={onRun && n.type === 'AGENT_IA' ? () => onRun(n) : undefined}
+                        onEdit={onEdit ? () => onEdit(n) : undefined}
+                        onValidate={onValidate && n.type === 'HUMAN' ? () => onValidate(n) : undefined}
                         onOpen={() => onOpen(n)}
                     />
                 ))}
