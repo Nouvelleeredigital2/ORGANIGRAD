@@ -47,6 +47,7 @@ import { useFeedback } from './feedback/FeedbackContext';
 import { FeedbackProvider } from './feedback/FeedbackProvider';
 import { describeError } from './utils/asyncGuard';
 import { usePermissions } from './auth/usePermissions';
+import { ImportPreviewModal } from './components/import/ImportPreviewModal';
 
 function AppContent() {
     const { setFilamentState } = useOrigin();
@@ -80,15 +81,25 @@ function AppContent() {
         activeView,
         setActiveView,
         handleImportFile,
-        clearImportedSource,
         selectedPoleKey,
         setSelectedPoleKey,
         selectedPole,
         poleDirectory,
         focusAgentPole,
         locateAgent,
-        isImportedSourceActive,
+        importPreview,
+        importMode,
+        setImportMode,
+        allowInvalidImport,
+        setAllowInvalidImport,
+        isCommittingImport,
+        importCommitError,
+        confirmImport,
+        cancelImport,
     } = useOrgChartController();
+
+    const { activeWorkspace } = useWorkspaceContext();
+    const activeWorkspaceName = activeWorkspace?.name ?? null;
 
     const [isExporting, setIsExporting] = useState(false);
     const [isPdfMode, setIsPdfMode] = useState(false);
@@ -299,8 +310,6 @@ function AppContent() {
                                 handleResetData={handleResetData}
                                 sourceInfo={sourceInfo}
                                 handleImportFile={handleImportFile}
-                                clearImportedSource={clearImportedSource}
-                                isImportedSourceActive={isImportedSourceActive}
                                 sourceError={error}
                                 retrySource={() => void refresh()}
                             />
@@ -393,6 +402,29 @@ function AppContent() {
                 agent={activeModal?.agent || null}
                 isEditMode={isEditMode}
                 onSave={handleUpdateAgent}
+            />
+
+            {/* Instance UNIQUE : handleImportFile est passé à la fois à la
+                Topbar et aux Paramètres ; deux montages donneraient deux
+                modales concurrentes. */}
+            <ImportPreviewModal
+                isOpen={importPreview !== null}
+                fileName={importPreview?.fileName ?? null}
+                preview={importPreview?.preview ?? null}
+                targetLabel={
+                    activeWorkspaceName
+                        ? `Workspace ${activeWorkspaceName}`
+                        : 'Session locale (hors ligne)'
+                }
+                canWrite={peutEditerAgents}
+                mode={importMode}
+                onModeChange={setImportMode}
+                allowInvalid={allowInvalidImport}
+                onAllowInvalidChange={setAllowInvalidImport}
+                isCommitting={isCommittingImport}
+                commitError={importCommitError}
+                onConfirm={() => void confirmImport()}
+                onCancel={cancelImport}
             />
 
             <Suspense fallback={null}>

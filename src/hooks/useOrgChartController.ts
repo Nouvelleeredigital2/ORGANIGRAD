@@ -7,9 +7,14 @@ import { storageService } from '../services/storageService';
 import type { CsvSourceInfo } from '../utils/csvSource';
 import { buildPoleDirectory, getPoleKey } from '../utils/poleDirectory';
 import { buildPoleHierarchy } from '../utils/poleHierarchy';
-import { importAgentsFromFile } from '../services/importService';
+import { commitImport, previewImport, type ImportPreview } from '../services/importService';
 import { findAgentPath } from '../utils/treeSearch';
 import { useAppRoute } from '../routing/useAppRoute';
+import { agentRepo } from '../services/agentRepo';
+import { useWorkspaceContext } from '../contexts/WorkspaceContext';
+import { usePermissions } from '../auth/usePermissions';
+import { useFeedback } from '../feedback/FeedbackContext';
+import { describeError } from '../utils/asyncGuard';
 
 export type AppView = 'orgchart' | 'dashboard' | 'orchestration' | 'members' | 'api-keys' | 'settings';
 
@@ -20,20 +25,32 @@ export interface SelectedPoleState {
     tree: TreeNode[];
 }
 
+/**
+ * Référence de source stable pour un fichier importé.
+ *
+ * Elle cloisonne les fiches : deux fichiers différents ⇒ deux `sourceRef` ⇒
+ * aucune collision d'identifiants possible entre eux.
+ */
+const normalizeSourceRef = (fileName: string): string =>
+    fileName
+        .replace(/\.(csv|xlsx|xls)$/i, '')
+        .trim()
+        .toLowerCase();
+
 const buildActiveSourceInfo = (
     remoteSourceInfo: CsvSourceInfo,
-    importedFileName: string | null,
+    isServerBacked: boolean,
 ): CsvSourceInfo => {
-    if (!importedFileName) {
+    if (!isServerBacked) {
         return remoteSourceInfo;
     }
 
     return {
-        inputUrl: importedFileName,
-        effectiveUrl: importedFileName,
+        inputUrl: '',
+        effectiveUrl: '',
         isRemote: false,
-        label: 'Import local actif',
-        helperText: `Fichier charge: ${importedFileName}`,
+        label: 'Organigramme enregistré',
+        helperText: 'Les fiches proviennent des données enregistrées, pas du CSV.',
     };
 };
 
@@ -67,65 +84,184 @@ export const useOrgChartController = () => {
 
     const [csvUrl, setCsvUrl] = useState(storageService.getCsvUrl());
     const { data: remoteAgents, loading, error, refresh, sourceInfo: remoteSourceInfo } = useGoogleSheets(csvUrl);
-    const [importedAgents, setImportedAgents] = useState<Agent[] | null>(null);
-    const [importedFileName, setImportedFileName] = useState<string | null>(null);
-
     useEffect(() => {
         storageService.setCsvUrl(csvUrl);
     }, [csvUrl]);
 
-    const [deletedIds, setDeletedIds] = useState<Set<string>>(new Set(storageService.getDeletedIds()));
-    const [localAgents, setLocalAgents] = useState<Record<string, Partial<Agent>>>(storageService.getAgentOverrides());
+    const { activeId: workspaceId } = useWorkspaceContext();
+    const repoCtx = useMemo(() => ({ workspaceId }), [workspaceId]);
+    const { can, isAdmin } = usePermissions();
+    const feedback = useFeedback();
+
+    const peutEcrire = can('graph:write');
+    const peutSupprimer = isAdmin;
+
+    // ── Source de vérité ────────────────────────────────────────────────────
+    // Les fiches persistées priment. Tant qu'il n'y en a aucune, on continue
+    // d'afficher le CSV — en LECTURE SEULE — pour que l'application ne soit
+    // jamais vide pendant la transition.
+    const [serverAgents, setServerAgents] = useState<Agent[]>([]);
+    const [agentsMeta, setAgentsMeta] = useState<{ stale: boolean; error?: string }>({ stale: false });
+
+    const rechargerAgents = useCallback(async () => {
+        const res = await agentRepo.list(repoCtx);
+        setServerAgents(res.agents);
+        setAgentsMeta({ stale: res.stale, ...(res.error ? { error: res.error } : {}) });
+    }, [repoCtx]);
 
     useEffect(() => {
-        storageService.setDeletedIds(Array.from(deletedIds));
-        storageService.setAgentOverrides(localAgents);
-    }, [deletedIds, localAgents]);
+        void rechargerAgents();
+    }, [rechargerAgents]);
 
-    const rawAgents = importedAgents ?? remoteAgents;
-    const sourceInfo = buildActiveSourceInfo(remoteSourceInfo, importedFileName);
+    const isServerBacked = serverAgents.length > 0;
+    const effectiveAgents = isServerBacked ? serverAgents : remoteAgents;
+    const sourceInfo = buildActiveSourceInfo(remoteSourceInfo, isServerBacked);
 
-    const effectiveAgents = useMemo(() => {
-        return rawAgents
-            .filter((agent) => !deletedIds.has(agent.id))
-            .map((agent) => ({
-                ...agent,
-                ...(localAgents[agent.id] || {}),
-            }));
-    }, [rawAgents, deletedIds, localAgents]);
+    // ── Écritures ───────────────────────────────────────────────────────────
+    // Optimiste puis rollback : l'utilisateur voit son geste immédiatement, et
+    // un échec le lui dit au lieu de le laisser croire que c'est enregistré.
+    const handleUpdateAgent = async (id: string, updates: Partial<Agent>) => {
+        if (!peutEcrire) {
+            feedback.error("Ton rôle ne permet pas de modifier l'organigramme.");
+            return;
+        }
+        const cible = effectiveAgents.find((a) => a.id === id);
+        if (!cible) return;
 
-    const handleDeleteAgent = (id: string) => {
-        setDeletedIds((prev) => new Set([...prev, id]));
-    };
+        const avant = serverAgents;
+        const fusionne: Agent = { ...cible, ...updates };
+        setServerAgents((prev) => {
+            const idx = prev.findIndex((a) => a.id === id);
+            return idx === -1 ? [...prev, fusionne] : prev.map((a, i) => (i === idx ? fusionne : a));
+        });
 
-    const handleUpdateAgent = (id: string, updates: Partial<Agent>) => {
-        setLocalAgents((prev) => ({
-            ...prev,
-            [id]: { ...(prev[id] || {}), ...updates },
-        }));
-    };
-
-    const handleResetData = () => {
-        if (confirm('Voulez-vous vraiment reinitialiser toutes les modifications locales ?')) {
-            setDeletedIds(new Set());
-            setLocalAgents({});
+        try {
+            await agentRepo.upsert(fusionne, repoCtx);
+        } catch (err) {
+            setServerAgents(avant);
+            feedback.error(`Modification non enregistrée : ${describeError(err)}`);
         }
     };
 
-    const handleImportFile = async (file: File) => {
-        const agents = await importAgentsFromFile(file);
-        setImportedAgents(agents);
-        setImportedFileName(file.name);
-        setActiveView('orgchart');
+    const handleDeleteAgent = async (id: string) => {
+        if (!peutSupprimer) {
+            feedback.error('Seuls les administrateurs peuvent retirer une fiche.');
+            return;
+        }
+        const cible = effectiveAgents.find((a) => a.id === id);
+        if (!cible) return;
+
+        // Même règle que le trigger serveur : adoption par le grand-parent.
+        const enfants = effectiveAgents.filter((a) => a.rattachementId === id);
+        const question = enfants.length
+            ? `Retirer ${cible.prenom} ${cible.nom} ? ${enfants.length} collaborateur(s) seront rattaché(s) à son supérieur.`
+            : `Retirer ${cible.prenom} ${cible.nom} de l'organigramme ?`;
+        if (!confirm(question)) return;
+
+        const avant = serverAgents;
+        setServerAgents((prev) =>
+            prev
+                .filter((a) => a.id !== id)
+                .map((a) => (a.rattachementId === id ? { ...a, rattachementId: cible.rattachementId } : a)),
+        );
+
+        try {
+            await agentRepo.remove(id, repoCtx);
+            feedback.success(`${cible.prenom} ${cible.nom} retiré de l'organigramme.`);
+        } catch (err) {
+            setServerAgents(avant);
+            feedback.error(`Suppression non enregistrée : ${describeError(err)}`);
+        }
     };
 
-    const clearImportedSource = () => {
-        setImportedAgents(null);
-        setImportedFileName(null);
+    /** Vide les fiches RH — ce n'est plus une purge de surcharges locales. */
+    const handleResetData = async () => {
+        if (!peutSupprimer) {
+            feedback.error("Seuls les administrateurs peuvent vider l'organigramme.");
+            return;
+        }
+        if (!isServerBacked) {
+            feedback.info('Aucune fiche enregistrée à supprimer.');
+            return;
+        }
+        if (
+            !confirm(
+                `Supprimer les ${serverAgents.length} fiches enregistrées ? Cette action est irréversible.`,
+            )
+        ) {
+            return;
+        }
+        try {
+            const supprimes = await agentRepo.clearWorkspace(repoCtx);
+            setServerAgents([]);
+            feedback.success(`${supprimes} fiche(s) supprimée(s).`);
+        } catch (err) {
+            feedback.error(`Suppression non effectuée : ${describeError(err)}`);
+        }
+    };
+
+    // ── Import en deux temps : prévisualisation puis confirmation ───────────
+    const [importPreview, setImportPreview] = useState<{ fileName: string; preview: ImportPreview } | null>(
+        null,
+    );
+    const [importMode, setImportMode] = useState<'merge' | 'replace'>('merge');
+    const [allowInvalidImport, setAllowInvalidImport] = useState(false);
+    const [isCommittingImport, setIsCommittingImport] = useState(false);
+    const [importCommitError, setImportCommitError] = useState<string | null>(null);
+
+    /** N'applique plus le fichier : ouvre la prévisualisation. */
+    const handleImportFile = async (file: File) => {
+        const preview = await previewImport(file);
+        setImportPreview({ fileName: file.name, preview });
+        setImportMode('merge');
+        setAllowInvalidImport(false);
+        setImportCommitError(null);
+    };
+
+    const cancelImport = () => {
+        setImportPreview(null);
+        setImportCommitError(null);
+    };
+
+    const confirmImport = async () => {
+        if (!importPreview) return;
+        setIsCommittingImport(true);
+        setImportCommitError(null);
+
+        try {
+            const agents = commitImport(importPreview.preview, { allowInvalid: allowInvalidImport });
+            const sourceRef = normalizeSourceRef(importPreview.fileName);
+            // La provenance est portée par chaque fiche : c'est elle qui rend
+            // les identifiants stables et cloisonnés par source.
+            const marques: Agent[] = agents.map((a) => ({
+                ...a,
+                sourceKind: 'import',
+                sourceRef,
+                externalKey: a.externalKey ?? a.id,
+            }));
+
+            const bilan = await agentRepo.bulkUpsert(marques, repoCtx, {
+                sourceKind: 'import',
+                sourceRef,
+                mode: importMode,
+            });
+
+            await rechargerAgents();
+            setImportPreview(null);
+            setActiveView('orgchart');
+            feedback.success(
+                `Import terminé : ${bilan.inserted} ajoutée(s), ${bilan.updated} mise(s) à jour` +
+                    (bilan.deleted ? `, ${bilan.deleted} retirée(s)` : '') +
+                    '.',
+            );
+        } catch (err) {
+            setImportCommitError(describeError(err));
+        } finally {
+            setIsCommittingImport(false);
+        }
     };
 
     const applyCsvUrl = (nextUrl: string) => {
-        clearImportedSource();
         setCsvUrl(nextUrl);
     };
 
@@ -273,13 +409,31 @@ export const useOrgChartController = () => {
         handleUpdateAgent,
         handleResetData,
         handleImportFile,
-        clearImportedSource,
         selectedPoleKey,
         setSelectedPoleKey,
         selectedPole,
         poleDirectory,
         focusAgentPole,
         locateAgent,
-        isImportedSourceActive: Boolean(importedFileName),
+
+        // ── Import en deux temps ────────────────────────────────────────────
+        importPreview,
+        importMode,
+        setImportMode,
+        allowInvalidImport,
+        setAllowInvalidImport,
+        isCommittingImport,
+        importCommitError,
+        confirmImport,
+        cancelImport,
+
+        // ── État de la source ───────────────────────────────────────────────
+        /** `true` ⇒ les fiches viennent des données enregistrées, pas du CSV. */
+        isServerBacked,
+        /** Lecture distante en échec : on montre un cache, il faut le dire. */
+        agentsStale: agentsMeta.stale,
+        agentsError: agentsMeta.error ?? null,
+        canEditAgents: peutEcrire,
+        canDeleteAgents: peutSupprimer,
     };
 };

@@ -15,8 +15,6 @@ interface SettingsViewProps {
     handleResetData: () => void;
     sourceInfo: CsvSourceInfo;
     handleImportFile: (file: File) => Promise<void>;
-    clearImportedSource: () => void;
-    isImportedSourceActive: boolean;
     /** Erreur de chargement de la source — l'écran d'erreur global est masqué
      *  sur cette vue, sans quoi elle serait invisible ici. */
     sourceError: string | null;
@@ -30,8 +28,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     handleResetData,
     sourceInfo,
     handleImportFile,
-    clearImportedSource,
-    isImportedSourceActive,
     sourceError,
     retrySource,
 }) => {
@@ -146,15 +142,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                             </div>
                         )}
 
-                        {isImportedSourceActive && (
-                            <button
-                                onClick={clearImportedSource}
-                                className="flex items-center gap-2 px-5 py-3 bg-slate-100 text-slate-700 font-bold rounded-xl hover:bg-slate-200 transition-all"
-                            >
-                                <RotateCcw className="w-4 h-4" />
-                                Revenir a la source standard
-                            </button>
-                        )}
                     </div>
                 </section>
 

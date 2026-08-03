@@ -50,9 +50,28 @@ const isBranchLeader = (agent: Agent, rootId: string): boolean => {
     return haystack.includes('chef de service') || haystack.includes('responsable');
 };
 
+/**
+ * Construit l'arbre d'un pôle.
+ *
+ * Deux régimes, dans cet ordre :
+ *
+ *  1. **Rattachement explicite** — dès qu'au moins un agent porte un
+ *     `rattachementId`, il fait foi. C'est le cas des données persistées, où la
+ *     hiérarchie est une donnée à part entière que l'utilisateur peut corriger.
+ *
+ *  2. **Heuristique** — sinon seulement, on déduit la hiérarchie de mots-clés
+ *     de fonction (« DGS », « directeur », « chef de service »…). Ce régime
+ *     dépend de L'ORDRE DES LIGNES : réordonner le CSV change l'organigramme.
+ *     Il n'est conservé que pour les sources brutes sans rattachement.
+ */
 export const buildPoleHierarchy = (agents: Agent[]): TreeNode[] => {
     if (agents.length === 0) {
         return [];
+    }
+
+    const hasExplicitLinks = agents.some((agent) => Boolean(agent.rattachementId));
+    if (hasExplicitLinks) {
+        return buildHierarchy(agents);
     }
 
     const enrichedAgents = agents.map((agent) => ({ ...agent }));

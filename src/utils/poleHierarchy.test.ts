@@ -65,4 +65,25 @@ describe('buildPoleHierarchy', () => {
         expect(salma?.rattachementId).toBe('edith');
         expect(sandrine?.rattachementId).toBe('nathalie');
     });
+
+    /**
+     * Risque couvert : l'heuristique écrasait TOUS les rattachements, y compris
+     * ceux saisis explicitement. Une hiérarchie corrigée à la main était donc
+     * réécrite au rendu suivant, et dépendait de l'ordre des lignes.
+     */
+    it('respecte le rattachement explicite au lieu de le déduire', () => {
+        const tree = buildPoleHierarchy([
+            // L'ordre est volontairement inverse de la hiérarchie déclarée.
+            makeAgent({ id: 'agent', nom: 'DUPONT', fonction: 'Gestionnaire', gradeStyle: 'Agent', rattachementId: 'chef' }),
+            makeAgent({ id: 'chef', nom: 'MARTIN', fonction: 'Chef de service', gradeStyle: 'Responsable', rattachementId: 'dg' }),
+            makeAgent({ id: 'dg', nom: 'LEROY', fonction: 'Directeur général', gradeStyle: 'Direction', rattachementId: null }),
+        ]);
+
+        expect(tree).toHaveLength(1);
+        expect(tree[0]!.id).toBe('dg');
+        expect(tree[0]!.children?.map((c) => c.id)).toEqual(['chef']);
+
+        const chef = findNode(tree, (n) => n.id === 'chef');
+        expect(chef?.children?.map((c) => c.id)).toEqual(['agent']);
+    });
 });
