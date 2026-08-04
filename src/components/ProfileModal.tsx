@@ -9,13 +9,15 @@ interface ProfileModalProps {
     onClose: () => void;
     agent: Agent | null;
     isEditMode?: boolean;
-    onSave?: (id: string, updates: Partial<Agent>) => void;
+    onSave?: (id: string, updates: Partial<Agent>) => Promise<{ ok: boolean; message?: string }>;
 }
 
 export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose, agent, isEditMode = false, onSave }) => {
     const feedback = useFeedback();
     const [formData, setFormData] = React.useState<Partial<Agent>>({});
     const fileInputRef = React.useRef<HTMLInputElement>(null);
+    const [isSaving, setIsSaving] = React.useState(false);
+    const [saveError, setSaveError] = React.useState<string | null>(null);
 
     const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
@@ -33,16 +35,20 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose, age
 
     if (!agent) return null;
 
-    const handleSave = () => {
+    const handleSave = async () => {
         if (!onSave || !agent.id) return;
         if (formData.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
-            alert('Adresse email invalide.');
+            setSaveError('Adresse email invalide.');
             return;
         }
-        onSave(agent.id, formData);
-        // La sauvegarde est locale a cette session tant que les donnees RH ne
-        // sont pas persistees cote serveur : on le dit plutot que de fermer
-        // en silence et laisser un doute.
+        setSaveError(null);
+        setIsSaving(true);
+        const result = await onSave(agent.id, formData);
+        setIsSaving(false);
+        if (!result.ok) {
+            setSaveError(result.message ?? 'Modification non enregistrée. Réessayez.');
+            return;
+        }
         feedback.success(`Fiche mise a jour · ${agent.prenom} ${agent.nom}.`);
         onClose();
     };
@@ -153,14 +159,17 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose, age
 
                     {isEditMode ? (
                         <div className="flex gap-3 pt-4">
+                            {saveError && <p className="w-full text-sm font-medium text-red-600">{saveError}</p>}
                             <button
-                                onClick={handleSave}
+                                onClick={() => void handleSave()}
+                                disabled={isSaving}
                                 className="flex-1 h-12 bg-blue-600 text-white font-black uppercase tracking-widest text-xs rounded-2xl shadow-xl shadow-blue-200 hover:bg-blue-700 transition-all"
                             >
-                                Enregistrer
+                                {isSaving ? 'Enregistrement…' : 'Enregistrer'}
                             </button>
                             <button
                                 onClick={onClose}
+                                disabled={isSaving}
                                 className="flex-1 h-12 bg-slate-100 text-slate-500 font-black uppercase tracking-widest text-xs rounded-2xl hover:bg-slate-200 transition-all"
                             >
                                 Annuler

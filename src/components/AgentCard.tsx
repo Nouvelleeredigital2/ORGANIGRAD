@@ -70,9 +70,7 @@ export const AgentCard: React.FC<AgentCardProps> = ({
                 <button
                     onClick={(e) => {
                         e.stopPropagation();
-                        if (confirm(`Supprimer ${agent.prenom} ${agent.nom} ?`)) {
-                            onDelete();
-                        }
+                        onDelete();
                     }}
                     className="absolute left-4 top-4 z-30 rounded-lg bg-red-50 p-2 text-red-500 opacity-0 shadow-sm transition-all hover:bg-red-100 group-hover:opacity-100 print:hidden"
                     title="Supprimer l'agent"
