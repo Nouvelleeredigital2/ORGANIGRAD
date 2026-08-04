@@ -35,6 +35,16 @@ export async function startOrchestrator() {
                 supabaseServiceRoleKey: env.supabaseServiceRoleKey,
             },
         });
+        // Consommation du bus APPS-2026 en production — DÉSACTIVÉE PAR DÉFAUT.
+        // Le producteur, lui, est déjà câblé côté pgServer (hop 1 via le moteur,
+        // hop 5 sur approve/reject) : Organigrad PARLE déjà sur le bus, il n'y
+        // ÉCOUTE pas encore. Activer avec SYNAPSE_CONSUMER=1.
+        // Prérequis avant activation durable : cloisonner la file du consumer par
+        // workspace (cf. avertissement en tête de synapse/consumer.ts).
+        if (process.env.SYNAPSE_CONSUMER === '1') {
+            registerSynapseConsumer(app);
+            console.log('[orchestrator] consumer Synapse ACTIF (mode pg)');
+        }
         await app.listen({ port, host: '0.0.0.0' });
         console.log(`[orchestrator] mode Postgres + API key sur http://0.0.0.0:${port}`);
         return { app, mode: 'pg' as const };

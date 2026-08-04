@@ -7,7 +7,14 @@
  * ex. LINK — relient la décision à la demande). Organigrad reste l'autorité.
  *
  * Auto-désactivé si `SYNAPSE_URL` est absent (aucun effet hors démo).
- * Branché uniquement en mode dev in-memory (pas d'auth) — pas en mode pg.
+ *
+ * Modes : branché d'office en dev in-memory ; en mode pg (production) il faut
+ * l'activer explicitement avec `SYNAPSE_CONSUMER=1` — voir `api/bootstrap.ts`.
+ *
+ * LIMITE CONNUE, à lever avant tout usage multi-tenant : la file `pending` est
+ * globale au processus et n'est PAS cloisonnée par workspace. En mode pg, toute
+ * clé authentifiée voit et peut décider l'ensemble des validations reçues du bus,
+ * quel que soit son workspace. C'est la raison du drapeau d'activation.
  */
 import type { FastifyInstance, FastifyReply } from "fastify";
 
@@ -83,6 +90,12 @@ export function registerSynapseConsumer(app: FastifyInstance): void {
     for (const e of items) {
       const id = typeof e.id === "string" ? e.id : undefined;
       if (e.type !== "validation.requested" || !id || pending.has(id)) continue;
+      // Ne pas ré-ingérer nos PROPRES demandes : le producteur (hop 1) publie
+      // `validation.requested` pour chaque nœud entrant en attente humaine. Les
+      // reprendre ici ferait apparaître deux fois la même validation et
+      // permettrait de la décider par un chemin qui court-circuite la machine
+      // à états — l'approbation d'un nœud passe par /api/nodes/:id/approve.
+      if (String(e.sourceApp ?? "").toLowerCase() === "organigrad") continue;
       const p = (e.payload ?? {}) as Record<string, unknown>;
       pending.set(id, {
         id,
