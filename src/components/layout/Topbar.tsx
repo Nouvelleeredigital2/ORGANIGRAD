@@ -9,6 +9,7 @@ interface TopbarProps {
     handleImportFile: (file: File) => Promise<void>;
     loading: boolean;
     isExporting: boolean;
+    canExport: boolean;
     spotlightInput: React.ReactNode;
 }
 
@@ -18,6 +19,7 @@ export const Topbar: React.FC<TopbarProps> = ({
     handleImportFile,
     loading,
     isExporting,
+    canExport,
     spotlightInput,
 }) => {
     const { setFilamentState } = useOrigin();
@@ -79,7 +81,7 @@ export const Topbar: React.FC<TopbarProps> = ({
                 <button
                     className="origin-button flex items-center gap-2 text-xs font-extrabold uppercase tracking-widest"
                     onClick={handleExportCSV}
-                    disabled={loading || isImporting}
+                    disabled={loading || isImporting || !canExport}
                     title="Exporter les donnees modifiees au format CSV"
                 >
                     <CloudDownload className="w-4 h-4" />
@@ -88,11 +90,16 @@ export const Topbar: React.FC<TopbarProps> = ({
                 <button
                     className="origin-button-primary flex items-center gap-2 text-xs font-extrabold uppercase tracking-widest"
                     onClick={handleExportPDF}
-                    disabled={isExporting || loading || isImporting}
+                    disabled={isExporting || loading || isImporting || !canExport}
                 >
                     <FileText className="w-4 h-4" />
                     Export PDF
                 </button>
+                {!canExport && !loading && (
+                    <p className="absolute right-8 top-[100%] mt-2 text-xs font-medium text-slate-500" role="status">
+                        Importez des fiches avant d&apos;exporter.
+                    </p>
+                )}
             </div>
             
         </OriginGlass>

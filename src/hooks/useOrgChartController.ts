@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useGoogleSheets } from './useGoogleSheets';
 import type { Agent } from '../types/agent';
 import type { TreeNode } from '../types/orgchart';
@@ -24,6 +24,10 @@ export interface SelectedPoleState {
     agents: Agent[];
     tree: TreeNode[];
 }
+
+export type AgentSaveResult =
+    | { ok: true }
+    | { ok: false; message: string };
 
 /**
  * Référence de source stable pour un fichier importé.
@@ -102,9 +106,12 @@ export const useOrgChartController = () => {
     // jamais vide pendant la transition.
     const [serverAgents, setServerAgents] = useState<Agent[]>([]);
     const [agentsMeta, setAgentsMeta] = useState<{ stale: boolean; error?: string }>({ stale: false });
+    const agentsVersionRef = useRef(0);
 
     const rechargerAgents = useCallback(async () => {
+        const version = agentsVersionRef.current;
         const res = await agentRepo.list(repoCtx);
+        if (version !== agentsVersionRef.current) return;
         setServerAgents(res.agents);
         setAgentsMeta({ stale: res.stale, ...(res.error ? { error: res.error } : {}) });
     }, [repoCtx]);
@@ -117,29 +124,59 @@ export const useOrgChartController = () => {
     const effectiveAgents = isServerBacked ? serverAgents : remoteAgents;
     const sourceInfo = buildActiveSourceInfo(remoteSourceInfo, isServerBacked);
 
+    const preparePersistentSnapshot = async (): Promise<Agent[]> => {
+        if (isServerBacked) return serverAgents;
+        if (effectiveAgents.length === 0) return [];
+
+        const sourceRef = csvUrl.trim() || 'embedded-csv';
+        const snapshot = effectiveAgents.map((agent) => ({
+            ...agent,
+            sourceKind: 'remote_csv' as const,
+            sourceRef,
+            externalKey: agent.externalKey ?? agent.id,
+        }));
+
+        await agentRepo.bulkUpsert(snapshot, repoCtx, {
+            sourceKind: 'remote_csv',
+            sourceRef,
+            mode: 'replace',
+        });
+        agentsVersionRef.current += 1;
+        setServerAgents(snapshot);
+        return snapshot;
+    };
+
     // ── Écritures ───────────────────────────────────────────────────────────
     // Optimiste puis rollback : l'utilisateur voit son geste immédiatement, et
     // un échec le lui dit au lieu de le laisser croire que c'est enregistré.
-    const handleUpdateAgent = async (id: string, updates: Partial<Agent>) => {
+    const handleUpdateAgent = async (
+        id: string,
+        updates: Partial<Agent>,
+    ): Promise<AgentSaveResult> => {
         if (!peutEcrire) {
-            feedback.error("Ton rôle ne permet pas de modifier l'organigramme.");
-            return;
+            return { ok: false, message: "Ton rôle ne permet pas de modifier l'organigramme." };
         }
-        const cible = effectiveAgents.find((a) => a.id === id);
-        if (!cible) return;
 
-        const avant = serverAgents;
+        let base: Agent[];
+        try {
+            base = await preparePersistentSnapshot();
+        } catch (err) {
+            return { ok: false, message: `Préparation de la sauvegarde impossible : ${describeError(err)}` };
+        }
+
+        const cible = base.find((a) => a.id === id);
+        if (!cible) return { ok: false, message: 'Cette fiche est introuvable.' };
+
         const fusionne: Agent = { ...cible, ...updates };
-        setServerAgents((prev) => {
-            const idx = prev.findIndex((a) => a.id === id);
-            return idx === -1 ? [...prev, fusionne] : prev.map((a, i) => (i === idx ? fusionne : a));
-        });
+        const suivant = base.map((a) => (a.id === id ? fusionne : a));
+        setServerAgents(suivant);
 
         try {
             await agentRepo.upsert(fusionne, repoCtx);
+            return { ok: true };
         } catch (err) {
-            setServerAgents(avant);
-            feedback.error(`Modification non enregistrée : ${describeError(err)}`);
+            setServerAgents(base);
+            return { ok: false, message: `Modification non enregistrée : ${describeError(err)}` };
         }
     };
 
@@ -158,18 +195,23 @@ export const useOrgChartController = () => {
             : `Retirer ${cible.prenom} ${cible.nom} de l'organigramme ?`;
         if (!confirm(question)) return;
 
-        const avant = serverAgents;
-        setServerAgents((prev) =>
-            prev
-                .filter((a) => a.id !== id)
-                .map((a) => (a.rattachementId === id ? { ...a, rattachementId: cible.rattachementId } : a)),
-        );
+        let base: Agent[];
+        try {
+            base = await preparePersistentSnapshot();
+        } catch (err) {
+            feedback.error(`Suppression non effectuée : ${describeError(err)}`);
+            return;
+        }
+        const suivant = base
+            .filter((a) => a.id !== id)
+            .map((a) => (a.rattachementId === id ? { ...a, rattachementId: cible.rattachementId } : a));
+        setServerAgents(suivant);
 
         try {
             await agentRepo.remove(id, repoCtx);
             feedback.success(`${cible.prenom} ${cible.nom} retiré de l'organigramme.`);
         } catch (err) {
-            setServerAgents(avant);
+            setServerAgents(base);
             feedback.error(`Suppression non enregistrée : ${describeError(err)}`);
         }
     };
