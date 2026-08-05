@@ -148,7 +148,9 @@ test('Bug #2 fix — quand connecté, "Lancer la chaîne" POST sur l\'orchestrat
     });
 
     await gotoOrchestration(page);
-    await expect(page.getByText(/Orchestrateur connecté/i)).toBeVisible({ timeout: 6000 });
+    // La fixture SSE se ferme après son message : le bridge est donc
+    // honnêtement marqué dégradé, tout en restant disponible pour l'action HTTP.
+    await expect(page.getByText(/Orchestrateur (connecté|dégradé)/i)).toBeVisible({ timeout: 6000 });
 
     await page.getByRole('button', { name: /Lancer la chaîne/i }).click();
 

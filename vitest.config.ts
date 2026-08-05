@@ -7,7 +7,10 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: './src/test/setup.ts',
     css: true,
-    exclude: ['node_modules/**', 'e2e/**', 'dist/**', 'orchestrator/**'],
+    // Les worktrees locaux peuvent contenir une seconde copie des suites
+    // frontend, e2e et orchestrateur ; Vitest ne doit tester que le checkout
+    // courant (chaque worktree exécute ses propres commandes).
+    exclude: ['node_modules/**', 'e2e/**', 'dist/**', 'orchestrator/**', '.worktrees/**'],
     // Hermétisme (Priorité 8) : neutralise toute config réelle qui pourrait fuiter
     // de .env.local dans les tests — Supabase/orchestrateur restent NON configurés,
     // donc aucun client réseau réel n'est instancié.
