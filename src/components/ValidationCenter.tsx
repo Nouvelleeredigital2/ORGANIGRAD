@@ -68,6 +68,7 @@ export function ValidationCenter({
     if (!isOpen) return null;
 
     const handleRejectConfirm = async (node: HybridNode) => {
+        if (pendingId === node.id) return;
         const fb = rejectFeedback.trim();
         if (!fb) return;
         setPendingId(node.id);
@@ -197,7 +198,7 @@ export function ValidationCenter({
                                             />
                                             <button
                                                 onClick={() => void handleRejectConfirm(it.node)}
-                                                disabled={!rejectFeedback.trim()}
+                                                disabled={!rejectFeedback.trim() || pendingId === it.node.id}
                                                 style={{
                                                     background: 'var(--system-red)',
                                                     color: '#fff',
@@ -206,8 +207,8 @@ export function ValidationCenter({
                                                     padding: '5px 10px',
                                                     fontSize: 11,
                                                     fontWeight: 600,
-                                                    cursor: rejectFeedback.trim() ? 'pointer' : 'not-allowed',
-                                                    opacity: rejectFeedback.trim() ? 1 : 0.5,
+                                                    cursor: rejectFeedback.trim() && pendingId !== it.node.id ? 'pointer' : 'not-allowed',
+                                                    opacity: rejectFeedback.trim() && pendingId !== it.node.id ? 1 : 0.5,
                                                 }}
                                             >
                                                 <XCircle size={12} style={{ display: 'inline', marginRight: 4 }} />

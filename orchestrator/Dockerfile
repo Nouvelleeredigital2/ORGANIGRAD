@@ -2,7 +2,7 @@
 # Organigrad — orchestrateur Fastify (@organigrad/orchestrator)
 # Stack : Node 20 / TypeScript / Fastify 5 / postgres. Multi-stage (build → run).
 # Entrée : dist/api/bootstrap.js (script "start"). Port : 3001 (via PORT).
-# ⚠️ VÉRIFIER : que bootstrap.ts lise process.env.PORT et expose GET /health.
+# Healthcheck public exposé par le serveur : GET /healthz.
 #    Si l'orchestrateur fait partie d'un workspace npm, builder depuis la racine
 #    du repo avec --filter plutôt que ce contexte local.
 # =============================================================================
@@ -30,6 +30,6 @@ COPY --from=builder /app/dist ./dist
 USER node
 EXPOSE 3001
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD wget -qO- "http://localhost:${PORT}/health" || exit 1
+  CMD wget -qO- "http://localhost:${PORT}/healthz" || exit 1
 
 CMD ["node", "dist/api/bootstrap.js"]

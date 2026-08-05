@@ -9,6 +9,7 @@ import type { WorkspaceRole } from '../../types/supabase';
 import { usePermissions } from '../../auth/usePermissions';
 import { useFeedback } from '../../feedback/FeedbackContext';
 import { useCopyToClipboard } from '../../hooks/useCopyToClipboard';
+import { canAdminManageMember } from './adminGuards';
 
 /**
  * MembersView — gestion des membres et invitations d'un workspace.
@@ -378,7 +379,7 @@ export function MembersView() {
                             {members.map((m) => {
                                 const isSelf = m.user_id === userId;
                                 const isOwner = m.user_id === ownerId;
-                                const canModify = isAdmin && !isOwner;
+                                const canModify = canAdminManageMember({ isAdmin, isOwner, isSelf });
                                 return (
                                     <li
                                         key={m.user_id}

@@ -7,6 +7,7 @@ import { cx } from '../../design/cx';
 import { usePermissions } from '../../auth/usePermissions';
 import { useFeedback } from '../../feedback/FeedbackContext';
 import { useCopyToClipboard } from '../../hooks/useCopyToClipboard';
+import { canLoadApiKeys, mayReplaceUncopiedKey } from './adminGuards';
 
 /**
  * ApiKeysView — gestion des clés API par workspace.
@@ -45,6 +46,11 @@ export function ApiKeysView() {
     const refresh = useCallback(async () => {
         // Auparavant : liste vidée en silence, donc « Aucune clé pour ce
         // workspace » alors qu'aucune requête n'avait été tentée.
+        if (!canLoadApiKeys(isAdmin)) {
+            setKeys([]);
+            setUnavailable("Ton rôle ne permet pas de consulter les clés API de ce workspace.");
+            return;
+        }
         if (!supabase) {
             setKeys([]);
             setUnavailable("Supabase n'est pas configuré : les clés API sont indisponibles.");
@@ -66,7 +72,7 @@ export function ApiKeysView() {
         if (err) setError(err.message);
         else setKeys(data ?? []);
         setLoading(false);
-    }, [activeId]);
+    }, [activeId, isAdmin]);
 
     useEffect(() => {
         // Chargement initial déféré (les setState de refresh s'exécutent dans un
@@ -83,6 +89,16 @@ export function ApiKeysView() {
     const handleCreate = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!supabase || !activeId || !newKeyName.trim()) return;
+        if (
+            revealedKey &&
+            !mayReplaceUncopiedKey(
+                !copied,
+                copied ||
+                    confirm(
+                        "Une clé non copiée est encore affichée. Créer une autre clé la rendra irrécupérable. Continuer ?",
+                    ),
+            )
+        ) return;
         setCreating(true);
         setError(null);
         const { data, error: err } = await supabase.rpc('create_workspace_api_key', {
@@ -136,7 +152,7 @@ export function ApiKeysView() {
                     <p className="t-body mt-2 max-w-2xl">
                         {isAdmin
                             ? "Une clé d'API authentifie un agent ou un service externe auprès de l'orchestrateur Organigrad. Le token complet n'est affiché qu'une seule fois à la création — copie-le immédiatement."
-                            : `Consultation des clés du workspace. Ton rôle (${role ?? 'inconnu'}) ne permet pas d'en créer ni d'en révoquer.`}
+                            : `Ton rôle (${role ?? 'inconnu'}) ne permet pas de consulter, créer ni révoquer les clés API.`}
                     </p>
                 </div>
 

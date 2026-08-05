@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { ValidationCenter, type ValidationItem } from './ValidationCenter';
 import type { HybridNode } from '../types/hybridNode';
 
@@ -104,5 +104,22 @@ describe('ValidationCenter — panneau coulissant v2', () => {
         expect(onClose).not.toHaveBeenCalled();
         fireEvent.click(overlay);
         expect(onClose).toHaveBeenCalled();
+    });
+
+    it('sends only one rejection while the first request is pending', async () => {
+        let resolveReject!: (result: boolean) => void;
+        const onReject = vi.fn(() => new Promise<boolean>((resolve) => { resolveReject = resolve; }));
+        const { container } = render(
+            <ValidationCenter isOpen items={[items[0]!]} onClose={() => {}} onApprove={() => {}} onReject={onReject} />,
+        );
+        fireEvent.click(screen.getByRole('button', { name: /Rejeter/i }));
+        fireEvent.change(container.querySelector('input')!, { target: { value: 'A revoir' } });
+        const confirm = screen.getByRole('button', { name: /Confirmer/i });
+        fireEvent.click(confirm);
+        fireEvent.click(confirm);
+        expect(onReject).toHaveBeenCalledTimes(1);
+        expect(confirm).toBeDisabled();
+        resolveReject(true);
+        await waitFor(() => expect(screen.queryByRole('button', { name: /Confirmer/i })).toBeNull());
     });
 });

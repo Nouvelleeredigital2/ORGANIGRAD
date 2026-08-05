@@ -18,6 +18,27 @@ function makeFakeClient(reachable: boolean) {
 }
 
 describe('useOrchestratorBridge', () => {
+    it('signals a failed configured connection instead of local mode', async () => {
+        const client = makeFakeClient(false);
+        const { result } = renderHook(() => useOrchestratorBridge({ clientFactory: () => client }));
+        await waitFor(() => expect(result.current.connectionState).toBe('failed'));
+        expect(result.current.connected).toBe(false);
+    });
+
+    it('becomes degraded when the SSE subscription fails after the snapshot', async () => {
+        let onError: ((event: Event) => void) | undefined;
+        const client = makeFakeClient(true);
+        client.subscribe = vi.fn((_onEvent, error) => {
+            onError = error;
+            return () => {};
+        });
+        const { result } = renderHook(() => useOrchestratorBridge({ clientFactory: () => client }));
+        await waitFor(() => expect(result.current.connectionState).toBe('connected'));
+        act(() => onError?.(new Event('error')));
+        await waitFor(() => expect(result.current.connectionState).toBe('degraded'));
+        expect(result.current.connected).toBe(true);
+    });
+
     it('mode brouillon : connected reste false quand l\'orchestrateur n\'est pas joignable', async () => {
         const client = makeFakeClient(false);
         const { result } = renderHook(() => useOrchestratorBridge({ clientFactory: () => client }));

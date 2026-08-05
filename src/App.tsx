@@ -449,13 +449,13 @@ function PostAuthGate({ children }: { children: React.ReactNode }) {
         return (
             <AcceptInvitation
                 token={pendingToken}
-                onAccepted={async () => {
+                onAccepted={async (workspaceId) => {
                     setPendingToken(null);
                     clearPendingInviteToken();
                     const updated = await refresh();
                     // Basculer automatiquement vers le premier workspace disponible
                     // (le workspace accepté sera en tête de liste après refresh)
-                    if (updated?.[0]?.id) setActive(updated[0].id);
+                    if (updated?.some((workspace) => workspace.id === workspaceId)) setActive(workspaceId);
                 }}
                 onSkip={() => {
                     setPendingToken(null);

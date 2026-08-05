@@ -23,6 +23,7 @@ import { supabase } from '../lib/supabase';
  */
 export interface OrchestratorBridge {
     connected: boolean;
+    connectionState: 'local' | 'connected' | 'degraded' | 'failed';
     nodes: OrchestratorGraphNode[];
     /** Client actif — exposé pour que le repo puisse router les écritures via l'orchestrateur. */
     client: OrchestratorClient | null;
@@ -46,6 +47,7 @@ export function useOrchestratorBridge(
     opts: UseOrchestratorBridgeOptions = {},
 ): OrchestratorBridge {
     const [connected, setConnected] = useState(false);
+    const [connectionState, setConnectionState] = useState<OrchestratorBridge['connectionState']>('local');
     const [nodes, setNodes] = useState<OrchestratorGraphNode[]>([]);
     const [activeClient, setActiveClient] = useState<OrchestratorClient | null>(null);
     const clientRef = useRef<OrchestratorClient | null>(null);
@@ -80,6 +82,7 @@ export function useOrchestratorBridge(
         (async () => {
             if (disabled) {
                 setConnected(false);
+                setConnectionState('local');
                 return;
             }
             const client = clientFactory
@@ -92,6 +95,7 @@ export function useOrchestratorBridge(
             if (!reachable) {
                 setConnected(false);
                 setActiveClient(null);
+                setConnectionState('failed');
                 return;
             }
             try {
@@ -99,13 +103,17 @@ export function useOrchestratorBridge(
                 if (cancelled) return;
                 setNodes(snapshot);
                 setConnected(true);
+                setConnectionState('connected');
                 setActiveClient(client);
                 unsubscribe = client.subscribe((evt: SseStatusEvent) => {
                     setNodes((prev) => applyTransitionPatch(prev, evt));
+                }, () => {
+                    if (!cancelled) setConnectionState('degraded');
                 });
             } catch {
                 setConnected(false);
                 setActiveClient(null);
+                setConnectionState('failed');
             }
         })();
 
@@ -118,6 +126,7 @@ export function useOrchestratorBridge(
 
     return {
         connected,
+        connectionState,
         nodes,
         client: activeClient,
         runNode: async (id) => {

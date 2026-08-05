@@ -18,7 +18,7 @@ import { clearPendingInviteToken } from './inviteToken';
 
 interface AcceptInvitationProps {
     token: string;
-    onAccepted: () => void;
+    onAccepted: (workspaceId: string) => void;
     onSkip: () => void;
 }
 
@@ -56,7 +56,7 @@ export function AcceptInvitation({ token, onAccepted, onSkip }: AcceptInvitation
         if (!supabase) return;
         setLoading(true);
         setError(null);
-        const { error: err } = await supabase.rpc('accept_workspace_invitation', {
+        const { data, error: err } = await supabase.rpc('accept_workspace_invitation', {
             p_token: token,
         });
         setLoading(false);
@@ -64,8 +64,13 @@ export function AcceptInvitation({ token, onAccepted, onSkip }: AcceptInvitation
             setError(err.message);
             return;
         }
+        const row = Array.isArray(data) ? data[0] : data;
+        if (!row?.workspace_id) {
+            setError("L'invitation a été acceptée, mais le workspace rejoint n'a pas été renvoyé.");
+            return;
+        }
         clearPendingInviteToken();
-        onAccepted();
+        onAccepted(row.workspace_id);
     };
 
     return (

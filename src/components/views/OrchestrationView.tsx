@@ -287,6 +287,12 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
             return;
         }
 
+        if (bridge.connectionState !== 'local') {
+            setIsRunning(false);
+            feedback.error('Orchestrateur indisponible : la chaîne n\'a pas été simulée. Vérifiez la connexion dans Paramètres.');
+            return;
+        }
+
         // --- Simulation locale (sans orchestrateur) ---
         resetStatuses();
         roots.forEach((root) =>
@@ -447,6 +453,10 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
     };
 
     const handleSaveNode = async (node: HybridNode) => {
+        if (!peutEcrire) {
+            setSaveError('Votre rôle ne permet pas de modifier les nœuds.');
+            return;
+        }
         const exists = hybridSource.some((n) => n.id === node.id);
         try {
             // `orchestratorClient` route l'écriture via l'orchestrateur, qui
@@ -510,13 +520,21 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
                         <span
                             className="inline-block h-2 w-2 rounded-full"
                             style={{
-                                background: bridge.connected
+                                background: bridge.connectionState === 'failed'
+                                    ? 'var(--system-red)'
+                                    : bridge.connectionState === 'degraded'
+                                      ? 'var(--system-orange)'
+                                      : bridge.connected
                                     ? 'var(--system-green)'
                                     : 'var(--ink-5)',
                             }}
                         />
                         <span style={{ color: 'var(--fg-3)' }}>
-                            {bridge.connected
+                            {bridge.connectionState === 'failed'
+                                ? 'Orchestrateur indisponible · aucune simulation ne sera lancée'
+                                : bridge.connectionState === 'degraded'
+                                  ? 'Orchestrateur dégradé · reconnexion du flux en cours'
+                                  : bridge.connected
                                 ? 'Orchestrateur connecté · transitions distribuées'
                                 : 'Mode local · transitions simulées (configurer l\'orchestrateur dans Paramètres)'}
                         </span>
@@ -609,7 +627,7 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
                             <p className="text-sm font-medium text-slate-400">Chargement des nœuds…</p>
                         </div>
                     ) : !hasAnyNode ? (
-                        <EmptyState onCreate={() => setEditorOpen(true)} />
+                        <EmptyState onCreate={() => setEditorOpen(true)} canCreate={peutEcrire} />
                     ) : (
                         <>
                             <MCPAnchorsOverlay containerRef={stageRef} nodes={allNodes} />
@@ -825,7 +843,7 @@ function NodeGroup({
     );
 }
 
-function EmptyState({ onCreate }: { onCreate: () => void }) {
+function EmptyState({ onCreate, canCreate }: { onCreate: () => void; canCreate: boolean }) {
     return (
         <div className="flex h-full min-h-[260px] flex-col items-center justify-center gap-4 text-center">
             <div
@@ -853,7 +871,7 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
                 pour commencer à orchestrer.
             </p>
             <div className="mt-2">
-                <Button tone="blue" onClick={onCreate}>
+                <Button tone="blue" onClick={onCreate} disabled={!canCreate}>
                     Créer le premier nœud
                 </Button>
             </div>
