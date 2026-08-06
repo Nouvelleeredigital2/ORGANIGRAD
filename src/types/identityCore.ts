@@ -40,16 +40,28 @@ export interface IdentityCoreState {
     projects: IndependentProject[];
 }
 
+/**
+ * Applications concernées par le passeport de projet 2026.
+ *
+ * La sélection ne duplique jamais la charte : elle ne transporte que les
+ * références versionnées Identity Core rattachées au projet.
+ */
 export const PROJECT_APPLICATIONS = [
     'NED IA',
-    'Élite SEO',
-    'Socialize EA',
-    'Vector Studio',
-    'Virtual Production OS',
-    'Atelier Orvion',
-    'Memoria Player Studio',
-    'ExploraViva',
-    'Organigrad',
+    'Identity Core',
     'Mémoire Vive Connect',
+    'Biblio-Tech-RAG',
+    'Organigrad',
+    'Hermes',
+    'LINK',
+    'Élite SEO',
+    'Atelier Orvion',
+    'Neo Cortex Digital',
+    'Virtual Production OS',
+    'Vector Studio',
+    'Podcast IA',
+    'MindFlow',
+    'Socialize EA',
+    'AgentdeTestUX',
 ] as const;
 
