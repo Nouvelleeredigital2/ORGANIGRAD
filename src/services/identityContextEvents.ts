@@ -82,6 +82,25 @@ export function publishProjectCreated(project: IndependentProject, workspaceId: 
             identityVersion: project.identityVersion,
             participatingApps: project.participatingApps,
         },
+  });
+}
+
+export function publishProjectIdentityAttached(project: IndependentProject, workspaceId: string | null): void {
+    if (!project.identityId || project.identityVersion === null) return;
+    void publish({
+        type: 'project.identity_attached',
+        sourceApp: project.ownerApp,
+        targetApps: project.participatingApps,
+        workspaceId,
+        projectId: project.id,
+        identityId: project.identityId,
+        identityVersion: project.identityVersion,
+        payload: {
+            identityId: project.identityId,
+            identityVersion: project.identityVersion,
+            ownerApp: project.ownerApp,
+            participatingApps: project.participatingApps,
+        },
     });
 }
 
