@@ -24,6 +24,9 @@ const SettingsView = lazy(() =>
 const OrchestrationView = lazy(() =>
     import('./components/views/OrchestrationView').then((m) => ({ default: m.OrchestrationView })),
 );
+const IdentityCoreView = lazy(() =>
+    import('./components/views/IdentityCoreView').then((m) => ({ default: m.IdentityCoreView })),
+);
 const ApiKeysView = lazy(() =>
     import('./components/views/ApiKeysView').then((m) => ({ default: m.ApiKeysView })),
 );
@@ -298,6 +301,8 @@ function AppContent() {
                             />
                         ) : activeView === 'orchestration' ? (
                             <OrchestrationView rawAgents={rawAgents || []} />
+                        ) : activeView === 'identity-core' ? (
+                            <IdentityCoreView />
                         ) : activeView === 'members' ? (
                             <MembersView />
                         ) : activeView === 'api-keys' ? (
