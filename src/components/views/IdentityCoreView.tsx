@@ -3,7 +3,7 @@ import { BookOpen, Check, FolderKanban, Link2, Plus, ShieldCheck, Sparkles } fro
 import { useWorkspaceContext } from '../../contexts/WorkspaceContext';
 import { useFeedback } from '../../feedback/FeedbackContext';
 import { identityCoreStore } from '../../services/identityCoreStore';
-import { publishIdentityVersion, publishProjectCreated } from '../../services/identityContextEvents';
+import { publishIdentityVersion, publishProjectCreated, publishProjectIdentityAttached } from '../../services/identityContextEvents';
 import { PROJECT_APPLICATIONS, type BrandIdentity, type IndependentProject } from '../../types/identityCore';
 
 const fieldClass = 'w-full rounded-xl border border-[var(--hairline)] bg-white px-3 py-2.5 text-sm text-[var(--fg-1)] outline-none transition focus:border-[var(--accent)] focus:ring-2 focus:ring-[rgba(0,113,227,0.12)]';
@@ -118,6 +118,7 @@ export const IdentityCoreView: React.FC = () => {
             identityVersion: identity?.version ?? null,
         });
         publishProjectCreated(project, workspaceId);
+        publishProjectIdentityAttached(project, workspaceId);
         setProjectForm(emptyProject);
         feedback.success('Projet indépendant créé.');
     };
