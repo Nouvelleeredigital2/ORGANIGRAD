@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { LayoutDashboard, Loader2, Printer, Users, Settings, Layers3, Workflow, Menu, X, LogOut, ChevronDown, Key, UsersRound } from 'lucide-react';
+import { LayoutDashboard, Loader2, Printer, Users, Settings, Layers3, Workflow, Menu, X, LogOut, ChevronDown, Key, UsersRound, Sparkles } from 'lucide-react';
 import type { AppView } from '../../hooks/useOrgChartController';
 import type { CsvSourceInfo } from '../../utils/csvSource';
 import type { PoleDirectoryEntry } from '../../utils/poleDirectory';
@@ -213,6 +213,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     <NavItem icon={<Users size={17} strokeWidth={1.6} />} label="Organigrammes" active={activeView === 'orgchart'} onClick={() => setActiveView('orgchart')} />
                     <NavItem icon={<LayoutDashboard size={17} strokeWidth={1.6} />} label="Tableau de bord" active={activeView === 'dashboard'} onClick={() => setActiveView('dashboard')} />
                     <NavItem icon={<Workflow size={17} strokeWidth={1.6} />} label="Orchestration" active={activeView === 'orchestration'} onClick={() => setActiveView('orchestration')} />
+                    <NavItem icon={<Sparkles size={17} strokeWidth={1.6} />} label="Identity Core" active={activeView === 'identity-core'} onClick={() => setActiveView('identity-core')} />
                     <NavItem icon={<UsersRound size={17} strokeWidth={1.6} />} label="Membres" active={activeView === 'members'} onClick={() => setActiveView('members')} />
                     <NavItem icon={<Key size={17} strokeWidth={1.6} />} label="Clés API" active={activeView === 'api-keys'} onClick={() => setActiveView('api-keys')} />
                     <NavItem icon={<Settings size={17} strokeWidth={1.6} />} label="Paramètres" active={activeView === 'settings'} onClick={() => setActiveView('settings')} />
