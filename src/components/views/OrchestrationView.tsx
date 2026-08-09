@@ -19,6 +19,7 @@ import { notifyHuman, NOTIFICATION_EVENT } from '../../services/notificationServ
 import type { NotificationEventDetail } from '../../services/notificationService';
 import { emitActivity, emitTransition } from '../../services/activityBus';
 import { useOrchestratorBridge } from '../../hooks/useOrchestratorBridge';
+import { useOrchestratorConfig } from '../../hooks/useOrchestratorConfig';
 import { useFeedback } from '../../feedback/FeedbackContext';
 import { usePermissions } from '../../auth/usePermissions';
 import { describeError } from '../../utils/asyncGuard';
@@ -83,6 +84,13 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
     // Quand `bridge.connected`, on délègue run/approve/reject au service distant
     // et on observe les statuts via SSE plutôt que de simuler localement.
     const bridge = useOrchestratorBridge();
+    // Proxy vocal (SDK @apps2026/voice-client) : dérivé de l'URL de l'orchestrateur
+    // (ex. http://localhost:3001/api → http://localhost:3001/api/voice/gateway).
+    // Sans orchestrateur configuré, pas de bouton micro.
+    const { config: orchestratorConfig } = useOrchestratorConfig();
+    const voiceProxyBasePath = orchestratorConfig.baseUrl
+        ? `${orchestratorConfig.baseUrl.replace(/\/+$/, '')}/voice/gateway`
+        : undefined;
 
     // Cloisonnement : au changement de workspace, on repart IMMÉDIATEMENT du
     // cache namespacé de CE workspace (jamais celui du précédent). Ajustement
@@ -715,6 +723,7 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
                 items={pendingItems}
                 onClose={() => setValidationOpen(false)}
                 mode={bridge.connected ? 'remote' : 'local'}
+                voiceProxyBasePath={voiceProxyBasePath}
                 onShowDetails={(node) => setDetailsNode(node)}
                 onApprove={async (node) => {
                     // Le panneau ne se referme qu'au SUCCÈS : le refermer sur un

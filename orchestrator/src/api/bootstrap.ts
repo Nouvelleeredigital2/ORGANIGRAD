@@ -10,6 +10,7 @@ import { Notifier } from '../observability/notifier.js';
 import { buildServer } from './server.js';
 import { buildPgServer } from './pgServer.js';
 import { registerSynapseConsumer } from '../synapse/consumer.js';
+import { registerVoiceGatewayRoutes } from './voiceGateway.js';
 import { createSynapseProducer } from '../synapse/producer.js';
 import { getSql } from '../state/pgGraphStore.js';
 import { loadEnv } from '../config/env.js';
@@ -53,6 +54,9 @@ export async function startOrchestrator() {
         // ÉCOUTE pas encore. Activer avec SYNAPSE_CONSUMER=1.
         // Prérequis avant activation durable : cloisonner la file du consumer par
         // workspace (cf. avertissement en tête de synapse/consumer.ts).
+        // Proxy vocal (SDK @apps2026/voice-client) — 503 tant que le gateway
+        // n'est pas configuré (NED_VOICE_GATEWAY_URL / NED_VOICE_GATEWAY_TOKEN).
+        registerVoiceGatewayRoutes(app);
         if (process.env.SYNAPSE_CONSUMER === '1') {
             registerSynapseConsumer(app);
             console.log('[orchestrator] consumer Synapse ACTIF (mode pg)');
@@ -87,6 +91,8 @@ export async function startOrchestrator() {
     // Participation au bus APPS-2026 (consomme validation.requested, ré-émet la
     // décision). Auto-inactif si SYNAPSE_URL absent. Dev/in-memory uniquement.
     registerSynapseConsumer(app);
+    // Proxy vocal (SDK @apps2026/voice-client) — même patron qu'en mode pg.
+    registerVoiceGatewayRoutes(app);
     await app.listen({ port, host: '0.0.0.0' });
     console.log(`[orchestrator] mode in-memory sur http://0.0.0.0:${port}`);
     return { app, store, engine, notifier, mode: 'memory' as const };
