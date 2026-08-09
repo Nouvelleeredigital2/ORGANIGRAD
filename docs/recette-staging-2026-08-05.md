@@ -115,9 +115,42 @@ publique et des sessions utilisateur réelles.
 | O-05 | Depuis le 2026-08-09, l'accès SQL du serveur MCP Supabase échoue (`28P01 password authentication failed for user "postgres"`) — probable rotation du mot de passe base. L'API REST/Auth fonctionne normalement. | Mettre à jour la connexion du serveur MCP (ou fournir le nouveau DSN) pour ré-activer migrations/advisors outillés. |
 | O-06 | Recette UI non exécutée : import CSV via la SPA, édition/suppression/export (A-01→A-04), clés API côté UI, orchestration HITL, SSE deux onglets. | Dérouler la recette navigateur avec SPA + orchestrateur locaux (JWKS configuré). |
 
-## Décision au 2026-08-09
+## Recette UI connectée du 2026-08-09 (SPA locale, port 5199, comptes réels)
 
-**NO-GO maintenu**, mais le périmètre bloquant s'est resserré : les couches
-données (invitations, RLS, import RPC) sont validées en connecté ; restent le
-déploiement de l'orchestrateur (O-01, O-03), la recette UI (O-06) et les points
-opérationnels O-02/O-05.
+SPA `npm run dev` branchée sur le projet réel, sessions owner puis viewer.
+L'orchestrateur n'a pas pu être démarré (O-05 : DSN base invalidé par la
+rotation du mot de passe Postgres) — le volet orchestration/SSE reste dû.
+
+| Scénario UI | Résultat |
+| --- | --- |
+| Import CSV : prévisualisation (3 valides, 1 doublon signalé), destination affichée, confirmation | ✅ persisté en base (3 fiches `import`), pôle « Finances » apparu |
+| A-02 : édition d'une fiche (fonction), autres fiches conservées | ✅ persisté, aucune autre fiche modifiée |
+| A-03 : suppression d'une fiche (Emma Leroy) puis rechargement | ✅ persistée, absente après reload |
+| Export CSV avec données | ✅ non vide (en-têtes + fiches du pôle sélectionné) |
+| A-01 : workspace vide → Export CSV/PDF désactivés + message « Importez des fiches avant d'exporter » | ✅ |
+| Invitation UI : création, lien `?invite=inv_…` révélé une fois, révocation | ✅ persisté (`revoked_at` en base) ; la liste « en attente » ne se rafraîchit pas immédiatement après révocation (cosmétique) |
+| Clé API UI : création, révélation unique `ok_…`, scopes techniques figés, révocation | ✅ (`recette-ui-20260809` active pour la future recette orchestrateur ; `recette-ui-revoke` révoquée) |
+| Viewer : rôle affiché, lecture seule, guards Clés API/import/édition | ✅ après correctif R-05 |
+| A-04 (erreur d'écriture sans toast de succès) | Non rejoué en connecté — couvert par `e2e/audit-derniers-points.spec.ts` |
+
+## Anomalie supplémentaire trouvée et corrigée
+
+| Réf | Anomalie | Correctif |
+| --- | --- | --- |
+| R-05 | `useWorkspace` lisait `workspace_members` sans filtre `user_id`. La policy « wm read members » renvoyant les lignes de tous les co-membres, chaque workspace multi-membres apparaissait en doublon (erreur React « duplicate key ») et le rôle affiché était celui de la plus ancienne ligne — **tout membre se voyait « owner » dans l'UI** (le serveur refusait, l'UI mentait). | Filtre `.eq('user_id', userId)` + 3 tests (`useWorkspace.test.ts`). Vérifié en direct : le viewer voit « viewer », guards corrects. |
+
+À noter (non corrigé, décision produit) : la liste des membres affiche des
+préfixes d'UUID au lieu des e-mails des co-membres — la policy `profiles`
+(« profile self read ») ne permet de lire que son propre profil, la vue
+`workspace_members_view` renvoie donc des colonnes vides pour les autres.
+Ajouter une policy « profils visibles entre co-membres » si l'affichage est
+souhaité.
+
+## Décision au 2026-08-09 (mise à jour après recette UI)
+
+**NO-GO maintenu**, périmètre restant : déploiement orchestrateur (O-01, O-03
+avec `SUPABASE_JWKS_URL`), Edge Function e-mail (O-02), accès base à rétablir
+après rotation du mot de passe (O-05 — bloque aussi la recette
+orchestration/HITL/SSE, dernier volet de O-06), historique migrations (O-04,
+optionnel). Les couches données ET l'ensemble des parcours UI hors
+orchestration sont validés en connecté.
