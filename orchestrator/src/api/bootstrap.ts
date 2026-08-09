@@ -15,6 +15,7 @@ import { createSynapseProducer } from '../synapse/producer.js';
 import { getSql } from '../state/pgGraphStore.js';
 import { loadEnv } from '../config/env.js';
 import { createSupabaseJwtVerifier } from './userAuth.js';
+import { pathToFileURL } from 'node:url';
 
 export async function startOrchestrator() {
     // Validation centralisée — échoue tôt avec un message clair si config invalide.
@@ -98,7 +99,12 @@ export async function startOrchestrator() {
     return { app, store, engine, notifier, mode: 'memory' as const };
 }
 
-const isEntry = import.meta.url === `file://${process.argv[1]?.replace(/\\/g, '/')}`;
+// pathToFileURL normalise correctement (encodage %20, 2 vs 3 slashes) — la
+// reconstruction manuelle précédente échouait sur tout chemin avec espace
+// (ex. Windows "...\5070 Ti\...") : startOrchestrator() n'était jamais
+// appelé, le process restait vivant sans jamais écouter de port. Incident
+// réel du 09/08 (banc E2E local).
+const isEntry = process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isEntry || process.env.ORCHESTRATOR_AUTOSTART === '1') {
     startOrchestrator().catch((err) => {
         console.error('[orchestrator] échec démarrage', err);
