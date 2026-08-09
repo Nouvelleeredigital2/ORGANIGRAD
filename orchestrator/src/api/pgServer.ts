@@ -83,23 +83,36 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
     };
 
     // Journalise une action sensible (best-effort, n'échoue jamais le flux).
+    // `.catch()` explicite obligatoire : `void promise` ne rattrape RIEN, ce
+    // n'est qu'une annotation « je n'attends pas ce résultat ». `PgAuditTrail`
+    // attrape déjà ses propres erreurs, mais un rejet non rattrapé ici (toute
+    // implémentation d'`AuditTrail` future, ou un throw synchrone) fait
+    // planter tout le process Node (unhandled rejection) — constaté en
+    // recette le 2026-08-09 après une erreur SQL en cascade.
     const recordAudit = (
         req: import('fastify').FastifyRequest,
         action: string,
         resourceId: string | null,
         result: 'success' | 'denied' | 'error',
     ): void => {
-        void audit.record({
-            workspaceId: req.workspaceId ?? 'unknown',
-            actorKind: req.userId ? 'user' : 'api_key',
-            actorId: req.userId ?? req.apiKeyId ?? null,
-            action,
-            resourceType: 'node',
-            resourceId,
-            result,
-            ip: req.ip ?? null,
-            requestId: req.id ?? null,
-        });
+        audit
+            .record({
+                workspaceId: req.workspaceId ?? 'unknown',
+                actorKind: req.userId ? 'user' : 'api_key',
+                actorId: req.userId ?? req.apiKeyId ?? null,
+                action,
+                resourceType: 'node',
+                resourceId,
+                result,
+                ip: req.ip ?? null,
+                requestId: req.id ?? null,
+            })
+            .catch((err) => {
+                console.warn('[audit] échec écriture du journal (rattrapé)', {
+                    action,
+                    error: err instanceof Error ? err.message : String(err),
+                });
+            });
     };
 
     // Classe un échec en 'denied' (scope) ou 'error', pour l'audit.
