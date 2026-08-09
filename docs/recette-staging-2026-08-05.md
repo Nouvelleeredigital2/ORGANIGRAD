@@ -146,11 +146,68 @@ préfixes d'UUID au lieu des e-mails des co-membres — la policy `profiles`
 Ajouter une policy « profils visibles entre co-membres » si l'affichage est
 souhaité.
 
-## Décision au 2026-08-09 (mise à jour après recette UI)
+## Recette orchestrateur du 2026-08-09 (local, mode pg + JWKS réel)
 
-**NO-GO maintenu**, périmètre restant : déploiement orchestrateur (O-01, O-03
-avec `SUPABASE_JWKS_URL`), Edge Function e-mail (O-02), accès base à rétablir
-après rotation du mot de passe (O-05 — bloque aussi la recette
-orchestration/HITL/SSE, dernier volet de O-06), historique migrations (O-04,
-optionnel). Les couches données ET l'ensemble des parcours UI hors
-orchestration sont validés en connecté.
+Après rotation du mot de passe base et migration du pooler Supabase vers
+`aws-1-eu-north-1` (O-05 levé), `orchestrator/.env.production` et
+`orchestrator/.env.vps` ont été mis à jour avec le DSN correct et
+`SUPABASE_JWKS_URL` (O-03 levé). Orchestrateur lancé en local
+(`node --env-file=.env.local dist/src/api/bootstrap.js`, mode Postgres réel,
+projet `xucmfdggetwxmpquqjvj`) pour dérouler le dernier volet de la recette.
+
+| Scénario | Résultat |
+| --- | --- |
+| `GET /healthz` | ✅ `{"ok":true}` |
+| `graph:read` via clé API, session humaine avec `X-Workspace-Id` | ✅ ; sans le header → 400 `MISSING_WORKSPACE_ID` ; sans Bearer → 401 |
+| CRUD nœud (`POST/PUT /api/nodes`) : clé API refusée (pas de `graph:write`), member/owner autorisés, viewer refusé | ✅ 403/200 conformes |
+| `run-flow` via clé API (scope `node:run`) | ✅ nœud passe en `WAITING_HUMAN_APPROVAL` |
+| `approve`/`reject`/`reset` : clé API 403, viewer 403, member 200 | ✅ matrice HITL conforme aux scopes documentés |
+| SSE deux connexions simultanées (deux tickets, deux flux `GET /api/events`) recevant les mêmes transitions | ✅ diffusion identique sur les deux ; légère duplication d'événements côté polling (idempotent pour le client, non bloquant) |
+| CORS : origine `localhost:5199` autorisée, origine inconnue sans en-têtes CORS | ✅ |
+| `GET /api/graph` : absence de secrets (systemPrompt, clé, mot de passe) | ✅ seuls des booléens (`hasSystemPrompt`) |
+| Advisors sécurité Supabase | ✅ stables : 6 WARN SECURITY DEFINER intentionnels + 1 WARN protection mots de passe compromis désactivée, aucune table sans RLS |
+
+## Anomalies trouvées et corrigées le 2026-08-09 (orchestrateur)
+
+| Réf | Anomalie | Gravité | Correctif |
+| --- | --- | --- | --- |
+| R-06 | `getSql()` connectait avec `prepare: true` alors que le DSN de production passe par le pooler Supabase en **mode transaction** (port 6543, Supavisor). Ce mode réassigne la connexion Postgres backend à chaque transaction : un prepared statement créé sur l'une n'existe plus sur la suivante → `prepared statement "…" does not exist`. Reproduit sur `reset`. | Élevée (persistance) | `prepare: false` dans `pgGraphStore.ts`. |
+| R-07 | Conséquence de R-06 : l'erreur SQL faisait échouer aussi l'écriture d'audit, et `recordAudit` appelait `void audit.record(...)` — `void` n'attrape aucun rejet. Le rejet non rattrapé **a fait crasher tout le process orchestrateur**, coupant toutes les sessions et flux SSE en cours, pas seulement la requête fautive. | **Critique (disponibilité)** | `.catch()` explicite sur l'appel dans `pgServer.ts`. |
+
+Les deux corrections sont indépendantes et cumulatives : R-06 supprime la cause
+déclenchante, R-07 empêche qu'une erreur d'audit future (quelle qu'en soit la
+cause) ne puisse à nouveau faire tomber le service. Rejoué après correctif :
+`reset` répond `200`, l'orchestrateur reste vivant. 2 nouveaux fichiers de
+test (5 cas : config `prepare:false`, absence d'`unhandledRejection` sur
+approve/reject/reset avec un audit qui rejette).
+
+Anomalie mineure non corrigée (hors priorité sécurité/données de cette
+session) : `POST /api/nodes` accepte tout `id` de 1 à 256 caractères en
+validation applicative, mais la colonne Postgres est de type `uuid` — un
+`id` non-UUID remonte une erreur 500 brute au lieu d'un 400 de validation
+propre. À corriger dans un prochain lot (ajout d'un contrôle de format UUID
+dans `dto.ts`).
+
+## Décision au 2026-08-09 (mise à jour après recette orchestrateur)
+
+**GO conditionnel.** Toutes les couches testables en connecté sont validées :
+données/RLS, parcours UI complets, et désormais orchestration/HITL/SSE avec
+une vraie session ES256 et une vraie clé API. Une anomalie critique de
+disponibilité (R-07, aggravée par R-06) a été trouvée et corrigée avant
+qu'elle n'atteigne la production — c'était le test le plus utile de cette
+recette.
+
+Restent bloquants avant un GO définitif, tous de nature **opérationnelle**
+(pas applicative) :
+
+- **O-01** — l'orchestrateur VPS (`https://orchestrator.srv1017182.hstgr.cloud`)
+  est toujours injoignable. Il doit être redéployé avec les `.env.production`
+  / `.env.vps` corrigés aujourd'hui (nouveau DSN pooler + `SUPABASE_JWKS_URL`)
+  pour bénéficier aussi des correctifs R-06/R-07.
+- **O-02** — Edge Function `notify-email` toujours non déployée
+  (`supabase functions deploy notify-email` après configuration des secrets).
+- **O-04** — historique `supabase_migrations` incomplet pour les migrations
+  `20260803*` (dérive de comptabilité, objets conformes, ne pas rejouer) —
+  optionnel.
+
+Aucune anomalie de données, de droits ou de sécurité applicative ouverte.
