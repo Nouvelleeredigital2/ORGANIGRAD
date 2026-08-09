@@ -1,0 +1,123 @@
+# Compte-rendu de pré-recette staging — 2026-08-05
+
+## Décision
+
+**NO-GO** : la recette connectée et le déploiement ne doivent pas démarrer dans
+l'état actuel. Ce compte-rendu ne valide aucun environnement de staging.
+
+## Contrôles effectués
+
+| Contrôle | Résultat | Preuve |
+| --- | --- | --- |
+| État Git | Bloquant : modifications non commitées et trois migrations non suivies | `git status --short --branch` |
+| Qualité orchestrateur | Conforme localement : 246 tests passés, 48 scénarios connectés ignorés faute de secrets dédiés | `orchestrator/npm run check` |
+| Historique migrations cible | Non vérifiable : CLI Supabase absente et aucun projet lié au dépôt | absence de `supabase/config.toml` et `supabase/.temp/project-ref` |
+| Doctrine migrations | Confirmée : migrations avant 2026-08-03 non rejouables | `supabase/migrations/README.md` |
+| Healthcheck image | Contrôlé statiquement : `GET /healthz` | `orchestrator/Dockerfile` |
+| CORS, RLS, API et SSE réels | Non exécutés : exigent la cible staging et les comptes de recette | `docs/synchronisation-livraison.md` |
+
+## Changements à préserver avant revue
+
+Les fichiers suivants étaient déjà modifiés ou non suivis lors de l'audit ; ils
+n'ont pas été modifiés par cette recette :
+
+- `orchestrator/src/api/auth.ts`
+- `orchestrator/src/api/pgServer.ts`
+- `orchestrator/src/api/userAuth.ts`
+- `orchestrator/src/config/env.ts`
+- `supabase/schema/baseline_2026-08-03.sql`
+- `supabase/migrations/20260805150000_fix_invite_workspace_member_ambiguous_expires_at.sql`
+- `supabase/migrations/20260805150100_fix_accept_workspace_invitation_ambiguous_workspace_id.sql`
+- `supabase/migrations/20260805150200_fix_inv_read_by_email_no_auth_users.sql`
+
+## Préconditions avant reprise
+
+1. Revoir, tester et commiter séparément les changements et migrations listés
+   ci-dessus ; conserver un arbre Git propre.
+2. Installer ou fournir le CLI Supabase, puis lier explicitement le projet de
+   **staging** et exécuter `supabase migration list` avant toute écriture.
+3. Vérifier dans le coffre ou le runtime, sans afficher leurs valeurs, les
+   variables SPA, orchestrateur et Edge Function décrites dans
+   `docs/synchronisation-livraison.md`.
+4. Confirmer la sauvegarde et la procédure de retour arrière de la base cible.
+5. Créer les comptes `owner`, `admin`, `member` et `viewer`, ainsi qu'une clé
+   API technique à scopes limités.
+
+## Recette à exécuter une fois les préconditions levées
+
+- Importer, modifier, supprimer et exporter un CSV ; rejouer A-01 à A-04.
+- Vérifier les refus RLS et les droits UI/API de chaque rôle.
+- Vérifier invitations, révocation et acceptation dans le bon workspace.
+- Vérifier les scopes de la clé API et le refus des décisions humaines.
+- Vérifier l'exécution, l'attente humaine et les transitions SSE sur deux
+  onglets.
+- Vérifier `GET /healthz`, l'allowlist CORS réelle, les advisors RLS et
+  l'absence de secrets dans les logs et `GET /api/graph`.
+
+Consigner alors l'URL de staging, l'horodatage, les identités de test et le
+résultat de chaque scénario dans ce fichier avant de décider un **GO**.
+
+---
+
+# Mise à jour — recette connectée des 2026-08-05 et 2026-08-09
+
+Environnement testé : projet Supabase `xucmfdggetwxmpquqjvj`
+(`https://xucmfdggetwxmpquqjvj.supabase.co`), seul projet Organigrad existant,
+utilisé comme cible de recette. Accès par API REST/Auth avec la clé anon
+publique et des sessions utilisateur réelles.
+
+## Comptes et données de recette (2026-08-05)
+
+- Workspace « Recette staging 2026-08-05 » (`45b68ab3-99ee-4323-8593-de93b67e1b00`).
+- Quatre comptes confirmés `ceglialaurent+recette-{owner,admin,member,viewer}-20260805@gmail.com`,
+  rattachés par le flux réel d'invitation (RPC), rôles respectifs vérifiés.
+- Trois fiches `org_agents` importées par `import_org_agents` (mode `merge`,
+  rattachements hiérarchiques résolus).
+
+## Scénarios exécutés et résultats
+
+| Scénario | Résultat |
+| --- | --- |
+| Création des 4 comptes + login mot de passe | ✅ (limite d'envoi d'e-mails Supabase contournée : 3 comptes créés côté SQL, confirmés en base) |
+| Invitation : création par owner | ❌ puis ✅ — anomalie R-01 corrigée |
+| Invitation : acceptation par le compte invité | ❌ puis ✅ — anomalie R-02 corrigée |
+| Invitation : doublon pendant refusé (`invitation_already_pending`) | ✅ |
+| Invitation : viewer ne peut pas inviter (`forbidden`) | ✅ |
+| Invitation : mauvais compte refusé (`email_mismatch`) | ✅ |
+| Invitation : révocation par owner (update direct comme la SPA) | ❌ puis ✅ — anomalie R-03 corrigée |
+| Invitation : révocation par viewer sans effet (RLS) | ✅ |
+| Invitation : acceptation après expiration refusée | ✅ (expiration simulée en base) |
+| Import RPC `import_org_agents` (3 fiches, rattachements) | ✅ |
+| RLS `org_agents` — owner : SELECT/INSERT/UPDATE/DELETE | ✅ tous autorisés |
+| RLS `org_agents` — admin : SELECT/INSERT/UPDATE/DELETE | ✅ tous autorisés |
+| RLS `org_agents` — member : SELECT/INSERT/UPDATE ✅, DELETE refusé | ✅ conforme |
+| RLS `org_agents` — viewer : SELECT ✅, INSERT 42501, UPDATE/DELETE 0 ligne | ✅ conforme |
+| Advisors Supabase : aucune table sans RLS | ✅ (7 WARN : 6 fonctions SECURITY DEFINER exposées volontairement, protection mots de passe compromis désactivée) |
+| Sonde de contrôle 2026-08-09 : invite + révocation + accept | ✅ les correctifs sont toujours actifs en base |
+
+## Anomalies trouvées et corrigées (migrations appliquées le 2026-08-05)
+
+| Réf | Anomalie | Correctif |
+| --- | --- | --- |
+| R-01 | `invite_workspace_member` échouait toujours : `42702 column reference "expires_at" is ambiguous` (colonne OUT vs colonne de table). Toute invitation était impossible. | Migration `20260805150000` (alias `wi` qualifiant la sous-requête) + report baseline. Appliquée et vérifiée. |
+| R-02 | `accept_workspace_invitation` échouait toujours : `42702 "workspace_id" is ambiguous` (liste de colonnes de `ON CONFLICT` résolue contre les colonnes OUT). Toute acceptation était impossible. | Migration `20260805150100` (pragma `#variable_conflict use_column`) + report baseline. Appliquée et vérifiée. |
+| R-03 | Policy `inv read by email` interrogeait `auth.users` : `permission denied` pour `authenticated` sur toute lecture/écriture directe de `workspace_invitations` (liste et révocation dans la SPA cassées). | Migration `20260805150200` (`auth.email()` au lieu de la sous-requête) + report baseline. Appliquée et vérifiée. |
+| R-04 | Les jetons de session du projet sont signés **ES256** (« JWT signing keys ») ; l'orchestrateur ne vérifiait que HS256 : approve/reject/reset et CRUD de nœuds auraient échoué en 401 même avec `SUPABASE_JWT_SECRET`. | Support ES256 via JWKS dans l'orchestrateur (`SUPABASE_JWKS_URL`, `createSupabaseJwtVerifier`), 12 tests hermétiques. À déployer. |
+
+## Anomalies ouvertes (bloquantes pour le GO)
+
+| Réf | Anomalie | Action requise |
+| --- | --- | --- |
+| O-01 | L'orchestrateur déployé `https://orchestrator.srv1017182.hstgr.cloud` ne répond pas (échec de connexion immédiat sur `/healthz`). | Redéployer/redémarrer, avec la nouvelle variable `SUPABASE_JWKS_URL`. |
+| O-02 | Aucune Edge Function déployée alors que `EMAIL_EDGE_FUNCTION_URL` pointe sur `notify-email`. | `supabase functions deploy notify-email` après configuration des secrets, ou retirer la variable. |
+| O-03 | `orchestrator/.env.production` ne définit ni `SUPABASE_JWT_SECRET` ni `SUPABASE_JWKS_URL`, et `SUPABASE_SERVICE_ROLE_KEY` y est un placeholder. | Compléter la configuration de production (JWKS obligatoire, cf. R-04). |
+| O-04 | Historique `supabase_migrations` : les migrations `20260803*` (org_agents) n'y figurent pas (schéma appliqué hors historique). Objets présents et conformes — ne pas rejouer ; dérive de comptabilité seulement. | Optionnel : insérer les entrées d'historique manquantes lors d'une fenêtre maîtrisée. |
+| O-05 | Depuis le 2026-08-09, l'accès SQL du serveur MCP Supabase échoue (`28P01 password authentication failed for user "postgres"`) — probable rotation du mot de passe base. L'API REST/Auth fonctionne normalement. | Mettre à jour la connexion du serveur MCP (ou fournir le nouveau DSN) pour ré-activer migrations/advisors outillés. |
+| O-06 | Recette UI non exécutée : import CSV via la SPA, édition/suppression/export (A-01→A-04), clés API côté UI, orchestration HITL, SSE deux onglets. | Dérouler la recette navigateur avec SPA + orchestrateur locaux (JWKS configuré). |
+
+## Décision au 2026-08-09
+
+**NO-GO maintenu**, mais le périmètre bloquant s'est resserré : les couches
+données (invitations, RLS, import RPC) sont validées en connecté ; restent le
+déploiement de l'orchestrateur (O-01, O-03), la recette UI (O-06) et les points
+opérationnels O-02/O-05.

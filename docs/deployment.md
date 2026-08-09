@@ -40,9 +40,12 @@ npm ci && npm run build
 ```
 
 L'orchestrateur valide sa configuration au démarrage. En production, renseigner
-au minimum `SUPABASE_DB_URL`, `SUPABASE_JWT_SECRET`, `APP_URL` et
-`CORS_ALLOWED_ORIGINS`; ajouter `SUPABASE_SERVICE_ROLE_KEY` si
-`EMAIL_EDGE_FUNCTION_URL` est configurée. La SPA requiert
+au minimum `SUPABASE_DB_URL`, `APP_URL`, `CORS_ALLOWED_ORIGINS` et la
+vérification des sessions humaines : `SUPABASE_JWT_SECRET` (projets legacy,
+jetons HS256) **ou** `SUPABASE_JWKS_URL` (projets migrés vers les « JWT signing
+keys », jetons ES256 — cas du projet `xucmfdggetwxmpquqjvj` : sans cette
+variable, approve/reject/reset et le CRUD de nœuds échouent en 401). Ajouter
+`SUPABASE_SERVICE_ROLE_KEY` si `EMAIL_EDGE_FUNCTION_URL` est configurée. La SPA requiert
 `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` et l'URL publique de l'orchestrateur.
 
 ## Contrôles post-déploiement

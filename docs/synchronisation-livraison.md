@@ -81,7 +81,7 @@ complète est dans [`../supabase/migrations/README.md`](../supabase/migrations/R
 | Cible | Variables minimales |
 | --- | --- |
 | SPA (au build) | `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_ORCHESTRATOR_URL` |
-| Orchestrateur | `SUPABASE_DB_URL`, `SUPABASE_JWT_SECRET`, `APP_URL`, `CORS_ALLOWED_ORIGINS` |
+| Orchestrateur | `SUPABASE_DB_URL`, `SUPABASE_JWT_SECRET` ou `SUPABASE_JWKS_URL` (jetons ES256), `APP_URL`, `CORS_ALLOWED_ORIGINS` |
 | E-mail | `EMAIL_EDGE_FUNCTION_URL`, `SUPABASE_SERVICE_ROLE_KEY`; secrets Edge `RESEND_API_KEY`, `EMAIL_FROM` |
 | Intégrations optionnelles | `SLACK_VALIDATIONS`, `SLACK_FLUX`, `INTEGRATION_ENCRYPTION_KEY`, `SYNAPSE_URL` |
 
