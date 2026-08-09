@@ -13,6 +13,7 @@ import { registerSynapseConsumer } from '../synapse/consumer.js';
 import { createSynapseProducer } from '../synapse/producer.js';
 import { getSql } from '../state/pgGraphStore.js';
 import { loadEnv } from '../config/env.js';
+import { createSupabaseJwtVerifier } from './userAuth.js';
 
 export async function startOrchestrator() {
     // Validation centralisée — échoue tôt avec un message clair si config invalide.
@@ -22,10 +23,21 @@ export async function startOrchestrator() {
 
     if (env.mode === 'pg') {
         const sql = getSql();
+        // Sessions humaines : HS256 (secret partagé legacy) et/ou ES256 (JWKS —
+        // projets migrés vers les « JWT signing keys »). Sans l'un ni l'autre,
+        // seules les clés API `ok_…` sont acceptées.
+        const verifyUserToken =
+            env.supabaseJwtSecret || env.supabaseJwksUrl
+                ? createSupabaseJwtVerifier({
+                      secret: env.supabaseJwtSecret,
+                      jwksUrl: env.supabaseJwksUrl,
+                  })
+                : undefined;
         const app = buildPgServer({
             sql,
             allowedOrigins: env.corsAllowedOrigins,
             jwtSecret: env.supabaseJwtSecret,
+            verifyUserToken,
             notifierOptions: {
                 validationsWebhook: env.slackValidations,
                 fluxWebhook: env.slackFlux,

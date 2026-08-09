@@ -8,6 +8,7 @@ import { createSynapseProducer } from '../synapse/producer.js';
 import { IllegalTransitionError } from '../domain/stateMachine.js';
 import { NodeNotFoundError } from '../state/pgGraphStore.js';
 import { buildAuthHook } from './auth.js';
+import type { UserTokenVerifier } from './userAuth.js';
 import { assertScope, MissingScopeError, SCOPES } from './scopes.js';
 import { toPublicNodeDTO, validateNodeMutation, NodeMutationValidationError } from './dto.js';
 import { SecretCipher } from '../security/crypto.js';
@@ -47,6 +48,11 @@ export interface PgServerDeps {
     allowedOrigins?: string[];
     /** Secret JWT Supabase (HS256) — active l'auth par session utilisateur. */
     jwtSecret?: string;
+    /**
+     * Vérificateur de session complet (HS256 et/ou ES256 via JWKS) — voir
+     * `createSupabaseJwtVerifier`. Prioritaire sur `jwtSecret`.
+     */
+    verifyUserToken?: UserTokenVerifier;
 }
 
 const PUBLIC_PATHS = new Set(['/healthz']);
@@ -125,7 +131,11 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
 
     // Auth hook par Bearer sur /api/* et /mcp — SAUF le flux SSE (ticket) et les
     // chemins publics.
-    const authHook = buildAuthHook({ sql: deps.sql, jwtSecret: deps.jwtSecret });
+    const authHook = buildAuthHook({
+        sql: deps.sql,
+        jwtSecret: deps.jwtSecret,
+        verifyUserToken: deps.verifyUserToken,
+    });
     app.addHook('onRequest', async (req, reply) => {
         const path = req.url.split('?')[0]!;
         if (PUBLIC_PATHS.has(path)) return;

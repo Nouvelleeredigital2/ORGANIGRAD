@@ -20,6 +20,11 @@ export interface OrchestratorEnv {
     corsAllowedOrigins: string[];
     integrationEncryptionKey?: string;
     supabaseJwtSecret?: string;
+    /**
+     * URL JWKS du projet Supabase — requise pour vérifier les sessions des
+     * projets migrés vers les « JWT signing keys » (jetons ES256).
+     */
+    supabaseJwksUrl?: string;
 }
 
 export class EnvValidationError extends Error {
@@ -63,6 +68,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): OrchestratorEn
         ['EMAIL_EDGE_FUNCTION_URL', source.EMAIL_EDGE_FUNCTION_URL?.trim() || undefined],
         ['SLACK_VALIDATIONS', source.SLACK_VALIDATIONS?.trim() || undefined],
         ['SLACK_FLUX', source.SLACK_FLUX?.trim() || undefined],
+        ['SUPABASE_JWKS_URL', source.SUPABASE_JWKS_URL?.trim() || undefined],
     ];
     for (const [name, value] of urlChecks) {
         if (value !== undefined && name !== 'SUPABASE_DB_URL' && !isHttpUrl(value)) {
@@ -108,5 +114,6 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): OrchestratorEn
             .filter(Boolean),
         integrationEncryptionKey: encKey,
         supabaseJwtSecret: source.SUPABASE_JWT_SECRET?.trim() || undefined,
+        supabaseJwksUrl: source.SUPABASE_JWKS_URL?.trim() || undefined,
     };
 }
