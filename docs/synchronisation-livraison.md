@@ -82,6 +82,7 @@ complète est dans [`../supabase/migrations/README.md`](../supabase/migrations/R
 | --- | --- |
 | SPA (au build) | `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_ORCHESTRATOR_URL` |
 | Orchestrateur | `SUPABASE_DB_URL`, `SUPABASE_JWT_SECRET` ou `SUPABASE_JWKS_URL` (jetons ES256), `APP_URL`, `CORS_ALLOWED_ORIGINS` |
+| Pont LINK (optionnel) | `LINK_BASE_URL`, `LINK_BRIDGE_TOKEN` — active « Importer depuis LINK » (bots Hermes en nœuds AGENT_IA). Absent → 503. Doit correspondre à `ORGANIGRAD_BRIDGE_TOKEN` côté LINK. |
 | E-mail | `EMAIL_EDGE_FUNCTION_URL`, `SUPABASE_SERVICE_ROLE_KEY`; secrets Edge `RESEND_API_KEY`, `EMAIL_FROM` |
 | Intégrations optionnelles | `SLACK_VALIDATIONS`, `SLACK_FLUX`, `INTEGRATION_ENCRYPTION_KEY`, `SYNAPSE_URL` |
 
