@@ -188,26 +188,79 @@ validation applicative, mais la colonne Postgres est de type `uuid` — un
 propre. À corriger dans un prochain lot (ajout d'un contrôle de format UUID
 dans `dto.ts`).
 
-## Décision au 2026-08-09 (mise à jour après recette orchestrateur)
+## Redéploiement VPS du 2026-08-10 (clôture O-01/O-03/O-05)
 
-**GO conditionnel.** Toutes les couches testables en connecté sont validées :
-données/RLS, parcours UI complets, et désormais orchestration/HITL/SSE avec
-une vraie session ES256 et une vraie clé API. Une anomalie critique de
-disponibilité (R-07, aggravée par R-06) a été trouvée et corrigée avant
-qu'elle n'atteigne la production — c'était le test le plus utile de cette
-recette.
+Diagnostic : le déploiement de production (`/opt/organigrad`, PM2, VPS
+`srv1017182`) datait de **mai 2026** — antérieur aux fonctionnalités
+Synapse/vocal/org_agents, sans `SUPABASE_JWT_SECRET` ni `SUPABASE_JWKS_URL`,
+et son process avait cessé de tourner depuis le 2026-08-07 sans redémarrage
+automatique. Le dossier appartenait à `root` ; l'accès SSH disponible
+(`deploy`) n'avait pas de sudo sans mot de passe — chaque étape privilégiée
+(chown, arrêt de l'ancien process PM2 root) a été effectuée par l'opérateur
+humain dans son propre terminal, jamais par un mot de passe transmis à
+l'assistant.
 
-Restent bloquants avant un GO définitif, tous de nature **opérationnelle**
-(pas applicative) :
+Actions effectuées :
+- Build du code corrigé transféré et installé (`npm ci`) dans un dossier de
+  stage appartenant à `deploy`, validé avant bascule.
+- `chown -R deploy:deploy /opt/organigrad` (par l'opérateur) pour permettre un
+  redéploiement sans sudo à l'avenir.
+- Bascule de `dist/`, `node_modules/`, `package.json`, `vendor/` ; sauvegarde
+  de l'ancien état conservée (`/home/deploy/organigrad.bak-20260809`).
+- `ecosystem.config.cjs` réécrit : l'ancien chargeait l'env via le paquet
+  `dotenv`, absent du code actuel (remplacé par le flag natif
+  `--env-file` de Node) — corrigé, logs déplacés vers un chemin appartenant à
+  `deploy` (`/opt/organigrad/logs/`, `/var/log/` n'étant pas accessible en
+  écriture sans sudo).
+- `SUPABASE_DB_URL` corrigé (nouvel hôte pooler `aws-1-eu-north-1`) et
+  `SUPABASE_JWKS_URL` ajoutée dans `/opt/organigrad/.env`.
+- **Incident** : le mot de passe de connexion base a été collé en clair dans
+  le terminal de l'opérateur pendant la manipulation et donc exposé dans la
+  session ; il a été régénéré immédiatement via le dashboard Supabase
+  (« Reset database password ») avant d'être réappliqué. Le mot de passe final
+  n'a jamais été lu, journalisé ni saisi par l'assistant — uniquement injecté
+  par l'opérateur via une invite masquée (`read -s`).
+- **Trouvaille supplémentaire (O-01 bis)** : le routage externe n'a jamais été
+  configuré. `/etc/nginx/sites-available/orchestrator` et
+  `/etc/traefik/dynamic/orchestrator.yml` sont des restes d'anciennes tentatives
+  (nginx inactif, Traefik non installé) — le reverse proxy réellement actif est
+  **Caddy** (conteneur `caddy-proxy`, `/home/deploy/caddy/Caddyfile`), qui
+  n'avait aucun bloc pour `orchestrator.srv1017182.hstgr.cloud`. Bloc ajouté
+  (même patron que les autres apps du VPS), config validée (`caddy validate`)
+  avant rechargement à chaud (`caddy reload`, sans coupure des autres apps).
+- **Trouvaille supplémentaire (CORS)** : `CORS_ALLOWED_ORIGINS` était absente
+  du `.env` de production — la vraie SPA (`https://organigrad.vercel.app`)
+  aurait été bloquée par le navigateur une fois le service joignable. Ajoutée.
 
-- **O-01** — l'orchestrateur VPS (`https://orchestrator.srv1017182.hstgr.cloud`)
-  est toujours injoignable. Il doit être redéployé avec les `.env.production`
-  / `.env.vps` corrigés aujourd'hui (nouveau DSN pooler + `SUPABASE_JWKS_URL`)
-  pour bénéficier aussi des correctifs R-06/R-07.
+Vérifié via l'URL publique après redéploiement :
+
+| Contrôle | Résultat |
+| --- | --- |
+| `GET https://orchestrator.srv1017182.hstgr.cloud/healthz` | ✅ `{"ok":true}` |
+| Connexion Postgres réelle (clé API bidon → `INVALID_OR_REVOKED_KEY`, pas 500) | ✅ |
+| CORS : origine `organigrad.vercel.app` autorisée, origine inconnue refusée | ✅ |
+| `GET /api/graph` sans auth : pas de secret exposé | ✅ `MISSING_BEARER_TOKEN` |
+| Advisors Supabase après redéploiement | ✅ stables, aucune régression |
+
+## Décision au 2026-08-10 — GO
+
+Toutes les couches sont maintenant validées **en production réelle**, pas
+seulement en local : données/RLS, parcours UI, orchestration/HITL/SSE, et
+désormais le service déployé lui-même, accessible publiquement avec le code
+corrigé (R-06/R-07 inclus). O-01, O-03 et O-05 sont clos.
+
+Restent, non bloquants pour un GO fonctionnel :
+
 - **O-02** — Edge Function `notify-email` toujours non déployée
-  (`supabase functions deploy notify-email` après configuration des secrets).
+  (`supabase functions deploy notify-email` après configuration des secrets) —
+  affecte uniquement les notifications e-mail, pas le cœur applicatif.
 - **O-04** — historique `supabase_migrations` incomplet pour les migrations
-  `20260803*` (dérive de comptabilité, objets conformes, ne pas rejouer) —
-  optionnel.
+  `20260803*` (dérive de comptabilité, objets conformes, ne pas rejouer).
+- Dette mineure signalée en passant : 2 vulnérabilités "high" `npm audit` sur
+  des dépendances transitives de Fastify (`fast-uri`, `find-my-way`), à traiter
+  dans un lot dédié avec mise à jour de `package-lock.json`.
+- Le mot de passe de base exposé pendant le redéploiement a été régénéré
+  immédiatement ; à vérifier qu'aucune autre copie de l'ancien mot de passe
+  ne traîne (secrets manager, autres `.env`).
 
 Aucune anomalie de données, de droits ou de sécurité applicative ouverte.
