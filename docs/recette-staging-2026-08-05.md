@@ -264,3 +264,21 @@ Restent, non bloquants pour un GO fonctionnel :
   ne traîne (secrets manager, autres `.env`).
 
 Aucune anomalie de données, de droits ou de sécurité applicative ouverte.
+
+## Pont LINK en production — 2026-08-10/11
+
+Secret partagé configuré des deux côtés (`ORGANIGRAD_BRIDGE_TOKEN` LINK /
+`LINK_BRIDGE_TOKEN` + `LINK_BASE_URL` Organigrad). Trois anomalies réelles
+trouvées et corrigées pendant la mise en service :
+
+| Anomalie | Cause | Correctif |
+| --- | --- | --- |
+| Token illisible côté Node malgré hash identique en apparence | `\r` parasite ajouté par `openssl` sur l'environnement Windows local, non filtré par `tr -d '\n'` | Régénéré avec `tr -d '\r\n'`, vérifié octet par octet des deux côtés avant toute utilisation |
+| Build Docker LINK cassé (`npm install` exit 128) | Script `prepare` (`git config core.hooksPath`) échoue hors dépôt git (`.git` volontairement absent du contexte Docker) — bug préexistant, sans rapport avec ce chantier, bloquait tout déploiement LINK | `prepare` tolère l'absence de `.git` (`\|\| true`) |
+| `GET /api/bridge/agents` renvoyait 401 alors que le token était correct | Le middleware global de LINK protège toute route par une session Supabase, avec une liste blanche d'une seule route machine-à-machine (`/api/notifications/inbound`) — message 401 identique à celui de la route elle-même, bug indiscernable sans lire le middleware | `/api/bridge/agents` ajoutée à `MACHINE_ROUTES` (exportée, testée) |
+| Import échouait en 400 `FST_ERR_CTP_EMPTY_JSON_BODY` | Fastify refuse un `Content-Type: application/json` sans corps ; le client SPA n'envoyait aucun corps | `body: '{}'` ajouté à `importLinkAgents()` |
+
+Vérifié en production réelle (pas en test) : import de **20 bots** dans le
+workspace de recette (`created:20`), rejeu idempotent (`updated:20,
+created:0`), puis nettoyage des nœuds de test. Le pont est pleinement
+opérationnel.
