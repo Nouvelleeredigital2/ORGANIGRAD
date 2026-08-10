@@ -203,6 +203,8 @@ export class OrchestratorClient {
         const res = await this.fetchImpl(`${this.baseUrl}/integrations/link/import`, {
             method: 'POST',
             headers: { 'content-type': 'application/json', ...headers },
+            // Fastify refuse un content-type JSON sans corps (FST_ERR_CTP_EMPTY_JSON_BODY).
+            body: '{}',
         });
         if (!res.ok) {
             const detail = await res.json().catch(() => ({}));
