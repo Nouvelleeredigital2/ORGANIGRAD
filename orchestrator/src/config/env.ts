@@ -25,6 +25,10 @@ export interface OrchestratorEnv {
      * projets migrés vers les « JWT signing keys » (jetons ES256).
      */
     supabaseJwksUrl?: string;
+    /** Base URL de l'API LINK — requise pour importer les bots Hermes/LINK. */
+    linkBaseUrl?: string;
+    /** Token Bearer du pont LINK (GET /api/bridge/agents), jamais exposé au client. */
+    linkBridgeToken?: string;
 }
 
 export class EnvValidationError extends Error {
@@ -69,6 +73,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): OrchestratorEn
         ['SLACK_VALIDATIONS', source.SLACK_VALIDATIONS?.trim() || undefined],
         ['SLACK_FLUX', source.SLACK_FLUX?.trim() || undefined],
         ['SUPABASE_JWKS_URL', source.SUPABASE_JWKS_URL?.trim() || undefined],
+        ['LINK_BASE_URL', source.LINK_BASE_URL?.trim() || undefined],
     ];
     for (const [name, value] of urlChecks) {
         if (value !== undefined && name !== 'SUPABASE_DB_URL' && !isHttpUrl(value)) {
@@ -86,6 +91,13 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): OrchestratorEn
         issues.push(
             'SUPABASE_SERVICE_ROLE_KEY est requise quand EMAIL_EDGE_FUNCTION_URL est défini',
         );
+    }
+
+    // Pont LINK : le token n'a de sens qu'avec une base URL.
+    const linkBaseUrl = source.LINK_BASE_URL?.trim() || undefined;
+    const linkBridgeToken = source.LINK_BRIDGE_TOKEN?.trim() || undefined;
+    if (linkBridgeToken && !linkBaseUrl) {
+        issues.push('LINK_BASE_URL est requise quand LINK_BRIDGE_TOKEN est défini');
     }
 
     // Clé de chiffrement des secrets (optionnelle) : si présente, doit décoder
@@ -115,5 +127,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): OrchestratorEn
         integrationEncryptionKey: encKey,
         supabaseJwtSecret: source.SUPABASE_JWT_SECRET?.trim() || undefined,
         supabaseJwksUrl: source.SUPABASE_JWKS_URL?.trim() || undefined,
+        linkBaseUrl,
+        linkBridgeToken,
     };
 }

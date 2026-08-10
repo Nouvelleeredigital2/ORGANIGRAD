@@ -40,6 +40,8 @@ export async function startOrchestrator() {
             allowedOrigins: env.corsAllowedOrigins,
             jwtSecret: env.supabaseJwtSecret,
             verifyUserToken,
+            linkBaseUrl: env.linkBaseUrl,
+            linkBridgeToken: env.linkBridgeToken,
             notifierOptions: {
                 validationsWebhook: env.slackValidations,
                 fluxWebhook: env.slackFlux,

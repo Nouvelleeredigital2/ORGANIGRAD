@@ -47,6 +47,29 @@ describe('loadEnv (validation des variables d\'environnement)', () => {
         expect(env.corsAllowedOrigins).toEqual(['https://a.com', 'https://b.com']);
     });
 
+    it('LINK_BASE_URL/TOKEN absents : pont désactivé, pas d\'erreur', () => {
+        const env = loadEnv({});
+        expect(env.linkBaseUrl).toBeUndefined();
+        expect(env.linkBridgeToken).toBeUndefined();
+    });
+
+    it('exige LINK_BASE_URL si LINK_BRIDGE_TOKEN est défini', () => {
+        expect(() => loadEnv({ LINK_BRIDGE_TOKEN: 't' })).toThrow(/LINK_BASE_URL/);
+    });
+
+    it('rejette une LINK_BASE_URL non http', () => {
+        expect(() => loadEnv({ LINK_BASE_URL: 'ftp://x' })).toThrow(EnvValidationError);
+    });
+
+    it('accepte LINK_BASE_URL + LINK_BRIDGE_TOKEN valides', () => {
+        const env = loadEnv({
+            LINK_BASE_URL: 'https://link.nouvelleeredigital.fr',
+            LINK_BRIDGE_TOKEN: 't',
+        });
+        expect(env.linkBaseUrl).toBe('https://link.nouvelleeredigital.fr');
+        expect(env.linkBridgeToken).toBe('t');
+    });
+
     it('ne révèle jamais les valeurs dans le message d\'erreur', () => {
         try {
             loadEnv({ SUPABASE_DB_URL: 'https://secret-host-value' });

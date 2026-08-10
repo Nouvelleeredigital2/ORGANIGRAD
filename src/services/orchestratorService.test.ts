@@ -167,3 +167,52 @@ describe('OrchestratorClient', () => {
         expect(typeof off).toBe('function');
     });
 });
+
+describe('OrchestratorClient — importLinkAgents()', () => {
+    let fetchMock: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+        fetchMock = vi.fn();
+    });
+
+    it('POST sur /integrations/link/import avec la session humaine (JWT + workspace)', async () => {
+        fetchMock.mockResolvedValue(
+            new Response(JSON.stringify({ ok: true, created: 2, updated: 1, skipped: 0, total: 3 }), {
+                status: 200,
+            }),
+        );
+        const c = new OrchestratorClient({
+            fetchImpl: fetchMock as typeof fetch,
+            getUserAuth: async () => ({ token: 'jwt-abc', workspaceId: 'ws-1' }),
+        });
+        const result = await c.importLinkAgents();
+        expect(result).toEqual({ ok: true, created: 2, updated: 1, skipped: 0, total: 3 });
+
+        const [url, init] = fetchMock.mock.calls[0]!;
+        expect(url).toMatch(/\/integrations\/link\/import$/);
+        expect((init as RequestInit).method).toBe('POST');
+        const headers = (init as RequestInit).headers as Record<string, string>;
+        expect(headers.authorization).toBe('Bearer jwt-abc');
+        expect(headers['x-workspace-id']).toBe('ws-1');
+    });
+
+    it('503 (pont non configuré) → OrchestratorClientError', async () => {
+        fetchMock.mockResolvedValue(
+            new Response(JSON.stringify({ error: 'LINK_BRIDGE_NOT_CONFIGURED' }), { status: 503 }),
+        );
+        const c = new OrchestratorClient({
+            fetchImpl: fetchMock as typeof fetch,
+            getUserAuth: async () => ({ token: 'jwt-abc', workspaceId: 'ws-1' }),
+        });
+        await expect(c.importLinkAgents()).rejects.toMatchObject({ status: 503 });
+    });
+
+    it('403 (clé API sans session humaine) → OrchestratorClientError', async () => {
+        fetchMock.mockResolvedValue(
+            new Response(JSON.stringify({ error: 'INSUFFICIENT_SCOPE' }), { status: 403 }),
+        );
+        // Pas de getUserAuth → repli sur la clé API technique, refusée par le serveur.
+        const c = new OrchestratorClient({ fetchImpl: fetchMock as typeof fetch, apiKey: 'ok_k' });
+        await expect(c.importLinkAgents()).rejects.toMatchObject({ status: 403 });
+    });
+});

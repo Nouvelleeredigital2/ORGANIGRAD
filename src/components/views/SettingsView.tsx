@@ -1,11 +1,14 @@
 import React, { useState } from 'react';
-import { Save, RefreshCw, Upload, RotateCcw, Workflow, Server } from 'lucide-react';
+import { Save, RefreshCw, Upload, RotateCcw, Workflow, Server, Bot } from 'lucide-react';
 import type { CsvSourceInfo } from '../../utils/csvSource';
 import { hybridNodeStore } from '../../services/hybridNodeStore';
 import { useOrchestratorConfig } from '../../hooks/useOrchestratorConfig';
 import { useFileImport } from '../../hooks/useFileImport';
 import { useWorkspaceContext } from '../../contexts/WorkspaceContext';
 import { useFeedback } from '../../feedback/FeedbackContext';
+import { usePermissions } from '../../auth/usePermissions';
+import { supabase } from '../../lib/supabase';
+import { describeError } from '../../utils/asyncGuard';
 import { OrchestratorClient } from '../../services/orchestratorService';
 
 interface SettingsViewProps {
@@ -32,6 +35,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     retrySource,
 }) => {
     const { activeId: workspaceId } = useWorkspaceContext();
+    const { isAdmin } = usePermissions();
     const [tempUrl, setTempUrl] = useState(csvUrl);
 
     const {
@@ -87,6 +91,38 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             feedback.warning(
                 "Configuration enregistrée · orchestrateur injoignable — vérifie l'URL et la clé.",
             );
+        }
+    };
+
+    // --- Import des bots Hermes/LINK (AGENT_IA, référence par id — pas de copie) ---
+    const [linkImporting, setLinkImporting] = useState(false);
+
+    const handleImportLinkAgents = async () => {
+        const baseUrl = orchestrator.config.baseUrl.trim();
+        const apiKey = orchestrator.config.apiKey.trim();
+        if (!baseUrl) {
+            feedback.error("Configure d'abord la connexion orchestrateur ci-dessus.");
+            return;
+        }
+        setLinkImporting(true);
+        try {
+            const getUserAuth = async () => {
+                if (!supabase || !workspaceId) return null;
+                const { data } = await supabase.auth.getSession();
+                const token = data.session?.access_token;
+                return token ? { token, workspaceId } : null;
+            };
+            const client = new OrchestratorClient({ baseUrl, apiKey, getUserAuth });
+            const result = await client.importLinkAgents();
+            feedback.success(
+                `Import LINK : ${result.created} bot(s) créé(s), ${result.updated} mis à jour` +
+                    (result.skipped ? `, ${result.skipped} désactivé(s) ignoré(s)` : '') +
+                    '.',
+            );
+        } catch (err) {
+            feedback.error(`Import LINK échoué : ${describeError(err)}`);
+        } finally {
+            setLinkImporting(false);
         }
     };
 
@@ -261,6 +297,35 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         </div>
                     </div>
                 </section>
+
+                {isAdmin && (
+                    <section className="bg-white/82 backdrop-blur-xl p-8 rounded-[2rem] border border-white shadow-[0_18px_50px_rgba(148,163,184,0.14)]">
+                        <h3 className="text-xl font-black text-slate-900 mb-6 tracking-tight flex items-center gap-3">
+                            <Bot className="w-6 h-6 text-violet-600" />
+                            Bots Hermes · LINK
+                        </h3>
+                        <p className="text-slate-600 mb-6 max-w-xl text-sm">
+                            Importe les bots/personas actifs de LINK (veille, rédaction, design…)
+                            comme des nœuds Agent IA dans l'organigramme. Référence seulement — le
+                            prompt et les capacités restent dans LINK, jamais copiés ici.
+                            Ré-exécutable à tout moment : les bots déjà importés sont mis à jour,
+                            pas dupliqués.
+                        </p>
+                        <button
+                            onClick={() => void handleImportLinkAgents()}
+                            disabled={linkImporting || !orchestrator.isConfigured}
+                            className="flex items-center gap-2 px-6 py-3 bg-violet-600 text-white font-bold rounded-xl shadow-[0_16px_34px_rgba(124,58,237,0.18)] hover:bg-violet-700 transition-all disabled:opacity-50"
+                        >
+                            <Bot className="w-4 h-4" />
+                            {linkImporting ? 'Import en cours…' : 'Importer depuis LINK'}
+                        </button>
+                        {!orchestrator.isConfigured && (
+                            <p className="text-xs text-slate-500 mt-3">
+                                Enregistre d'abord la connexion orchestrateur ci-dessus.
+                            </p>
+                        )}
+                    </section>
+                )}
 
                 <section className="bg-white/82 backdrop-blur-xl p-8 rounded-[2rem] border border-white shadow-[0_18px_50px_rgba(148,163,184,0.14)]">
                     <h3 className="text-xl font-black text-slate-900 mb-6 tracking-tight flex items-center gap-3">

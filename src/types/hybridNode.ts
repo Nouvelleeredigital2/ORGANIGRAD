@@ -26,6 +26,8 @@ export interface NotificationChannels {
     slackWebhook?: string;
     email?: string;
     whatsappId?: string;
+    /** Canal Telegram d'un bot importé (ex. 'telegram-hermes' — informatif). */
+    telegram?: string;
 }
 
 /**

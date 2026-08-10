@@ -100,7 +100,12 @@ create table if not exists public.hybrid_nodes (
     avatar_url text,
     status text not null default 'IDLE'::text,
     created_at timestamp with time zone not null default now(),
-    updated_at timestamp with time zone not null default now()
+    updated_at timestamp with time zone not null default now(),
+    -- Référence externe optionnelle (ex. 'link' pour un bot Hermes importé) ;
+    -- purement informative, jamais utilisée pour l'autorisation. L'id du
+    -- nœud EST l'identifiant stable de l'entité source — voir migration
+    -- 20260811090000.
+    external_app text
 );
 
 create table if not exists public.node_transitions (
