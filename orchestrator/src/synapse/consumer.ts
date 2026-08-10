@@ -26,6 +26,7 @@
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { assertScope, MissingScopeError, SCOPES } from "../api/scopes.js";
+import { synapseAuthHeaders } from "./serviceAuth.js";
 
 interface PendingValidation {
   id: string;
@@ -83,9 +84,10 @@ export function registerSynapseConsumer(app: FastifyInstance): void {
       },
     };
     try {
+      const authHeaders = await synapseAuthHeaders();
       const res = await fetch(`${base}/api/events`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...authHeaders },
         body: JSON.stringify(evt),
       });
       if (!res.ok) return reply.code(502).send({ error: `Synapse a répondu ${res.status}` });
@@ -146,7 +148,8 @@ export function registerSynapseConsumer(app: FastifyInstance): void {
 
   const poll = async (): Promise<void> => {
     try {
-      const r = await fetch(`${base}/api/events?limit=50`);
+      const authHeaders = await synapseAuthHeaders();
+      const r = await fetch(`${base}/api/events?limit=50`, { headers: authHeaders });
       if (!r.ok) return;
       const data = (await r.json()) as { items?: Array<Record<string, unknown>> };
       ingest(data.items ?? []);
