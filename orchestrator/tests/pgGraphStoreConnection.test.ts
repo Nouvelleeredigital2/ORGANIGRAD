@@ -19,7 +19,10 @@ describe('getSql — configuration de connexion', () => {
     beforeEach(() => {
         vi.resetModules();
         postgresMock.mockClear();
-        process.env['SUPABASE_DB_URL'] = 'postgres://user:pass@aws-1-eu-north-1.pooler.supabase.com:6543/postgres';
+        // Hôte `localhost` volontaire : un DSN de test ne doit pas ressembler à
+        // une chaîne de connexion réelle, sous peine de faire hurler le contrôle
+        // anti-secrets de la CI pour rien (cf. env.test.ts, même convention).
+        process.env['SUPABASE_DB_URL'] = 'postgres://user:pass@localhost:6543/postgres';
     });
 
     afterEach(() => {

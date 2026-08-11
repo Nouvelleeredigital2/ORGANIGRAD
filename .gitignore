@@ -55,4 +55,9 @@ vite-dev.log
 # La tarball actuelle était déjà versionnée ; cette règle évite qu'une montée
 # de version soit silencieusement ignorée par `git add`.
 !orchestrator/vendor/*.tgz
+# Même raison côté SPA : @apps2026/voice-client (VoiceMicButton) est aussi
+# distribué en tarball vendorée. Absente du dépôt racine jusqu'ici → npm ci
+# échouait en CI (ENOENT), invisible en local car le fichier existait sur le
+# poste sans jamais avoir été commité.
+!vendor/*.tgz
 
