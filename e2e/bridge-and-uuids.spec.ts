@@ -82,7 +82,9 @@ test('Bug #2 fix — indicateur "Orchestrateur connecté" quand l\'API répond O
     );
 
     await gotoOrchestration(page);
-    await expect(page.getByText(/Orchestrateur connecté/i)).toBeVisible({ timeout: 6000 });
+    // Marge portée à 12s (6s était limite : ~6.2s en local, flaky sur un
+    // runner CI partagé plus lent — sans lien avec le câblage testé).
+    await expect(page.getByText(/Orchestrateur connecté/i)).toBeVisible({ timeout: 12000 });
 });
 
 test('Bug #2 fix — quand connecté, "Lancer la chaîne" POST sur l\'orchestrateur (Bearer)', async ({
