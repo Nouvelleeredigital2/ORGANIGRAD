@@ -7,9 +7,26 @@
  * ex. LINK — relient la décision à la demande). Organigrad reste l'autorité.
  *
  * Auto-désactivé si `SYNAPSE_URL` est absent (aucun effet hors démo).
- * Branché uniquement en mode dev in-memory (pas d'auth) — pas en mode pg.
+ *
+ * Modes : branché d'office en dev in-memory ; en mode pg (production) il faut
+ * l'activer explicitement avec `SYNAPSE_CONSUMER=1` — voir `api/bootstrap.ts`.
+ *
+ * CLOISONNEMENT PAR WORKSPACE (2026-08-11) : la file `pending` associe désormais
+ * un `workspaceId` à chaque validation, lu depuis `payload.workspaceId` de
+ * l'événement source (ex. Hermès le pose déjà — voir `post_gate()` côté
+ * pipeline). Un événement SANS `workspaceId` n'est PAS ingéré (log + rejet
+ * explicite) plutôt que placé dans un panier partagé par défaut — un défaut
+ * partagé serait exactement le trou qu'on referme ici. `GET
+ * /api/synapse/validations` ne renvoie que les validations du workspace
+ * appelant ; `/approve` et `/reject` renvoient 403 sur une validation d'un
+ * AUTRE workspace (même si l'id est deviné). Les deux routes de décision
+ * exigent en plus `human:approve`/`human:reject` (mêmes scopes que
+ * `/api/nodes/:id/approve|reject` — une clé technique ne les a jamais par
+ * défaut, seul un humain avec un rôle workspace les obtient).
  */
-import type { FastifyInstance, FastifyReply } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { assertScope, MissingScopeError, SCOPES } from "../api/scopes.js";
+import { synapseAuthHeaders } from "./serviceAuth.js";
 
 interface PendingValidation {
   id: string;
@@ -18,6 +35,7 @@ interface PendingValidation {
   sourceApp: string;
   actionUrl?: string;
   at?: string;
+  workspaceId: string;
 }
 
 const POLL_MS = 3000;
@@ -26,18 +44,32 @@ export function registerSynapseConsumer(app: FastifyInstance): void {
   const base = process.env.SYNAPSE_URL?.replace(/\/$/, "");
   const pending = new Map<string, PendingValidation>();
 
-  app.get("/api/synapse/validations", async () => ({
-    items: [...pending.values()],
+  app.get("/api/synapse/validations", async (req: FastifyRequest) => ({
+    items: [...pending.values()].filter((v) => v.workspaceId === req.workspaceId),
     synapse: base ? "live" : "disabled",
   }));
 
   const decide = async (
     eventId: string,
     decision: "approved" | "rejected",
+    req: FastifyRequest,
     reply: FastifyReply,
   ): Promise<FastifyReply> => {
+    try {
+      assertScope(req.scopes, decision === "approved" ? SCOPES.humanApprove : SCOPES.humanReject);
+    } catch (err) {
+      if (err instanceof MissingScopeError) {
+        return reply.code(403).send({ error: "INSUFFICIENT_SCOPE", required: err.required });
+      }
+      throw err;
+    }
     const v = pending.get(eventId);
     if (!v) return reply.code(404).send({ error: "validation inconnue" });
+    if (v.workspaceId !== req.workspaceId) {
+      // Existe, mais dans un AUTRE workspace : 404 (pas 403) pour ne pas
+      // confirmer à l'appelant que l'id existe ailleurs.
+      return reply.code(404).send({ error: "validation inconnue" });
+    }
     if (!base) return reply.code(503).send({ error: "SYNAPSE_URL non configuré" });
 
     const evt = {
@@ -52,9 +84,10 @@ export function registerSynapseConsumer(app: FastifyInstance): void {
       },
     };
     try {
+      const authHeaders = await synapseAuthHeaders();
       const res = await fetch(`${base}/api/events`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...authHeaders },
         body: JSON.stringify(evt),
       });
       if (!res.ok) return reply.code(502).send({ error: `Synapse a répondu ${res.status}` });
@@ -67,11 +100,11 @@ export function registerSynapseConsumer(app: FastifyInstance): void {
 
   app.post<{ Params: { eventId: string } }>(
     "/api/synapse/validations/:eventId/approve",
-    (req, reply) => decide(req.params.eventId, "approved", reply),
+    (req, reply) => decide(req.params.eventId, "approved", req, reply),
   );
   app.post<{ Params: { eventId: string } }>(
     "/api/synapse/validations/:eventId/reject",
-    (req, reply) => decide(req.params.eventId, "rejected", reply),
+    (req, reply) => decide(req.params.eventId, "rejected", req, reply),
   );
 
   if (!base) {
@@ -83,7 +116,24 @@ export function registerSynapseConsumer(app: FastifyInstance): void {
     for (const e of items) {
       const id = typeof e.id === "string" ? e.id : undefined;
       if (e.type !== "validation.requested" || !id || pending.has(id)) continue;
+      // Ne pas ré-ingérer nos PROPRES demandes : le producteur (hop 1) publie
+      // `validation.requested` pour chaque nœud entrant en attente humaine. Les
+      // reprendre ici ferait apparaître deux fois la même validation et
+      // permettrait de la décider par un chemin qui court-circuite la machine
+      // à états — l'approbation d'un nœud passe par /api/nodes/:id/approve.
+      if (String(e.sourceApp ?? "").toLowerCase() === "organigrad") continue;
       const p = (e.payload ?? {}) as Record<string, unknown>;
+      // Sans workspaceId, on ne sait à qui montrer cette validation — un
+      // défaut partagé (ex. "unknown") la rendrait visible de tout le monde,
+      // exactement le trou qu'on referme ici. On rejette plutôt que d'inventer.
+      const workspaceId = typeof p.workspaceId === "string" && p.workspaceId ? p.workspaceId : undefined;
+      if (!workspaceId) {
+        app.log.warn(
+          { eventId: id, sourceApp: e.sourceApp },
+          "[synapse-consumer] validation.requested sans workspaceId — ignorée",
+        );
+        continue;
+      }
       pending.set(id, {
         id,
         title: typeof p.title === "string" ? p.title : "Validation demandée",
@@ -91,13 +141,15 @@ export function registerSynapseConsumer(app: FastifyInstance): void {
         sourceApp: typeof p.sourceApp === "string" ? p.sourceApp : String(e.sourceApp ?? "?"),
         actionUrl: typeof p.actionUrl === "string" ? p.actionUrl : undefined,
         at: typeof e.createdAt === "string" ? e.createdAt : undefined,
+        workspaceId,
       });
     }
   };
 
   const poll = async (): Promise<void> => {
     try {
-      const r = await fetch(`${base}/api/events?limit=50`);
+      const authHeaders = await synapseAuthHeaders();
+      const r = await fetch(`${base}/api/events?limit=50`, { headers: authHeaders });
       if (!r.ok) return;
       const data = (await r.json()) as { items?: Array<Record<string, unknown>> };
       ingest(data.items ?? []);

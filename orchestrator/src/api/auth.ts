@@ -1,7 +1,7 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import { createHash } from 'node:crypto';
 import type { Sql } from 'postgres';
-import { verifySupabaseJwt } from './userAuth.js';
+import { verifySupabaseJwt, type UserTokenVerifier } from './userAuth.js';
 import { scopesForRole } from './scopes.js';
 
 /**
@@ -36,6 +36,11 @@ export interface AuthDeps {
      * utilisateur (≠ clé `ok_…`) sont authentifiées comme session humaine.
      */
     jwtSecret?: string;
+    /**
+     * Vérificateur de session complet (HS256 et/ou ES256 via JWKS). Prioritaire
+     * sur `jwtSecret` s'il est fourni — voir `createSupabaseJwtVerifier`.
+     */
+    verifyUserToken?: UserTokenVerifier;
 }
 
 interface ApiKeyRow {
@@ -46,6 +51,12 @@ interface ApiKeyRow {
 }
 
 export function buildAuthHook(deps: AuthDeps) {
+    const verifyUser: UserTokenVerifier | undefined =
+        deps.verifyUserToken ??
+        (deps.jwtSecret
+            ? async (token) => verifySupabaseJwt(token, deps.jwtSecret as string)
+            : undefined);
+
     return async function authHook(req: FastifyRequest, reply: FastifyReply) {
         const header = req.headers.authorization ?? '';
         const m = header.match(/^Bearer\s+(.+)$/i);
@@ -57,8 +68,8 @@ export function buildAuthHook(deps: AuthDeps) {
         // ── Session utilisateur (JWT) : tout Bearer qui n'est PAS une clé `ok_…` ──
         // Validation humaine : la session est vérifiée (signature + expiration) et
         // le rôle dans le workspace détermine les scopes (un humain PEUT approuver).
-        if (!rawKey.startsWith('ok_') && deps.jwtSecret) {
-            const user = verifySupabaseJwt(rawKey, deps.jwtSecret);
+        if (!rawKey.startsWith('ok_') && verifyUser) {
+            const user = await verifyUser(rawKey);
             if (!user) {
                 return reply.code(401).send({ error: 'INVALID_USER_TOKEN' });
             }

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { ValidationCenter, type ValidationItem } from './ValidationCenter';
 import type { HybridNode } from '../types/hybridNode';
 
@@ -104,5 +104,57 @@ describe('ValidationCenter — panneau coulissant v2', () => {
         expect(onClose).not.toHaveBeenCalled();
         fireEvent.click(overlay);
         expect(onClose).toHaveBeenCalled();
+    });
+
+    it('sends only one rejection while the first request is pending', async () => {
+        let resolveReject!: (result: boolean) => void;
+        const onReject = vi.fn(() => new Promise<boolean>((resolve) => { resolveReject = resolve; }));
+        const { container } = render(
+            <ValidationCenter isOpen items={[items[0]!]} onClose={() => {}} onApprove={() => {}} onReject={onReject} />,
+        );
+        fireEvent.click(screen.getByRole('button', { name: /Rejeter/i }));
+        fireEvent.change(container.querySelector('input')!, { target: { value: 'A revoir' } });
+        const confirm = screen.getByRole('button', { name: /Confirmer/i });
+        fireEvent.click(confirm);
+        fireEvent.click(confirm);
+        expect(onReject).toHaveBeenCalledTimes(1);
+        expect(confirm).toBeDisabled();
+        resolveReject(true);
+        await waitFor(() => expect(screen.queryByRole('button', { name: /Confirmer/i })).toBeNull());
+    });
+
+    it('affiche le bouton micro (SDK vocal) près du motif de rejet quand le proxy est configuré', () => {
+        const voiceCapture = {
+            supported: true,
+            listening: false,
+            muted: false,
+            start: vi.fn().mockResolvedValue(undefined),
+            pushToTalkStart: vi.fn().mockResolvedValue(undefined),
+            pushToTalkEnd: vi.fn(),
+            mute: vi.fn(),
+            unmute: vi.fn(),
+            revoke: vi.fn(),
+        };
+        render(
+            <ValidationCenter
+                isOpen
+                items={[items[0]!]}
+                onClose={() => {}}
+                onApprove={() => {}}
+                onReject={() => {}}
+                voiceProxyBasePath="http://localhost:3001/api/voice/gateway"
+                voiceCapture={voiceCapture}
+            />,
+        );
+        fireEvent.click(screen.getByRole('button', { name: /Rejeter/i }));
+        expect(screen.getByRole('button', { name: /Dicter au micro/i })).toBeInTheDocument();
+    });
+
+    it("n'affiche pas de bouton micro sans proxy vocal configuré (pas d'orchestrateur)", () => {
+        render(
+            <ValidationCenter isOpen items={[items[0]!]} onClose={() => {}} onApprove={() => {}} onReject={() => {}} />,
+        );
+        fireEvent.click(screen.getByRole('button', { name: /Rejeter/i }));
+        expect(screen.queryByRole('button', { name: /Dicter au micro/i })).toBeNull();
     });
 });

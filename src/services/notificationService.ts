@@ -5,6 +5,8 @@
  *  - slackWebhook  → POST JSON au webhook Slack (fetch natif)
  *  - email         → Supabase Edge Function `notify-email`
  *  - whatsappId    → no-op (canal déclaré, aucune API configurée)
+ *  - telegram      → no-op (informatif : canal d'écoute d'un bot importé de
+ *                    LINK, Organigrad n'émet jamais VERS Telegram)
  */
 import type { HybridNode, NotificationChannels } from '../types/hybridNode';
 
@@ -64,6 +66,17 @@ const drivers: Record<NotificationChannelKey, NotificationDriver> = {
             `[notify:whatsapp] Driver non implémenté — message ignoré : "${message}" (nœud ${node.id})`,
         );
     },
+
+    /**
+     * Telegram — purement informatif (canal d'écoute d'un bot importé de LINK,
+     * ex. 'telegram-hermes'). Organigrad n'a aucune API pour émettre vers
+     * Telegram : c'est LINK/Hermes qui restent responsables de ce canal.
+     */
+    telegram: (_channel, { node, message }) => {
+        console.info(
+            `[notify:telegram] canal informatif uniquement — message ignoré : "${message}" (nœud ${node.id})`,
+        );
+    },
 };
 
 export const NOTIFICATION_EVENT = 'organigrad:notification';
@@ -88,6 +101,7 @@ export interface NotificationEventDetail {
 const NON_EMETTEURS: Partial<Record<NotificationChannelKey, string>> = {
     email: "délégué à l'orchestrateur, rien n'est envoyé depuis le navigateur",
     whatsappId: 'aucune API configurée',
+    telegram: "informatif — canal du bot, LINK/Hermes reste l'émetteur",
 };
 
 /**

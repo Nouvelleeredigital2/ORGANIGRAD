@@ -8,6 +8,7 @@ import { createSynapseProducer } from '../synapse/producer.js';
 import { IllegalTransitionError } from '../domain/stateMachine.js';
 import { NodeNotFoundError } from '../state/pgGraphStore.js';
 import { buildAuthHook } from './auth.js';
+import type { UserTokenVerifier } from './userAuth.js';
 import { assertScope, MissingScopeError, SCOPES } from './scopes.js';
 import { toPublicNodeDTO, validateNodeMutation, NodeMutationValidationError } from './dto.js';
 import { SecretCipher } from '../security/crypto.js';
@@ -15,6 +16,8 @@ import { SseTicketStore } from './sseTickets.js';
 import { PgAuditTrail } from '../observability/auditLog.js';
 import { dispatchMcpRequest } from '../mcp/mcpServer.js';
 import { Notifier, PgAuditLogger } from '../observability/notifier.js';
+import { safeFetch } from '../net/ssrfGuard.js';
+import type { HybridNode } from '../domain/types.js';
 
 /**
  * Serveur HTTP de production — auth par clé API workspace, store Postgres.
@@ -47,6 +50,19 @@ export interface PgServerDeps {
     allowedOrigins?: string[];
     /** Secret JWT Supabase (HS256) — active l'auth par session utilisateur. */
     jwtSecret?: string;
+    /**
+     * Vérificateur de session complet (HS256 et/ou ES256 via JWKS) — voir
+     * `createSupabaseJwtVerifier`. Prioritaire sur `jwtSecret`.
+     */
+    verifyUserToken?: UserTokenVerifier;
+    /** Base URL de l'API LINK — active POST /api/integrations/link/import si présente avec linkBridgeToken. */
+    linkBaseUrl?: string;
+    /** Token Bearer du pont LINK (GET /api/bridge/agents). */
+    linkBridgeToken?: string;
+    /** fetch injectable pour les tests (défaut : safeFetch réel). */
+    fetchImpl?: typeof fetch;
+    /** Résolution DNS injectable pour les tests de safeFetch (défaut : DNS réel). */
+    fetchLookup?: import('../net/ssrfGuard.js').SafeFetchDeps['lookup'];
 }
 
 const PUBLIC_PATHS = new Set(['/healthz']);
@@ -77,23 +93,36 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
     };
 
     // Journalise une action sensible (best-effort, n'échoue jamais le flux).
+    // `.catch()` explicite obligatoire : `void promise` ne rattrape RIEN, ce
+    // n'est qu'une annotation « je n'attends pas ce résultat ». `PgAuditTrail`
+    // attrape déjà ses propres erreurs, mais un rejet non rattrapé ici (toute
+    // implémentation d'`AuditTrail` future, ou un throw synchrone) fait
+    // planter tout le process Node (unhandled rejection) — constaté en
+    // recette le 2026-08-09 après une erreur SQL en cascade.
     const recordAudit = (
         req: import('fastify').FastifyRequest,
         action: string,
         resourceId: string | null,
         result: 'success' | 'denied' | 'error',
     ): void => {
-        void audit.record({
-            workspaceId: req.workspaceId ?? 'unknown',
-            actorKind: req.userId ? 'user' : 'api_key',
-            actorId: req.userId ?? req.apiKeyId ?? null,
-            action,
-            resourceType: 'node',
-            resourceId,
-            result,
-            ip: req.ip ?? null,
-            requestId: req.id ?? null,
-        });
+        audit
+            .record({
+                workspaceId: req.workspaceId ?? 'unknown',
+                actorKind: req.userId ? 'user' : 'api_key',
+                actorId: req.userId ?? req.apiKeyId ?? null,
+                action,
+                resourceType: 'node',
+                resourceId,
+                result,
+                ip: req.ip ?? null,
+                requestId: req.id ?? null,
+            })
+            .catch((err) => {
+                console.warn('[audit] échec écriture du journal (rattrapé)', {
+                    action,
+                    error: err instanceof Error ? err.message : String(err),
+                });
+            });
     };
 
     // Classe un échec en 'denied' (scope) ou 'error', pour l'audit.
@@ -125,7 +154,11 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
 
     // Auth hook par Bearer sur /api/* et /mcp — SAUF le flux SSE (ticket) et les
     // chemins publics.
-    const authHook = buildAuthHook({ sql: deps.sql, jwtSecret: deps.jwtSecret });
+    const authHook = buildAuthHook({
+        sql: deps.sql,
+        jwtSecret: deps.jwtSecret,
+        verifyUserToken: deps.verifyUserToken,
+    });
     app.addHook('onRequest', async (req, reply) => {
         const path = req.url.split('?')[0]!;
         if (PUBLIC_PATHS.has(path)) return;
@@ -218,6 +251,83 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
         }
         return store;
     };
+
+    // --- POST /api/integrations/link/import ---------------------------------
+    // Importe les bots/personas Hermes exposés par LINK (GET /api/bridge/agents)
+    // comme des nœuds AGENT_IA, référencés par leur id LINK (uuid5 stable) — pas
+    // de copie de prompt ni de capacités (B3). Idempotent : ré-exécutable, upsert
+    // par id. Réservé aux admins de workspace (session humaine uniquement — une
+    // clé API technique n'a jamais workspace:admin, cf. scopes.ts).
+    interface LinkBridgeAgent {
+        id: string;
+        name: string;
+        title: string | null;
+        network: string;
+        role: string;
+        channel: string | null;
+        enabled: boolean;
+    }
+    app.post('/api/integrations/link/import', async (req, reply) => {
+        try {
+            assertScope(req.scopes, SCOPES.workspaceAdmin);
+            if (!deps.linkBaseUrl || !deps.linkBridgeToken) {
+                return reply.code(503).send({ error: 'LINK_BRIDGE_NOT_CONFIGURED' });
+            }
+
+            const url = new URL('/api/bridge/agents', deps.linkBaseUrl).toString();
+            let res: Response;
+            try {
+                res = await safeFetch(
+                    url,
+                    { headers: { authorization: `Bearer ${deps.linkBridgeToken}` } },
+                    {},
+                    { fetchImpl: deps.fetchImpl, lookup: deps.fetchLookup },
+                );
+            } catch {
+                return reply.code(502).send({ error: 'LINK_BRIDGE_UNREACHABLE' });
+            }
+            if (!res.ok) {
+                return reply.code(502).send({ error: 'LINK_BRIDGE_ERROR', status: res.status });
+            }
+
+            const body = (await res.json()) as { agents?: LinkBridgeAgent[] };
+            const agents = Array.isArray(body.agents) ? body.agents : [];
+
+            const store = storeFor(req.workspaceId!, req.apiKeyId, req.userId);
+            let created = 0;
+            let updated = 0;
+            for (const agent of agents) {
+                if (!agent.enabled) continue;
+                const existed = await store.has(agent.id);
+                const node: HybridNode = {
+                    id: agent.id,
+                    type: 'AGENT_IA',
+                    nom: agent.name,
+                    roleTitre: agent.title ?? agent.role,
+                    parentID: null,
+                    gradeId: 'Agent',
+                    skills: [agent.network, agent.role].filter((s): s is string => Boolean(s)),
+                    notificationChannels: agent.channel?.startsWith('telegram')
+                        ? { telegram: agent.channel }
+                        : undefined,
+                    status: 'IDLE',
+                };
+                await store.upsertNode(node);
+                await deps.sql`
+                    update public.hybrid_nodes set external_app = 'link'
+                     where id = ${agent.id} and workspace_id = ${req.workspaceId!}
+                `;
+                if (existed) updated += 1;
+                else created += 1;
+            }
+
+            recordAudit(req, 'link:import_agents', null, 'success');
+            return { ok: true, created, updated, skipped: agents.length - created - updated, total: agents.length };
+        } catch (err) {
+            recordAudit(req, 'link:import_agents', null, auditResultOf(err));
+            return handleError(reply, err);
+        }
+    });
 
     // --- GET /api/graph -----------------------------------------------------
     app.get('/api/graph', async (req, reply) => {

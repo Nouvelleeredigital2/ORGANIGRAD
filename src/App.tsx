@@ -107,12 +107,17 @@ function AppContent() {
     const [useHybridCard, setUseHybridCard] = useState(false);
     const [activeModal, setActiveModal] = useState<{ type: 'profile' | 'contact'; agent: Agent } | null>(null);
     const orgChartRef = useRef<OrgChartRef>(null);
+    const canExport = rawAgents.length > 0;
 
     /**
      * Export PDF — depuis la topbar, on ouvre d'abord l'aperçu A3 (PrintExportView).
      * L'utilisateur valide via le bouton "Télécharger" → on lance l'export réel.
      */
     const handleExportPDF = async (): Promise<void> => {
+        if (!canExport) {
+            feedback.info("Importez des fiches avant d'exporter.");
+            return;
+        }
         setPrintPreviewOpen(true);
     };
 
@@ -207,6 +212,10 @@ function AppContent() {
     };
 
     const handleExportCSV = async () => {
+        if (!canExport) {
+            feedback.info("Importez des fiches avant d'exporter.");
+            return;
+        }
         const { exportToCsv } = await import('./services/csvService');
         if (activeView === 'orgchart' && selectedPole) {
             exportToCsv(selectedPole.agents);
@@ -238,6 +247,7 @@ function AppContent() {
                         handleExportPDF={handleExportPDF}
                         loading={loading}
                         isExporting={isExporting}
+                        canExport={canExport}
                         spotlightInput={
                             <SpotlightSearch
                                 data={viewTree}
@@ -449,13 +459,13 @@ function PostAuthGate({ children }: { children: React.ReactNode }) {
         return (
             <AcceptInvitation
                 token={pendingToken}
-                onAccepted={async () => {
+                onAccepted={async (workspaceId) => {
                     setPendingToken(null);
                     clearPendingInviteToken();
                     const updated = await refresh();
                     // Basculer automatiquement vers le premier workspace disponible
                     // (le workspace accepté sera en tête de liste après refresh)
-                    if (updated?.[0]?.id) setActive(updated[0].id);
+                    if (updated?.some((workspace) => workspace.id === workspaceId)) setActive(workspaceId);
                 }}
                 onSkip={() => {
                     setPendingToken(null);

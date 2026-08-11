@@ -100,7 +100,12 @@ create table if not exists public.hybrid_nodes (
     avatar_url text,
     status text not null default 'IDLE'::text,
     created_at timestamp with time zone not null default now(),
-    updated_at timestamp with time zone not null default now()
+    updated_at timestamp with time zone not null default now(),
+    -- Référence externe optionnelle (ex. 'link' pour un bot Hermes importé) ;
+    -- purement informative, jamais utilisée pour l'autorisation. L'id du
+    -- nœud EST l'identifiant stable de l'entité source — voir migration
+    -- 20260811090000.
+    external_app text
 );
 
 create table if not exists public.node_transitions (
@@ -420,13 +425,16 @@ begin
         raise exception 'owner_role_not_invitable';
     end if;
 
+    -- Alias `wi` obligatoire : les colonnes OUT (id, token, expires_at)
+    -- sont des variables PL/pgSQL et rendraient `expires_at` ambigu
+    -- (voir migration 20260805150000).
     if exists (
-        select 1 from public.workspace_invitations
-        where workspace_id = p_workspace_id
-          and lower(email) = norm_email
-          and accepted_at is null
-          and revoked_at is null
-          and expires_at > now()
+        select 1 from public.workspace_invitations wi
+        where wi.workspace_id = p_workspace_id
+          and lower(wi.email) = norm_email
+          and wi.accepted_at is null
+          and wi.revoked_at is null
+          and wi.expires_at > now()
     ) then
         raise exception 'invitation_already_pending';
     end if;
@@ -448,6 +456,10 @@ create or replace function public.accept_workspace_invitation(p_token text)
 returns table(workspace_id uuid, role workspace_role)
 language plpgsql security definer set search_path to 'pg_catalog', 'public', 'extensions'
 as $function$
+-- Pragma obligatoire : les colonnes OUT (workspace_id, role) sont des
+-- variables PL/pgSQL et rendraient ambiguë la liste de colonnes de
+-- `on conflict (workspace_id, user_id)` (voir migration 20260805150100).
+#variable_conflict use_column
 declare
     inv record;
     user_email text;
@@ -569,9 +581,12 @@ drop policy if exists "inv read admin" on public.workspace_invitations;
 create policy "inv read admin" on public.workspace_invitations for select
     using (public.workspace_role_of(workspace_id) = any (array['owner'::workspace_role, 'admin'::workspace_role]));
 drop policy if exists "inv read by email" on public.workspace_invitations;
+-- L'e-mail vient du claim JWT (auth.email()) : une sous-requête sur
+-- auth.users s'exécuterait avec les privilèges de l'appelant authenticated,
+-- qui n'y a aucun droit (voir migration 20260805150200).
 create policy "inv read by email" on public.workspace_invitations for select using (
     auth.uid() is not null
-    and lower(email) = lower((select users.email from auth.users where users.id = auth.uid())::text)
+    and lower(email) = lower(coalesce(auth.email(), ''))
     and revoked_at is null and accepted_at is null and expires_at > now()
 );
 drop policy if exists "inv insert admin" on public.workspace_invitations;

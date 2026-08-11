@@ -44,8 +44,14 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
+          # reporter: 'list' (playwright.config.ts) n'écrit pas de
+          # playwright-report/ — traces/captures vont dans test-results/
+          # (trace: 'retain-on-failure', screenshot: 'only-on-failure').
+          # L'ancien chemin ne matchait jamais rien : 0 artefact remonté
+          # sur un échec, aucun moyen de diagnostiquer après coup.
           name: playwright-report
-          path: playwright-report/
+          path: test-results/
+          if-no-files-found: warn
           retention-days: 7
 
   orchestrator:

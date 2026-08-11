@@ -35,6 +35,15 @@ export interface OrchestratorGraphNode {
     notifications: { slack: boolean; email: boolean; whatsapp: boolean };
 }
 
+/** Réponse de POST /api/integrations/link/import. */
+export interface LinkImportResult {
+    ok: true;
+    created: number;
+    updated: number;
+    skipped: number;
+    total: number;
+}
+
 export interface SseStatusEvent {
     type: 'NODE_STATUS_CHANGED';
     nodeId: string;
@@ -182,6 +191,26 @@ export class OrchestratorClient {
         });
         if (res.status === 404) return; // déjà absent — idempotent
         if (!res.ok) throw new OrchestratorClientError(`HTTP_${res.status}`, res.status);
+    }
+
+    /**
+     * Importe les bots Hermes/LINK comme des nœuds AGENT_IA (référence par id
+     * LINK, pas de copie de prompt — B3). Action humaine réservée admin :
+     * exige workspace:admin, qu'une clé API n'a jamais (cf. scopes serveur).
+     */
+    async importLinkAgents(): Promise<LinkImportResult> {
+        const headers = await this.humanHeaders();
+        const res = await this.fetchImpl(`${this.baseUrl}/integrations/link/import`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', ...headers },
+            // Fastify refuse un content-type JSON sans corps (FST_ERR_CTP_EMPTY_JSON_BODY).
+            body: '{}',
+        });
+        if (!res.ok) {
+            const detail = await res.json().catch(() => ({}));
+            throw new OrchestratorClientError(`HTTP_${res.status}`, res.status, detail);
+        }
+        return (await res.json()) as LinkImportResult;
     }
 
     /**

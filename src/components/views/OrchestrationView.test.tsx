@@ -2,9 +2,11 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent, act, waitFor } from '@testing-library/react';
 import { OrchestrationView } from './OrchestrationView';
 import type { HybridNode } from '../../types/hybridNode';
+import type { WorkspaceRole } from '../../auth/permissions';
 
 const bridgeMock = vi.hoisted(() => ({
     connected: false,
+    connectionState: 'local' as const,
     nodes: [] as HybridNode[],
     client: null,
     runNode: vi.fn<(id: string) => Promise<void>>(async () => {}),
@@ -16,6 +18,16 @@ const bridgeMock = vi.hoisted(() => ({
 
 vi.mock('../../hooks/useOrchestratorBridge', () => ({
     useOrchestratorBridge: () => bridgeMock,
+}));
+
+const permissionsMock = vi.hoisted(() => ({
+    can: vi.fn(() => true),
+    role: null as WorkspaceRole | null,
+    isLocalMode: true,
+}));
+
+vi.mock('../../auth/usePermissions', () => ({
+    usePermissions: () => permissionsMock,
 }));
 
 /** Sème des nœuds dans le cache local (espace offline). */
@@ -38,6 +50,10 @@ describe('OrchestrationView', () => {
     beforeEach(() => {
         localStorage.clear();
         bridgeMock.connected = false;
+        bridgeMock.connectionState = 'local';
+        permissionsMock.can.mockReturnValue(true);
+        permissionsMock.role = null;
+        permissionsMock.isLocalMode = true;
         bridgeMock.nodes = [];
         Object.values(bridgeMock).forEach((v) => {
             if (typeof v === 'function' && 'mockClear' in v) v.mockClear();
@@ -152,5 +168,13 @@ describe('OrchestrationView', () => {
         await waitFor(() => expect(bridgeMock.reject).toHaveBeenCalled());
         // Le motif survit à l'échec et le panneau reste ouvert.
         expect(screen.getByPlaceholderText(/Motif du rejet/i)).toHaveValue('Incomplet');
+    });
+
+    it('disables the empty-state creation CTA for a read-only role', () => {
+        permissionsMock.can.mockReturnValue(false);
+        permissionsMock.role = 'viewer';
+        permissionsMock.isLocalMode = false;
+        render(<OrchestrationView rawAgents={[]} />);
+        expect(screen.getByRole('button', { name: /premier/i })).toBeDisabled();
     });
 });

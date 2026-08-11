@@ -5,6 +5,7 @@ import {
     type SseStatusEvent,
     type OrchestratorGraphNode,
     type UserAuth,
+    type LinkImportResult,
 } from '../services/orchestratorService';
 import { useOrchestratorConfig } from './useOrchestratorConfig';
 import { useWorkspaceContext } from '../contexts/WorkspaceContext';
@@ -23,6 +24,7 @@ import { supabase } from '../lib/supabase';
  */
 export interface OrchestratorBridge {
     connected: boolean;
+    connectionState: 'local' | 'connected' | 'degraded' | 'failed';
     nodes: OrchestratorGraphNode[];
     /** Client actif — exposé pour que le repo puisse router les écritures via l'orchestrateur. */
     client: OrchestratorClient | null;
@@ -31,6 +33,8 @@ export interface OrchestratorBridge {
     approve: (id: string) => Promise<void>;
     reject: (id: string, feedback: string) => Promise<void>;
     reset: (id: string) => Promise<void>;
+    /** Importe les bots Hermes/LINK comme des nœuds AGENT_IA (admin uniquement). */
+    importLinkAgents: () => Promise<LinkImportResult>;
 }
 
 export interface UseOrchestratorBridgeOptions {
@@ -46,6 +50,7 @@ export function useOrchestratorBridge(
     opts: UseOrchestratorBridgeOptions = {},
 ): OrchestratorBridge {
     const [connected, setConnected] = useState(false);
+    const [connectionState, setConnectionState] = useState<OrchestratorBridge['connectionState']>('local');
     const [nodes, setNodes] = useState<OrchestratorGraphNode[]>([]);
     const [activeClient, setActiveClient] = useState<OrchestratorClient | null>(null);
     const clientRef = useRef<OrchestratorClient | null>(null);
@@ -80,6 +85,7 @@ export function useOrchestratorBridge(
         (async () => {
             if (disabled) {
                 setConnected(false);
+                setConnectionState('local');
                 return;
             }
             const client = clientFactory
@@ -92,6 +98,7 @@ export function useOrchestratorBridge(
             if (!reachable) {
                 setConnected(false);
                 setActiveClient(null);
+                setConnectionState('failed');
                 return;
             }
             try {
@@ -99,13 +106,17 @@ export function useOrchestratorBridge(
                 if (cancelled) return;
                 setNodes(snapshot);
                 setConnected(true);
+                setConnectionState('connected');
                 setActiveClient(client);
                 unsubscribe = client.subscribe((evt: SseStatusEvent) => {
                     setNodes((prev) => applyTransitionPatch(prev, evt));
+                }, () => {
+                    if (!cancelled) setConnectionState('degraded');
                 });
             } catch {
                 setConnected(false);
                 setActiveClient(null);
+                setConnectionState('failed');
             }
         })();
 
@@ -118,6 +129,7 @@ export function useOrchestratorBridge(
 
     return {
         connected,
+        connectionState,
         nodes,
         client: activeClient,
         runNode: async (id) => {
@@ -134,6 +146,15 @@ export function useOrchestratorBridge(
         },
         reset: async (id) => {
             await clientRef.current?.reset(id);
+        },
+        /**
+         * Importe les bots Hermes/LINK comme des nœuds AGENT_IA (session
+         * humaine admin requise côté serveur). Lève si l'orchestrateur n'est
+         * pas configuré/joignable — le client doit gérer l'erreur.
+         */
+        importLinkAgents: async () => {
+            if (!clientRef.current) throw new Error('ORCHESTRATOR_NOT_CONFIGURED');
+            return clientRef.current.importLinkAgents();
         },
     };
 }

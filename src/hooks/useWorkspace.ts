@@ -36,10 +36,14 @@ export function useWorkspace(userId: string | undefined): {
         }
         setLoading(true);
         try {
-            // RLS limite naturellement aux workspaces où auth.uid() est membre
+            // Filtre user_id indispensable : la policy « wm read members »
+            // expose les lignes de TOUS les co-membres des workspaces où l'on
+            // est membre. Sans ce filtre, chaque workspace apparaît en doublon
+            // et le rôle affiché est celui de la plus ancienne ligne — l'owner.
             const { data, error } = await supabase
                 .from('workspace_members')
                 .select('role, workspace:workspaces(*)')
+                .eq('user_id', userId)
                 .order('created_at', { ascending: true });
             if (error) throw error;
             const list: WorkspaceWithRole[] = (data ?? [])

@@ -230,7 +230,14 @@ export function getSql(): Sql {
         );
     }
     _sql = postgres(url, {
-        prepare: true,
+        // `prepare: false` est obligatoire : le DSN de production passe par le
+        // pooler Supabase en MODE TRANSACTION (port 6543, Supavisor/PgBouncer).
+        // Ce mode réassigne la connexion Postgres backend à chaque transaction ;
+        // un prepared statement créé sur l'une n'existe plus sur la suivante et
+        // casse en `prepared statement "…" does not exist`. Constaté en recette
+        // le 2026-08-09 : cette erreur a fait crasher tout le process (rejet non
+        // rattrapé plus loin dans le journal d'audit — cf. recordAudit).
+        prepare: false,
         max: 10,
         idle_timeout: 30,
         connect_timeout: 10,

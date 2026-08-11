@@ -5,6 +5,8 @@ import { Button } from '../design/ui';
 import { cx } from '../design/cx';
 import { ARCHETYPE } from '../design/tokens';
 import { useEscapeClose } from '../hooks/useEscapeClose';
+import { VoiceMicButton } from './VoiceMicButton';
+import type { VoiceCapture } from '@apps2026/voice-client';
 
 /**
  * Validation Center — refonte v2 (bundle Design System Apple-style).
@@ -43,6 +45,13 @@ interface ValidationCenterProps {
      * en local rien n'est persisté, en distant un appel réel est émis.
      */
     mode?: 'local' | 'remote';
+    /**
+     * Base du proxy vocal de l'orchestrateur (ex. `${baseUrl}/voice/gateway`).
+     * Absente → pas de bouton micro (mode local sans orchestrateur).
+     */
+    voiceProxyBasePath?: string;
+    /** Injection de la capture micro pour les tests (jsdom n'a pas de micro). */
+    voiceCapture?: VoiceCapture;
 }
 
 const GLYPH_CLASS: Record<HybridNode['type'], 'human' | 'ai' | 'mcp'> = {
@@ -59,6 +68,8 @@ export function ValidationCenter({
     onReject,
     onShowDetails,
     mode = 'local',
+    voiceProxyBasePath,
+    voiceCapture,
 }: ValidationCenterProps) {
     const [rejectingId, setRejectingId] = useState<string | null>(null);
     const [rejectFeedback, setRejectFeedback] = useState('');
@@ -68,6 +79,7 @@ export function ValidationCenter({
     if (!isOpen) return null;
 
     const handleRejectConfirm = async (node: HybridNode) => {
+        if (pendingId === node.id) return;
         const fb = rejectFeedback.trim();
         if (!fb) return;
         setPendingId(node.id);
@@ -195,9 +207,15 @@ export function ValidationCenter({
                                                     color: 'var(--fg-1)',
                                                 }}
                                             />
+                                            {voiceProxyBasePath && (
+                                                <VoiceMicButton
+                                                    proxyBasePath={voiceProxyBasePath}
+                                                    capture={voiceCapture}
+                                                />
+                                            )}
                                             <button
                                                 onClick={() => void handleRejectConfirm(it.node)}
-                                                disabled={!rejectFeedback.trim()}
+                                                disabled={!rejectFeedback.trim() || pendingId === it.node.id}
                                                 style={{
                                                     background: 'var(--system-red)',
                                                     color: '#fff',
@@ -206,8 +224,8 @@ export function ValidationCenter({
                                                     padding: '5px 10px',
                                                     fontSize: 11,
                                                     fontWeight: 600,
-                                                    cursor: rejectFeedback.trim() ? 'pointer' : 'not-allowed',
-                                                    opacity: rejectFeedback.trim() ? 1 : 0.5,
+                                                    cursor: rejectFeedback.trim() && pendingId !== it.node.id ? 'pointer' : 'not-allowed',
+                                                    opacity: rejectFeedback.trim() && pendingId !== it.node.id ? 1 : 0.5,
                                                 }}
                                             >
                                                 <XCircle size={12} style={{ display: 'inline', marginRight: 4 }} />
