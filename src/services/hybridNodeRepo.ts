@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 import type {
     HybridNode,
     NodeType,
@@ -9,6 +10,20 @@ import type {
 import type { Database } from '../types/supabase';
 import { hybridNodeStore } from './hybridNodeStore';
 import type { NodeMutationPayload, OrchestratorClient } from './orchestratorService';
+
+/**
+ * Registre module-level des channels Realtime actifs, un par workspace —
+ * voir la jsdoc de `hybridNodeRepo.subscribe` pour la raison d'être.
+ */
+const realtimeSubscriptions = new Map<
+    string,
+    {
+        channel: RealtimeChannel;
+        handlers: Set<
+            (event: 'INSERT' | 'UPDATE' | 'DELETE', node: HybridNode | { id: string }) => void
+        >;
+    }
+>();
 
 /**
  * Préfixe posé par l'orchestrateur sur une valeur chiffrée au repos.
@@ -239,36 +254,59 @@ export const hybridNodeRepo = {
     /**
      * Souscrit aux changements live (Realtime Postgres) pour un workspace.
      * Renvoie une fonction de cleanup.
+     *
+     * Mutualisé par workspace : ActivityLog et OrchestrationView s'abonnent
+     * tous deux au même workspace en parallèle. `supabase.channel(topic)`
+     * renvoie l'instance EXISTANTE pour un topic déjà présent — un second
+     * appel à `.on('postgres_changes', …)` sur un channel déjà `.subscribe()`
+     * lève une exception non rattrapable (crash de toute l'app, constaté en
+     * recette connectée 2026-08-11 : ouvrir Orchestration avec ActivityLog
+     * déjà monté faisait planter la SPA). Un seul channel/dispatcher par
+     * workspace, un Set de handlers en aval — comptage de références pour
+     * fermer le channel quand le dernier abonné se retire.
      */
     subscribe(
         ctx: RepoContext,
         handler: (event: 'INSERT' | 'UPDATE' | 'DELETE', node: HybridNode | { id: string }) => void,
     ): () => void {
         if (!supabase || !ctx.workspaceId) return () => {};
-        const channel = supabase
-            .channel(`hybrid_nodes:${ctx.workspaceId}`)
-            .on(
-                'postgres_changes',
-                {
-                    event: '*',
-                    schema: 'public',
-                    table: 'hybrid_nodes',
-                    filter: `workspace_id=eq.${ctx.workspaceId}`,
-                },
-                (payload) => {
-                    if (payload.eventType === 'DELETE') {
-                        handler('DELETE', { id: (payload.old as Row).id });
-                    } else {
-                        handler(
-                            payload.eventType as 'INSERT' | 'UPDATE',
-                            rowToNode(payload.new as Row),
-                        );
-                    }
-                },
-            )
-            .subscribe();
+        const workspaceId = ctx.workspaceId;
+
+        let entry = realtimeSubscriptions.get(workspaceId);
+        if (!entry) {
+            const handlers = new Set<typeof handler>();
+            const channel = supabase
+                .channel(`hybrid_nodes:${workspaceId}`)
+                .on(
+                    'postgres_changes',
+                    {
+                        event: '*',
+                        schema: 'public',
+                        table: 'hybrid_nodes',
+                        filter: `workspace_id=eq.${workspaceId}`,
+                    },
+                    (payload) => {
+                        const dispatched: ['INSERT' | 'UPDATE' | 'DELETE', HybridNode | { id: string }] =
+                            payload.eventType === 'DELETE'
+                                ? ['DELETE', { id: (payload.old as Row).id }]
+                                : [payload.eventType as 'INSERT' | 'UPDATE', rowToNode(payload.new as Row)];
+                        for (const h of handlers) h(...dispatched);
+                    },
+                )
+                .subscribe();
+            entry = { channel, handlers };
+            realtimeSubscriptions.set(workspaceId, entry);
+        }
+        entry.handlers.add(handler);
+
         return () => {
-            void supabase?.removeChannel(channel);
+            const current = realtimeSubscriptions.get(workspaceId);
+            if (!current) return;
+            current.handlers.delete(handler);
+            if (current.handlers.size === 0) {
+                realtimeSubscriptions.delete(workspaceId);
+                void supabase?.removeChannel(current.channel);
+            }
         };
     },
 };
