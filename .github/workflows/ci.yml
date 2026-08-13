@@ -8,7 +8,7 @@ on:
 jobs:
   frontend:
     name: Frontend (lint · typecheck · test · build)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, hermes-vps]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -29,7 +29,7 @@ jobs:
   # vide volontairement les variables) : aucun secret n'est requis.
   e2e:
     name: E2E (Playwright · chromium)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, hermes-vps]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -56,7 +56,7 @@ jobs:
 
   orchestrator:
     name: Orchestrateur (typecheck · test · build)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, hermes-vps]
     defaults:
       run:
         working-directory: orchestrator
@@ -74,7 +74,7 @@ jobs:
 
   hygiene:
     name: Hygiène dépôt (secrets · artefacts)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, hermes-vps]
     steps:
       - uses: actions/checkout@v4
       - name: Aucun .env (hors .example/.test) versionné
