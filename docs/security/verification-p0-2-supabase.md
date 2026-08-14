@@ -263,17 +263,22 @@ select 'policy',             tablename || ' :: ' || policyname from pg_policies 
 order by 1, 2;
 ```
 
-Exporter le résultat en CSV (bouton *Download CSV* du SQL Editor) et le
-comparer à `inventaire-schema-reference.csv`, dans ce même dossier : **54
-objets**, relevés sur la réplique locale du schéma versionné.
+Exporter le résultat en CSV (bouton *Download CSV* du SQL Editor), puis :
 
 ```bash
-diff <(tail -n +2 docs/security/inventaire-schema-reference.csv | sort) <(tail -n +2 export-prod.csv | sort)
+node scripts/diff-schema.mjs export-prod.csv
 ```
 
-Les lignes `>` sont des objets présents en production et absents du dépôt — la
-dérive à rapatrier. Les lignes `<` sont des objets versionnés absents de la
-production, donc du code mort ou une migration jamais appliquée.
+Le script compare à `inventaire-schema-reference.csv`, dans ce même dossier :
+**54 objets** relevés sur la réplique locale du schéma versionné. Il distingue
+les objets **présents en base et absents du dépôt** (la dérive à rapatrier) de
+ceux **présents dans le dépôt et absents de la base** (code mort, ou migration
+jamais appliquée), et sort en code 1 dès qu'il trouve un écart — utilisable tel
+quel dans un contrôle automatisé.
+
+> Un `diff` de shell ne convient pas ici : le SQL Editor entoure de guillemets
+> toute valeur contenant une virgule, ce que font les noms de policies
+> (`table :: nom`). Le script gère ce cas.
 
 ---
 
