@@ -99,6 +99,17 @@ jobs:
         options: >-
           --health-cmd pg_isready --health-interval 5s
           --health-timeout 5s --health-retries 10
+      # Seconde base, VIERGE : les tests de concurrence créent leur propre
+      # schéma minimal. Les mélanger avec le schéma Organigrad complet ferait
+      # jouer ses triggers (client_guard) et rendrait le résultat illisible.
+      postgres-concurrence:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: test
+        ports: ['5433:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 10
     defaults:
       run:
         working-directory: orchestrator
@@ -116,6 +127,14 @@ jobs:
         run: npm test -- workspaceRpcSecurity
         env:
           TEST_DATABASE_URL: postgres://postgres:test@localhost:5432/postgres
+      # Test de CARACTÉRISATION : il verrouille le « dernier écrivain gagne »
+      # actuel, qui n'a jamais été choisi (cf. docs/architecture/concurrence-ecritures.md).
+      # Il DOIT échouer le jour où une politique de concurrence est retenue —
+      # il faudra alors le réécrire en test de conformité, pas le supprimer.
+      - name: Concurrence — politique d'écriture effective
+        run: npm test -- concurrentWrites
+        env:
+          TEST_DATABASE_URL: postgres://postgres:test@localhost:5433/postgres
 
   hygiene:
     name: Hygiène dépôt (secrets · artefacts)
