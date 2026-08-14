@@ -26,11 +26,51 @@ import {
 test.describe('Authentification', () => {
     test.skip(!CONFIGURE, '.env.connected non renseigné — voir .env.connected.example');
 
+    let client: SupabaseClient;
+    let nomWorkspace: string;
+    let roleAttendu: string;
+
+    test.beforeAll(async () => {
+        client = await clientPour(COMPTE_A!);
+        const id = await workspaceDe(client, COMPTE_A!);
+        const { data: ws } = await client.from('workspaces').select('name').eq('id', id).single();
+        const { data: membre } = await client
+            .from('workspace_members')
+            .select('role')
+            .eq('workspace_id', id)
+            .single();
+        nomWorkspace = String(ws?.name ?? '');
+        roleAttendu = String(membre?.role ?? '');
+    });
+
+    test.afterAll(async () => {
+        await client?.auth.signOut();
+    });
+
+    /**
+     * Ouvre le menu de workspace de la barre latérale. Il porte le nom du
+     * workspace et son rôle, et contient le bouton de déconnexion — il n'y a
+     * pas de commande de déconnexion ailleurs.
+     */
+    async function ouvrirMenuWorkspace(page: import('@playwright/test').Page) {
+        const echappe = nomWorkspace.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        await page.getByRole('button', { name: new RegExp(echappe) }).first().click();
+    }
+
+    test('le rôle réel est affiché dans le sélecteur de workspace', async ({ page }) => {
+        await seConnecter(page, COMPTE_A!);
+        await ouvrirMenuWorkspace(page);
+        // Le rôle vient de la base, pas d'une valeur codée en dur côté client.
+        await expect(page.getByText(roleAttendu, { exact: true }).first()).toBeVisible();
+    });
+
     test('connexion puis déconnexion', async ({ page }) => {
         const erreurs = collecterErreurs(page);
         await seConnecter(page, COMPTE_A!);
 
-        await page.getByRole('navigation').getByRole('button', { name: /Déconnexion|Se déconnecter/i }).click();
+        await ouvrirMenuWorkspace(page);
+        await page.getByRole('button', { name: 'Se déconnecter' }).click();
+
         // Retour à l'écran d'authentification : le formulaire réapparaît.
         await expect(page.getByRole('button', { name: 'Se connecter' })).toBeVisible({
             timeout: 15_000,
