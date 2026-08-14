@@ -1,5 +1,5 @@
 import { supabase } from '../lib/supabase';
-import type { RealtimeChannel } from '@supabase/supabase-js';
+import { souscrirePartage } from './realtimeShared';
 import type {
     HybridNode,
     NodeType,
@@ -15,15 +15,8 @@ import type { NodeMutationPayload, OrchestratorClient } from './orchestratorServ
  * Registre module-level des channels Realtime actifs, un par workspace —
  * voir la jsdoc de `hybridNodeRepo.subscribe` pour la raison d'être.
  */
-const realtimeSubscriptions = new Map<
-    string,
-    {
-        channel: RealtimeChannel;
-        handlers: Set<
-            (event: 'INSERT' | 'UPDATE' | 'DELETE', node: HybridNode | { id: string }) => void
-        >;
-    }
->();
+/** Événement diffusé aux abonnés : DELETE ne porte que l'identifiant. */
+type EvenementNoeud = ['INSERT' | 'UPDATE' | 'DELETE', HybridNode | { id: string }];
 
 /**
  * Préfixe posé par l'orchestrateur sur une valeur chiffrée au repos.
@@ -256,14 +249,10 @@ export const hybridNodeRepo = {
      * Renvoie une fonction de cleanup.
      *
      * Mutualisé par workspace : ActivityLog et OrchestrationView s'abonnent
-     * tous deux au même workspace en parallèle. `supabase.channel(topic)`
-     * renvoie l'instance EXISTANTE pour un topic déjà présent — un second
-     * appel à `.on('postgres_changes', …)` sur un channel déjà `.subscribe()`
-     * lève une exception non rattrapable (crash de toute l'app, constaté en
-     * recette connectée 2026-08-11 : ouvrir Orchestration avec ActivityLog
-     * déjà monté faisait planter la SPA). Un seul channel/dispatcher par
-     * workspace, un Set de handlers en aval — comptage de références pour
-     * fermer le channel quand le dernier abonné se retire.
+     * tous deux au même workspace en parallèle, et `supabase.channel(topic)`
+     * renvoie l'instance EXISTANTE — d'où le crash de toute la SPA constaté en
+     * recette connectée le 2026-08-11. Le registre partagé et le comptage de
+     * références vivent dans `realtimeShared.ts`, avec le détail du piège.
      */
     subscribe(
         ctx: RepoContext,
@@ -272,41 +261,30 @@ export const hybridNodeRepo = {
         if (!supabase || !ctx.workspaceId) return () => {};
         const workspaceId = ctx.workspaceId;
 
-        let entry = realtimeSubscriptions.get(workspaceId);
-        if (!entry) {
-            const handlers = new Set<typeof handler>();
-            const channel = supabase
-                .channel(`hybrid_nodes:${workspaceId}`)
-                .on(
+        return souscrirePartage<EvenementNoeud>(
+            `hybrid_nodes:${workspaceId}`,
+            (channel, emettre) =>
+                channel.on(
                     'postgres_changes',
                     {
                         event: '*',
                         schema: 'public',
                         table: 'hybrid_nodes',
+                        // Le filtre par workspace tient l'isolation côté serveur ;
+                        // le topic la tient côté client.
                         filter: `workspace_id=eq.${workspaceId}`,
                     },
-                    (payload) => {
-                        const dispatched: ['INSERT' | 'UPDATE' | 'DELETE', HybridNode | { id: string }] =
+                    (payload) =>
+                        emettre(
                             payload.eventType === 'DELETE'
                                 ? ['DELETE', { id: (payload.old as Row).id }]
-                                : [payload.eventType as 'INSERT' | 'UPDATE', rowToNode(payload.new as Row)];
-                        for (const h of handlers) h(...dispatched);
-                    },
-                )
-                .subscribe();
-            entry = { channel, handlers };
-            realtimeSubscriptions.set(workspaceId, entry);
-        }
-        entry.handlers.add(handler);
-
-        return () => {
-            const current = realtimeSubscriptions.get(workspaceId);
-            if (!current) return;
-            current.handlers.delete(handler);
-            if (current.handlers.size === 0) {
-                realtimeSubscriptions.delete(workspaceId);
-                void supabase?.removeChannel(current.channel);
-            }
-        };
+                                : [
+                                      payload.eventType as 'INSERT' | 'UPDATE',
+                                      rowToNode(payload.new as Row),
+                                  ],
+                        ),
+                ),
+            ([event, node]) => handler(event, node),
+        );
     },
 };

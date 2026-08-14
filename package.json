@@ -11,6 +11,7 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
+    "test:e2e:connected": "playwright test --config playwright.connected.config.ts",
     "preview": "vite preview",
     "check": "npm run lint && npm run typecheck && npm run test && npm run build"
   },

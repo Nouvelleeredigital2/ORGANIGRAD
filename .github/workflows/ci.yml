@@ -124,7 +124,10 @@ jobs:
       - uses: actions/checkout@v4
       - name: Aucun .env (hors .example/.test) versionné
         run: |
-          if git ls-files | grep -E '(^|/)\.env($|\.)' | grep -vE '\.env\.example$|\.env\.test$'; then
+          # `\.example$` plutôt que le seul `\.env\.example` : les gabarits sont
+          # désormais plusieurs (.env.example, .env.connected.example) et un
+          # gabarit ne contient par définition aucune valeur.
+          if git ls-files | grep -E '(^|/)\.env($|\.)' | grep -vE '\.example$|\.env\.test$'; then
             echo "::error::Un fichier .env est versionné"; exit 1; fi
       - name: Aucun node_modules / dist versionné
         run: |

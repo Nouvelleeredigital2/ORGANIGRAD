@@ -57,6 +57,56 @@ Pop-Location
 Sans `TEST_DATABASE_URL`, Vitest saute ce test : une suite verte ne prouve donc
 pas la compatibilité PostgreSQL réelle.
 
+## Sécurité SQL — isolation multi-workspaces
+
+`orchestrator/tests/workspaceRpcSecurity.integration.test.ts` (11 tests) vérifie
+qu'un utilisateur ne peut pas agir sur un workspace dont il n'est pas membre.
+Même conditionnement que ci-dessus (`TEST_DATABASE_URL`), mais la base est
+provisionnée **depuis le SQL versionné** (`supabase/schema/baseline_2026-08-03.sql`
+puis les migrations postérieures) : les tests portent sur le schéma livré, pas
+sur une copie recopiée dans le test.
+
+Ce test tourne en CI (job `securite-sql`, service `postgres:16`). Localement :
+
+```powershell
+docker run --rm -e POSTGRES_PASSWORD=test -p 15433:5432 postgres:16
+$env:TEST_DATABASE_URL = 'postgres://postgres:test@localhost:15433/postgres'
+Push-Location orchestrator
+npm test -- workspaceRpcSecurity
+Pop-Location
+```
+
+> La base doit être **vierge** : le baseline est un dump, pas une migration
+> idempotente. Recréer la base entre deux exécutions.
+
+## E2E connectée — Realtime (P0-5)
+
+`e2e-connected/realtime-orchestration.spec.ts` couvre le scénario qui a fait
+tomber la SPA le 2026-08-11 : `OrchestrationView` et `ActivityLog` abonnés au
+même workspace. Il faut un **vrai** client Realtime — `supabase.channel(topic)`
+rend l'instance existante, et un second `.on(...)` sur un channel déjà souscrit
+lève depuis le cœur de supabase-js, hors de toute frontière React. Un mock ne le
+montre pas ; c'est pourquoi ce test existe **en plus** des tests unitaires de
+`src/services/realtimeShared.ts`.
+
+Le nœud est créé **depuis Node**, pas par l'interface : seul le chemin Realtime
+peut alors le faire apparaître à l'écran. Une création via l'UI passerait par la
+mise à jour optimiste et ne prouverait rien.
+
+```bash
+cp .env.connected.example .env.connected   # puis renseigner
+npm run test:e2e:connected
+```
+
+Configuration séparée (`playwright.connected.config.ts`, port 5175) : la suite
+hermétique force Supabase OFF, ce qui met la SPA en mode local — tout permis,
+aucun channel. Les deux ne peuvent pas cohabiter, et la suite connectée ne doit
+jamais s'exécuter par accident dans la CI hermétique.
+
+> ⚠️ Projet Supabase **de test** uniquement : ces tests créent puis suppriment
+> des nœuds. Sans `.env.connected`, les 3 tests sont sautés — une suite verte ne
+> prouve donc rien ici non plus.
+
 ## Tests connectés optionnels
 
 Les scénarios B2/B5 de `orchestrator/tests/e2eVerticalSlice.test.ts` vérifient
