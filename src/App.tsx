@@ -45,7 +45,7 @@ import { WorkspaceProvider } from './contexts/WorkspaceProvider';
 import { isSupabaseConfigured } from './lib/supabase';
 import { useFeedback } from './feedback/FeedbackContext';
 import { FeedbackProvider } from './feedback/FeedbackProvider';
-import { describeError } from './utils/asyncGuard';
+import { messageErreurUtilisateur } from './utils/asyncGuard';
 import { usePermissions } from './auth/usePermissions';
 import { ImportPreviewModal } from './components/import/ImportPreviewModal';
 
@@ -156,7 +156,7 @@ function AppContent() {
         // Le succès n'est affiché que si l'export a réellement abouti (ORG-003).
         if (failure) {
             feedback.error(
-                `Export PDF échoué${poleLabel ? ` — ${poleLabel}` : ''} : ${describeError(failure)}. Aucun fichier n'a été téléchargé.`,
+                `Export PDF échoué${poleLabel ? ` — ${poleLabel}` : ''} : ${messageErreurUtilisateur(failure)}. Aucun fichier n'a été téléchargé.`,
             );
             setFilamentState('error');
         } else {
