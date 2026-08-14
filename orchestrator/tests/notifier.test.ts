@@ -608,7 +608,7 @@ describe('Notifier — clé d\'idempotence des e-mails', () => {
      */
     function fetchCible(echecsEmail = 0) {
         let restants = echecsEmail;
-        return vi.fn(async (url: string, _init?: RequestInit) => {
+        return vi.fn(async (url: string) => {
             if (url === EMAIL_URL && restants > 0) {
                 restants -= 1;
                 return new Response('', { status: 500 });
@@ -618,9 +618,12 @@ describe('Notifier — clé d\'idempotence des e-mails', () => {
     }
 
     function clesEnvoyees(fetchMock: ReturnType<typeof fetchCible>): string[] {
-        return fetchMock.mock.calls
-            .filter((c) => (c[0] as string) === EMAIL_URL)
-            .map((c) => JSON.parse((c[1] as RequestInit).body as string).idempotencyKey as string);
+        // Le mock ne déclare que `url` (déclarer un `init` inutilisé fâche
+        // eslint) ; les arguments réels comportent bien le second, d'où la
+        // relecture via un tuple.
+        return (fetchMock.mock.calls as unknown as Array<[string, RequestInit]>)
+            .filter(([url]) => url === EMAIL_URL)
+            .map(([, init]) => JSON.parse(init.body as string).idempotencyKey as string);
     }
 
     function notifierAvec(fetchMock: ReturnType<typeof fetchCible>) {
