@@ -73,7 +73,7 @@ function AppContent() {
         poleStats,
         highlightedSearch,
         setHighlightedSearch,
-        isEditMode,
+        isEditMode: editionDemandee,
         setIsEditMode,
         handleDeleteAgent,
         handleUpdateAgent,
@@ -97,6 +97,16 @@ function AppContent() {
         confirmImport,
         cancelImport,
     } = useOrgChartController();
+
+    // `?edit=1` vient de l'URL : un viewer peut l'écrire à la main. Le mode
+    // édition est donc BORNÉ ICI, une seule fois, plutôt qu'à chaque endroit qui
+    // le consomme — un site oublié suffisait à rouvrir la brèche, et c'est
+    // exactement ce qui s'était produit : l'organigramme était bien borné, mais
+    // ProfileModal et ContactModal recevaient le drapeau brut et proposaient
+    // leur formulaire d'enregistrement à un lecteur seul.
+    // La RLS refusait bien l'écriture ; l'interface promettait quand même une
+    // action qui finissait en 403 muet.
+    const isEditMode = editionDemandee && peutEditerAgents;
 
     const { activeWorkspace } = useWorkspaceContext();
     const activeWorkspaceName = activeWorkspace?.name ?? null;
@@ -328,7 +338,7 @@ function AppContent() {
                                 selectedPole={selectedPole}
                                 orgChartRef={orgChartRef}
                                 isPdfMode={isPdfMode}
-                                isEditMode={isEditMode && peutEditerAgents}
+                                isEditMode={isEditMode}
                                 onToggleEditMode={
                                     peutEditerAgents ? () => setIsEditMode(!isEditMode) : undefined
                                 }
