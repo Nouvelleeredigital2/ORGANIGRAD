@@ -618,13 +618,22 @@ html, body {
     -webkit-backdrop-filter: blur(10px);
     backdrop-filter: blur(10px);
     z-index: 95;
-    display: flex; align-items: center; justify-content: center;
+    /* `align-items: center` rognait le HAUT du contenu quand celui-ci dépasse
+       la fenêtre, sans que le défilement puisse le rattraper (comportement
+       connu du centrage flex en débordement). La barre d'action étant posée à
+       `top: -60px` au-dessus de la page A3, elle devenait INATTEIGNABLE : à
+       1280×720, le bouton « Télécharger le PDF » ne pouvait pas être cliqué.
+       Le correctif d'en dessous de 1180 px ne couvrait pas ce cas.
+       `margin: auto` sur l'enfant centre quand il y a la place et laisse
+       défiler sinon. */
+    display: flex; align-items: flex-start; justify-content: center;
     overflow: auto;
     padding: 80px 24px 24px;
     animation: fade-in 220ms var(--ease-standard) both;
 }
 .dsm-print-stage {
     position: relative;
+    margin: auto;
     animation: scale-pop 320ms var(--ease-emphatic) both;
 }
 
@@ -846,8 +855,10 @@ html, body {
     background: white;
 }
 
-/* Responsive : sous 1180 px on autorise le scroll horizontal */
+/* Responsive : sous 1180 px on autorise le scroll horizontal.
+   `align-items` n'est plus repris ici : la règle de base est déjà
+   `flex-start` + `margin: auto`, sûre au débordement à toutes les tailles. */
 @media (max-width: 1180px) {
-    .dsm-print-overlay { align-items: flex-start; padding-top: 100px; }
+    .dsm-print-overlay { padding-top: 100px; }
     .dsm-print-page { transform-origin: top left; }
 }
