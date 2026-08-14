@@ -79,7 +79,33 @@ Pop-Location
 > La base doit être **vierge** : le baseline est un dump, pas une migration
 > idempotente. Recréer la base entre deux exécutions.
 
-## E2E connectée — Realtime (P0-5)
+## E2E connectée — Supabase réel (P0-5, P1-7)
+
+`e2e-connected/` regroupe tout ce qui ne peut pas être vérifié hors ligne, soit
+**22 tests** en quatre fichiers :
+
+| Fichier | Couvre |
+|---|---|
+| `auth-isolation.spec.ts` | connexion, déconnexion, session au rechargement, **isolation A/B**, rôle `viewer` |
+| `membres-cles-api.spec.ts` | invitations (création, doublon, rôle owner refusé), clés API (révélation unique, révocation) |
+| `noeuds-persistance.spec.ts` | cycle de vie d'un nœud et **persistance réelle** après rechargement |
+| `realtime-orchestration.spec.ts` | le crash Realtime à deux consommateurs (ci-dessous) |
+
+```bash
+cp .env.connected.example .env.connected   # puis renseigner
+npm run test:e2e:connected
+```
+
+> **Deux comptes dans deux workspaces distincts** sont nécessaires
+> (`E2E_EMAIL_B`). L'isolation ne se teste pas avec un seul compte — c'est
+> précisément la configuration qu'exploitait la faille corrigée. Sans le second
+> compte, ces tests se sautent ; les autres tournent.
+
+En CI : job `connectee`, **déclenchement manuel uniquement**
+(`workflow_dispatch`), avec des secrets GitHub. Il échoue explicitement si les
+secrets sont absents plutôt que de passer au vert en n'ayant rien testé.
+
+### Le cas Realtime (P0-5)
 
 `e2e-connected/realtime-orchestration.spec.ts` couvre le scénario qui a fait
 tomber la SPA le 2026-08-11 : `OrchestrationView` et `ActivityLog` abonnés au
@@ -92,11 +118,6 @@ montre pas ; c'est pourquoi ce test existe **en plus** des tests unitaires de
 Le nœud est créé **depuis Node**, pas par l'interface : seul le chemin Realtime
 peut alors le faire apparaître à l'écran. Une création via l'UI passerait par la
 mise à jour optimiste et ne prouverait rien.
-
-```bash
-cp .env.connected.example .env.connected   # puis renseigner
-npm run test:e2e:connected
-```
 
 Configuration séparée (`playwright.connected.config.ts`, port 5175) : la suite
 hermétique force Supabase OFF, ce qui met la SPA en mode local — tout permis,
