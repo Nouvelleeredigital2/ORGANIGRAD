@@ -216,3 +216,122 @@ describe('OrchestratorClient — importLinkAgents()', () => {
         await expect(c.importLinkAgents()).rejects.toMatchObject({ status: 403 });
     });
 });
+
+/**
+ * P2-17 — erreurs réseau. Chaque code doit être distinguable par l'appelant :
+ * un 401 (session expirée) et un 500 (panne serveur) n'appellent pas la même
+ * réaction dans l'interface, et aucun des deux ne doit passer pour un succès.
+ */
+describe('OrchestratorClient — codes HTTP et pannes réseau', () => {
+    let fetchMock: ReturnType<typeof vi.fn>;
+    let client: OrchestratorClient;
+
+    beforeEach(() => {
+        fetchMock = vi.fn();
+        client = new OrchestratorClient({ fetchImpl: fetchMock as typeof fetch });
+    });
+
+    for (const status of [401, 403, 429, 500, 503]) {
+        it(`${status} sur une action → OrchestratorClientError portant le statut`, async () => {
+            fetchMock.mockResolvedValue(new Response('{}', { status }));
+            await expect(client.runNode('a')).rejects.toMatchObject({
+                name: 'OrchestratorClientError',
+                status,
+                code: `HTTP_${status}`,
+            });
+        });
+
+        it(`${status} sur fetchGraph() lève au lieu de renvoyer une liste vide`, async () => {
+            // Un tableau vide se lirait comme « organigramme sans nœud » —
+            // un faux succès, indiscernable d'un graphe réellement vide.
+            fetchMock.mockResolvedValue(new Response('{}', { status }));
+            await expect(client.fetchGraph()).rejects.toThrow(String(status));
+        });
+
+        it(`${status} rend isReachable() faux`, async () => {
+            fetchMock.mockResolvedValue(new Response('{}', { status }));
+            expect(await client.isReachable()).toBe(false);
+        });
+    }
+
+    it('perte réseau pendant une action → rejet, jamais un succès silencieux', async () => {
+        fetchMock.mockRejectedValue(new TypeError('Failed to fetch'));
+        await expect(client.runNode('a')).rejects.toThrow();
+    });
+
+    it('un orchestrateur MUET est traité comme injoignable, pas comme une attente infinie', async () => {
+        // Cas le plus pénible à diagnostiquer : la connexion est acceptée mais
+        // aucune réponse n'arrive. Sans délai maximal, isReachable() ne se
+        // résolvait jamais et l'interface restait bloquée sur son état
+        // précédent, sans pouvoir dire « indisponible ».
+        fetchMock.mockImplementation(
+            (_url: string, init?: RequestInit) =>
+                new Promise((_resolve, reject) => {
+                    init?.signal?.addEventListener('abort', () =>
+                        reject(new DOMException('Aborted', 'AbortError')),
+                    );
+                }),
+        );
+        // Délai court : on vérifie le mécanisme, pas la valeur de production.
+        await expect(client.isReachable(20)).resolves.toBe(false);
+    });
+
+    it('la sonde passe bien un signal d’abandon', async () => {
+        fetchMock.mockResolvedValue(new Response(JSON.stringify(GRAPH), { status: 200 }));
+        await client.isReachable();
+        expect(fetchMock.mock.calls[0]![1]).toMatchObject({ signal: expect.anything() });
+    });
+});
+
+describe('OrchestratorClient — flux SSE interrompu puis rétabli', () => {
+    /** EventSource contrôlable : on déclenche `open` et `error` à la demande. */
+    function fabriqueES() {
+        const listeners = new Map<string, (e: Event) => void>();
+        const instances: Array<{ close: ReturnType<typeof vi.fn> }> = [];
+        function FakeES(this: Record<string, unknown>) {
+            const close = vi.fn();
+            this.addEventListener = (k: string, h: (e: Event) => void) => listeners.set(k, h);
+            this.removeEventListener = (k: string) => listeners.delete(k);
+            this.close = close;
+            instances.push({ close });
+        }
+        return { FakeES, listeners, instances };
+    }
+
+    it("signale l'ouverture du flux, y compris après une reconnexion", async () => {
+        const { FakeES, listeners } = fabriqueES();
+        const fetchMock = vi.fn().mockResolvedValue(
+            new Response(JSON.stringify({ ticket: 'tkt' }), { status: 200 }),
+        );
+        const client = new OrchestratorClient({
+            fetchImpl: fetchMock as typeof fetch,
+            eventSourceImpl: FakeES as unknown as typeof EventSource,
+        });
+
+        const erreurs: Event[] = [];
+        let ouvertures = 0;
+        const off = client.subscribe(
+            () => {},
+            (e) => erreurs.push(e),
+            () => {
+                ouvertures += 1;
+            },
+        );
+
+        await vi.waitFor(() => expect(listeners.has('open')).toBe(true));
+        listeners.get('open')!(new Event('open'));
+        expect(ouvertures).toBe(1);
+
+        // Interruption : l'appelant est prévenu…
+        listeners.get('error')!(new Event('error'));
+        expect(erreurs).toHaveLength(1);
+
+        // … et le rétablissement AUSSI. Sans ce second signal, l'interface
+        // restait « dégradée » à vie même une fois le flux revenu.
+        await vi.waitFor(() => expect(listeners.has('open')).toBe(true), { timeout: 5_000 });
+        listeners.get('open')!(new Event('open'));
+        expect(ouvertures).toBeGreaterThanOrEqual(2);
+
+        off();
+    });
+});

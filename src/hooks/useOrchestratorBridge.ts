@@ -24,7 +24,19 @@ import { supabase } from '../lib/supabase';
  */
 export interface OrchestratorBridge {
     connected: boolean;
-    connectionState: 'local' | 'connected' | 'degraded' | 'failed';
+    /**
+     * `local`      — aucun orchestrateur configuré, transitions simulées ;
+     * `connecting` — orchestrateur configuré, sonde en cours ;
+     * `connected`  — snapshot obtenu et flux ouvert ;
+     * `degraded`   — flux SSE interrompu, données possiblement obsolètes ;
+     * `failed`     — injoignable ou en erreur.
+     *
+     * `connecting` manquait : pendant la sonde, l'interface annonçait « Mode
+     * local · transitions simulées » alors qu'un orchestrateur ÉTAIT configuré
+     * et en cours de contact. Le chargement doit se distinguer de l'absence de
+     * configuration, sinon un serveur lent se lit comme un serveur absent.
+     */
+    connectionState: 'local' | 'connecting' | 'connected' | 'degraded' | 'failed';
     nodes: OrchestratorGraphNode[];
     /** Client actif — exposé pour que le repo puisse router les écritures via l'orchestrateur. */
     client: OrchestratorClient | null;
@@ -88,6 +100,7 @@ export function useOrchestratorBridge(
                 setConnectionState('local');
                 return;
             }
+            setConnectionState('connecting');
             const client = clientFactory
                 ? clientFactory()
                 : new OrchestratorClient({ baseUrl, apiKey, getUserAuth });
@@ -108,11 +121,18 @@ export function useOrchestratorBridge(
                 setConnected(true);
                 setConnectionState('connected');
                 setActiveClient(client);
-                unsubscribe = client.subscribe((evt: SseStatusEvent) => {
-                    setNodes((prev) => applyTransitionPatch(prev, evt));
-                }, () => {
-                    if (!cancelled) setConnectionState('degraded');
-                });
+                unsubscribe = client.subscribe(
+                    (evt: SseStatusEvent) => {
+                        setNodes((prev) => applyTransitionPatch(prev, evt));
+                    },
+                    () => {
+                        if (!cancelled) setConnectionState('degraded');
+                    },
+                    // Reconnexion réussie : on ne reste pas « dégradé » à vie.
+                    () => {
+                        if (!cancelled) setConnectionState('connected');
+                    },
+                );
             } catch {
                 setConnected(false);
                 setActiveClient(null);

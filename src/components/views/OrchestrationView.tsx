@@ -532,7 +532,9 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
                                     ? 'var(--system-red)'
                                     : bridge.connectionState === 'degraded'
                                       ? 'var(--system-orange)'
-                                      : bridge.connected
+                                      : bridge.connectionState === 'connecting'
+                                        ? 'var(--system-blue)'
+                                        : bridge.connected
                                     ? 'var(--system-green)'
                                     : 'var(--ink-5)',
                             }}
@@ -541,8 +543,10 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
                             {bridge.connectionState === 'failed'
                                 ? 'Orchestrateur indisponible · aucune simulation ne sera lancée'
                                 : bridge.connectionState === 'degraded'
-                                  ? 'Orchestrateur dégradé · reconnexion du flux en cours'
-                                  : bridge.connected
+                                  ? 'Orchestrateur dégradé · flux interrompu, données possiblement obsolètes'
+                                  : bridge.connectionState === 'connecting'
+                                    ? 'Connexion à l\'orchestrateur…'
+                                    : bridge.connected
                                 ? 'Orchestrateur connecté · transitions distribuées'
                                 : 'Mode local · transitions simulées (configurer l\'orchestrateur dans Paramètres)'}
                         </span>
