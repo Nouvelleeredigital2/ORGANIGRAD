@@ -20,8 +20,13 @@ jobs:
       - run: npm run typecheck
       - run: npm run test
       - run: npm run build
-      - name: npm audit (high+)
-        run: npm audit --audit-level=high || true
+      # `npm audit --audit-level=high || true` affichait les vulnérabilités puis
+      # passait quoi qu'il arrive : décoratif. La porte échoue sur toute
+      # vulnérabilité high/critical non corrigée ET non acceptée explicitement
+      # (registre daté dans scripts/audit-gate.mjs, détail dans
+      # docs/security/dependances.md). Couvre frontend + orchestrateur.
+      - name: Porte npm audit (high+, risques acceptés datés)
+        run: node scripts/audit-gate.mjs .
 
   # Les 18 specs Playwright existaient depuis des mois sans jamais tourner en
   # intégration : 8 d'entre elles échouaient silencieusement. Ce job ferme
@@ -71,6 +76,11 @@ jobs:
       - run: npm run typecheck
       - run: npm run test
       - run: npm run build
+      # Depuis la racine : la cible du registre d'acceptations est un chemin
+      # relatif au dépôt, pas au répertoire courant du job.
+      - name: Porte npm audit (high+, risques acceptés datés)
+        working-directory: .
+        run: node scripts/audit-gate.mjs orchestrator
 
   # Isolation multi-tenant vérifiée sur un PostgreSQL RÉEL, à partir du SQL
   # réellement versionné (baseline + migrations postérieures). Les mocks ne
