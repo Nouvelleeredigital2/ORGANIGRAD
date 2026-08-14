@@ -71,9 +71,12 @@ rien — il faut confirmer la réception.
 
 ## 2. Ce que je peux faire sans rien attendre
 
+> **A1 à A4 sont faits** (commits `4ccf494`, `8f529fc`, `93d071f`). A5 et A6
+> restent suspendus à une décision — voir B3 et la fin de cette section.
+
 Par ordre de valeur.
 
-### A1 — Suite connectée complète, prête à l'emploi (P1-7)
+### A1 ✅ — Suite connectée complète, prête à l'emploi (P1-7)
 
 Écrire dès maintenant toute la suite `e2e-connected/`, sur le modèle de
 `realtime-orchestration.spec.ts` : elle se saute proprement tant que
@@ -94,13 +97,13 @@ est fait, tu ne m'attends pas.
 dans le code, comme pour la suite Realtime, mais le premier passage connecté
 demandera sûrement des ajustements.
 
-### A2 — Job CI pour la suite connectée
+### A2 ✅ — Job CI pour la suite connectée
 
 Un job `workflow_dispatch` (déclenchement manuel) lisant des secrets GitHub, pour
 que la suite connectée puisse tourner en CI sans jamais s'exécuter par accident
 sur les PR ordinaires. Tu n'auras qu'à renseigner les secrets.
 
-### A3 — Inscription et magic link, moitié client (P1-9/10)
+### A3 ✅ — Inscription et magic link, moitié client (P1-9/10)
 
 Même découpage que pour la session expirée : la **réception** d'un lien demande
 une boîte mail, mais la **réaction** de l'écran d'authentification est locale.
@@ -112,7 +115,7 @@ C'est ce que demande explicitement ton point 9 (« vérifier les messages
 d'erreur, les comptes déjà existants, les mots de passe invalides, un email
 invalide »).
 
-### A4 — Automatiser le diff de schéma (P2-16)
+### A4 ✅ — Automatiser le diff de schéma (P2-16)
 
 Un script qui compare l'export CSV de R6 à
 `../security/inventaire-schema-reference.csv` et produit directement la liste des
