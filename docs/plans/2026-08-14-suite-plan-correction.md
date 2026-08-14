@@ -165,5 +165,10 @@ l'écran, et je ne peux ni les simuler ni les certifier :
 - la **recette manuelle des quatre rôles** (point 20) ;
 - le comportement en **production réelle** après déploiement.
 
-Je peux préparer les scénarios pas à pas pour cette recette si tu veux — dis-le
-moi et je les écris.
+Les scénarios pas à pas de cette recette sont écrits :
+[recette manuelle 4 rôles](2026-08-14-recette-manuelle-4-roles.md) — 50 points de
+contrôle, owner / admin / member / viewer / extérieur, plus une section
+transversale (multi-onglets, réseau coupé, session expirée, concurrence).
+
+Le mode d'emploi des quatre actions bloquantes est dans le
+[runbook mainteneur](2026-08-14-runbook-mainteneur.md).
