@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { Button, FormField, Input, Surface } from '../../design/ui';
+import { messageErreurAuth } from './authErrors';
 
 /**
  * Écran d'authentification — email + mot de passe + magic link.
@@ -40,7 +41,7 @@ export function AuthScreen() {
                 setInfo('Lien de connexion envoyé. Ouvre le mail pour finaliser.');
             }
         } catch (err) {
-            setError(err instanceof Error ? err.message : String(err));
+            setError(messageErreurAuth(err));
         } finally {
             setLoading(false);
         }
