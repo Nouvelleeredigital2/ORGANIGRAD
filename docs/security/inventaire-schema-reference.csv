@@ -1,0 +1,55 @@
+genre,objet
+fonction,accept_workspace_invitation [definer]
+fonction,create_workspace_api_key [definer]
+fonction,handle_new_user [definer]
+fonction,has_workspace_role [definer]
+fonction,import_org_agents
+fonction,invite_workspace_member [definer]
+fonction,is_workspace_member [definer]
+fonction,tg_hybrid_nodes_client_guard
+fonction,tg_org_agents_guard
+fonction,tg_org_agents_reparent_children
+fonction,touch_updated_at
+fonction,verify_workspace_api_key [definer]
+fonction,workspace_role_of [definer]
+policy,audit_log :: audit_log_select
+policy,hybrid_nodes :: hn delete writers
+policy,hybrid_nodes :: hn insert writers
+policy,hybrid_nodes :: hn read members
+policy,hybrid_nodes :: hn update writers
+policy,node_transitions :: nt read members
+policy,notifications :: notif read members
+policy,org_agents :: org_agents_delete
+policy,org_agents :: org_agents_insert
+policy,org_agents :: org_agents_select
+policy,org_agents :: org_agents_update
+policy,profiles :: profile self read
+policy,profiles :: profile self update
+policy,workspace_api_keys :: ak delete owner
+policy,workspace_api_keys :: ak insert admin
+policy,workspace_api_keys :: ak read admin
+policy,workspace_api_keys :: ak update admin
+policy,workspace_invitations :: inv insert admin
+policy,workspace_invitations :: inv read admin
+policy,workspace_invitations :: inv read by email
+policy,workspace_invitations :: inv update admin
+policy,workspace_members :: wm delete admin
+policy,workspace_members :: wm leave self
+policy,workspace_members :: wm read members
+policy,workspace_members :: wm write admin
+policy,workspaces :: ws create authed
+policy,workspaces :: ws delete owners
+policy,workspaces :: ws read members
+policy,workspaces :: ws update owners
+table,audit_log
+table,hybrid_nodes
+table,node_transitions
+table,notifications
+table,org_agents
+table,profiles
+table,workspace_api_keys
+table,workspace_invitations
+table,workspace_members
+table,workspaces
+type,workspace_role
+vue,workspace_members_view
