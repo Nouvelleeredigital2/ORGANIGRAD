@@ -39,45 +39,26 @@ npm run check         # typecheck + test
 - Image Docker de l'orchestrateur : son healthcheck vise `/healthz`
   (`dockerHealthcheck.test.ts`).
 
-## Test d'intégration PostgreSQL réel
+## Tests PostgreSQL réels, isolés et reproductibles
 
-`orchestrator/tests/pgGraphStore.integration.test.ts` est exécuté uniquement si
-`TEST_DATABASE_URL` est défini. Il utilise PostgreSQL réel et nettoie les données
-de test isolées par UUID. Aucun script `test:integration` n'existe : lancer la
-suite ciblée ainsi, après avoir démarré une base jetable :
+Les suites PostgreSQL exigent une base vierge mais n'utilisent pas le même
+schéma. Elles ne doivent donc jamais être lancées sur une seule base partagée.
 
-```powershell
-docker run --rm -e POSTGRES_PASSWORD=test -p 55432:5432 postgres:16
-$env:TEST_DATABASE_URL = 'postgres://postgres:test@localhost:55432/postgres'
-Push-Location orchestrator
-npm test -- pgGraphStore.integration
-Pop-Location
-```
+Les trois commandes suivantes créent chacune un conteneur PostgreSQL 16 jetable,
+choisissent un port local libre, attendent pg_isready puis arrêtent uniquement
+leur propre conteneur, y compris si Vitest échoue :
 
-Sans `TEST_DATABASE_URL`, Vitest saute ce test : une suite verte ne prouve donc
-pas la compatibilité PostgreSQL réelle.
+    npm run test:pg:graph
+    npm run test:pg:security
+    npm run test:pg:concurrency
 
-## Sécurité SQL — isolation multi-workspaces
+Elles couvrent respectivement PgGraphStore, l'isolation multi-workspace des RPC
+et la caractérisation des écritures concurrentes. Docker doit être disponible;
+aucune variable TEST_DATABASE_URL n'est à fournir manuellement.
 
-`orchestrator/tests/workspaceRpcSecurity.integration.test.ts` (11 tests) vérifie
-qu'un utilisateur ne peut pas agir sur un workspace dont il n'est pas membre.
-Même conditionnement que ci-dessus (`TEST_DATABASE_URL`), mais la base est
-provisionnée **depuis le SQL versionné** (`supabase/schema/baseline_2026-08-03.sql`
-puis les migrations postérieures) : les tests portent sur le schéma livré, pas
-sur une copie recopiée dans le test.
-
-Ce test tourne en CI (job `securite-sql`, service `postgres:16`). Localement :
-
-```powershell
-docker run --rm -e POSTGRES_PASSWORD=test -p 15433:5432 postgres:16
-$env:TEST_DATABASE_URL = 'postgres://postgres:test@localhost:15433/postgres'
-Push-Location orchestrator
-npm test -- workspaceRpcSecurity
-Pop-Location
-```
-
-> La base doit être **vierge** : le baseline est un dump, pas une migration
-> idempotente. Recréer la base entre deux exécutions.
+La CI conserve le même principe d'isolation : les suites sécurité et concurrence
+utilisent deux services PostgreSQL distincts. Les commandes locales sont le
+moyen supporté de rejouer ces garanties sans collision de schéma.
 
 ## E2E connectée — Supabase réel (P0-5, P1-7)
 

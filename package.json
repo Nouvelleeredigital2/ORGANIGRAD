@@ -12,6 +12,9 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:connected": "playwright test --config playwright.connected.config.ts",
+    "test:pg:graph": "powershell -ExecutionPolicy Bypass -File scripts/run-pg-integration.ps1 -Suite graph",
+    "test:pg:security": "powershell -ExecutionPolicy Bypass -File scripts/run-pg-integration.ps1 -Suite security",
+    "test:pg:concurrency": "powershell -ExecutionPolicy Bypass -File scripts/run-pg-integration.ps1 -Suite concurrency",
     "preview": "vite preview",
     "check": "npm run lint && npm run typecheck && npm run test && npm run build"
   },
