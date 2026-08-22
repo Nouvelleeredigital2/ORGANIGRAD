@@ -23,12 +23,15 @@
 > doit recharger. Sa saisie est conservée (le formulaire reste ouvert), mais il
 > doit réappliquer sa modification.
 >
-> **Limite connue** : la comparaison se fait à la milliseconde. PostgreSQL
-> stocke des microsecondes, mais un jeton ayant transité par un `Date`
-> JavaScript les perd ; tronquer des deux côtés rend la comparaison stable quelle
-> que soit la provenance du jeton. Deux écritures dans la même milliseconde
-> pourraient donc encore se recouvrir — un cas sans réalité pour une édition
-> humaine.
+> **Un piège de pilote, trouvé par la CI.** La comparaison est **exacte à la
+> microseconde**. Elle a failli ne pas l'être : `postgres.js` applique un
+> sérialiseur côté client d'après le cast qui suit un paramètre, et
+> `${jeton}::timestamptz` lui faisait convertir la chaîne en `Date` JavaScript —
+> qui ne porte que la milliseconde. Deux écritures dans la même milliseconde
+> partageaient alors un jeton, donc pouvaient s'écraser. C'est un runner de CI,
+> plus rapide que ma machine, qui l'a révélé. Le contournement est
+> `${jeton}::text::timestamptz` : le `::text` intercalé fait passer la valeur en
+> texte et laisse PostgreSQL faire la conversion, sans perte.
 
 ## Le comportement d’AVANT : « dernier écrivain gagne », silencieux
 

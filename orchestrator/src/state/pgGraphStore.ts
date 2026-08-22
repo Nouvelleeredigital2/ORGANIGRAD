@@ -58,8 +58,17 @@ interface DbRow {
     notification_channels: unknown;
     avatar_url: string | null;
     status: NodeStatus;
-    /** `returning *` le fournit ; sert de jeton de version (verrou optimiste). */
-    updated_at?: string | Date | null;
+    /**
+     * Jeton de version, rendu en TEXTE par PostgreSQL.
+     *
+     * Surtout pas la colonne telle quelle : le pilote la convertit en `Date`
+     * JavaScript, qui ne porte que la milliseconde alors que PostgreSQL stocke
+     * la microseconde. Deux écritures dans la même milliseconde produisaient
+     * alors le MÊME jeton — et le verrou laissait passer un écrasement. Le
+     * texte est reconverti en `timestamptz` pour la comparaison, donc le
+     * rendu (fuseau, DateStyle) n'a aucune importance.
+     */
+    updated_at_txt?: string | null;
 }
 
 export class PgGraphStore implements GraphStore {
@@ -89,14 +98,14 @@ export class PgGraphStore implements GraphStore {
             notificationChannels: decryptJson<NotificationChannels>(this.cipher, r.notification_channels) ?? undefined,
             avatarUrl: r.avatar_url ?? undefined,
             status: r.status,
-            updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : undefined,
+            updatedAt: r.updated_at_txt ?? undefined,
         };
     }
 
     /** Charge tous les nœuds du workspace. */
     async list(): Promise<readonly HybridNode[]> {
         const rows = await this.sql<DbRow[]>`
-            select * from public.hybrid_nodes
+            select *, updated_at::text as updated_at_txt from public.hybrid_nodes
              where workspace_id = ${this.workspaceId}
              order by created_at asc
         `;
@@ -105,7 +114,7 @@ export class PgGraphStore implements GraphStore {
 
     async get(id: string): Promise<HybridNode> {
         const rows = await this.sql<DbRow[]>`
-            select * from public.hybrid_nodes
+            select *, updated_at::text as updated_at_txt from public.hybrid_nodes
              where workspace_id = ${this.workspaceId} and id = ${id}
              limit 1
         `;
@@ -146,10 +155,19 @@ export class PgGraphStore implements GraphStore {
         // silencieuse sous une autre forme — une résurrection que personne n'a
         // demandée. On distingue donc « modifié » de « disparu ».
         //
-        // Comparaison à la MILLISECONDE des deux côtés : PostgreSQL stocke des
-        // microsecondes, mais un jeton ayant transité par un `Date` JavaScript
-        // les a perdues. Tronquer les deux rend la comparaison stable quelle que
-        // soit la provenance du jeton (PostgREST ou orchestrateur).
+        // Comparaison EXACTE, à la microseconde.
+        //
+        // `::text::timestamptz` et non `::timestamptz` : postgres.js applique un
+        // sérialiseur CÔTÉ CLIENT d'après le cast qui suit le paramètre. Avec
+        // `::timestamptz` il convertit la chaîne en `Date` JavaScript — qui ne
+        // porte que la milliseconde — et le jeton perd ses microsecondes en
+        // chemin. Le `::text` intercalé le fait passer en texte, et c'est
+        // PostgreSQL qui le convertit, sans perte. Vérifié : sans ce détour,
+        // toute écriture gardée partait en faux conflit.
+        //
+        // Cela vaut pour les deux provenances de jeton : le rendu texte de
+        // PostgreSQL et la forme ISO de PostgREST sont l'un comme l'autre
+        // convertis exactement, côté serveur.
         if (attenduUpdatedAt) {
             const majRows = await this.sql<DbRow[]>`
                 update public.hybrid_nodes set
@@ -166,9 +184,8 @@ export class PgGraphStore implements GraphStore {
                     updated_at            = now()
                  where id = ${node.id}
                    and workspace_id = ${this.workspaceId}
-                   and date_trunc('milliseconds', updated_at)
-                       = date_trunc('milliseconds', ${attenduUpdatedAt}::timestamptz)
-                returning *
+                   and updated_at = ${attenduUpdatedAt}::text::timestamptz
+                returning *, updated_at::text as updated_at_txt
             `;
             const maj = majRows[0];
             if (maj) return this.rowToNode(maj);
@@ -206,7 +223,7 @@ export class PgGraphStore implements GraphStore {
                 avatar_url            = excluded.avatar_url,
                 updated_at            = now()
             where public.hybrid_nodes.workspace_id = ${this.workspaceId}
-            returning *
+            returning *, updated_at::text as updated_at_txt
         `;
         const row = rows[0];
         if (!row) throw new NodeNotFoundError(node.id);
@@ -232,7 +249,7 @@ export class PgGraphStore implements GraphStore {
     ): Promise<HybridNode> {
         return this.sql.begin(async (tx) => {
             const before = await tx<DbRow[]>`
-                select * from public.hybrid_nodes
+                select *, updated_at::text as updated_at_txt from public.hybrid_nodes
                  where workspace_id = ${this.workspaceId} and id = ${nodeId}
                  for update
             `;
