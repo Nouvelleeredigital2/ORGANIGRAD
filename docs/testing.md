@@ -91,8 +91,22 @@ Pop-Location
 | `noeuds-persistance.spec.ts` | cycle de vie d'un nœud et **persistance réelle** après rechargement |
 | `realtime-orchestration.spec.ts` | le crash Realtime à deux consommateurs (ci-dessous) |
 
+**23/23 passent** depuis le 2026-08-22, exécutés sur une pile Supabase LOCALE.
+
+### Pile locale — recommandé, aucun projet cloud requis
+
+`npx supabase start` monte Postgres, PostgREST, Auth et Realtime en local. Les
+migrations y sont **désactivées** (`config.toml`) : le dossier `migrations/`
+n'est pas autonome, il faut le baseline d'abord. Appliquer le schéma à la main
+dans le conteneur `supabase_db_ORGANIGRAD`, puis créer les trois comptes par
+l'API admin avec `email_confirm: true` — sinon toute connexion échoue en
+`email_not_confirmed`. Rattacher le viewer au workspace de A et **supprimer son
+workspace personnel**, sinon l'application l'y connecte en owner et les tests de
+rôle vérifient le contraire de ce qu'ils croient. Détail dans
+[le runbook](plans/2026-08-14-runbook-mainteneur.md) §B2.
+
 ```bash
-cp .env.connected.example .env.connected   # puis renseigner
+cp .env.connected.example .env.connected   # pointer sur http://127.0.0.1:55441
 npm run test:e2e:connected
 ```
 

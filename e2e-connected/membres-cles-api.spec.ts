@@ -25,10 +25,17 @@ test.describe('Invitations et clés API', () => {
 
         // Ces parcours sont réservés à owner/admin : sans ce rôle, les tests
         // échoueraient pour une raison sans rapport avec ce qu'ils vérifient.
+        // Filtre par utilisateur INDISPENSABLE : la policy « wm read members »
+        // renvoie aussi les lignes des co-membres, donc plusieurs lignes dès
+        // qu'un second membre existe. Sans ce filtre, le `.single()` échoue, le
+        // rôle vaut « inconnu » et ces cinq tests se SAUTENT en silence — un
+        // garde-fou qui protège du bon échec pour la mauvaise raison.
+        const { data: auth } = await client.auth.getUser();
         const { data } = await client
             .from('workspace_members')
             .select('role')
             .eq('workspace_id', workspaceId)
+            .eq('user_id', auth.user?.id ?? '')
             .single();
         test.skip(
             !['owner', 'admin'].includes(String(data?.role)),
@@ -54,7 +61,9 @@ test.describe('Invitations et clés API', () => {
         await page.getByRole('button', { name: /^Inviter$/ }).click();
 
         // L'invitation apparaît dans la liste des invitations en attente.
-        await expect(page.getByText(email)).toBeVisible({ timeout: 20_000 });
+        // `.first()` : l'adresse apparaît dans la bannière de confirmation, dans
+        // le message de lien et dans le toast — trois occurrences légitimes.
+        await expect(page.getByText(email).first()).toBeVisible({ timeout: 20_000 });
 
         // Et elle existe réellement en base — l'affichage seul ne le prouve pas.
         const { data } = await client

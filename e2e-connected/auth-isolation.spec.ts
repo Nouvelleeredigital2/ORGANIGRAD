@@ -34,10 +34,16 @@ test.describe('Authentification', () => {
         client = await clientPour(COMPTE_A!);
         const id = await workspaceDe(client, COMPTE_A!);
         const { data: ws } = await client.from('workspaces').select('name').eq('id', id).single();
+        // Filtre par utilisateur : la policy « wm read members » renvoie AUSSI
+        // les lignes des co-membres. Un `.single()` sans ce filtre échoue dès
+        // qu'un second membre existe — et c'est le cas ici, le viewer partage ce
+        // workspace.
+        const { data: auth } = await client.auth.getUser();
         const { data: membre } = await client
             .from('workspace_members')
             .select('role')
             .eq('workspace_id', id)
+            .eq('user_id', auth.user?.id ?? '')
             .single();
         nomWorkspace = String(ws?.name ?? '');
         roleAttendu = String(membre?.role ?? '');
@@ -231,11 +237,17 @@ test.describe('Rôle en lecture seule', () => {
         // Les vues restent ADRESSABLES — le routeur ne connaît pas les rôles.
         // Ce qui compte, c'est qu'elles n'offrent rien.
         await page.goto('/?v=members');
-        await expect(page.getByText(/ne permet pas d'inviter/i)).toBeVisible({ timeout: 15_000 });
+        await expect(page.getByText(/ne permet pas d'inviter/i).first()).toBeVisible({
+            timeout: 15_000,
+        });
         await expect(page.getByRole('button', { name: /^Inviter$/ })).toHaveCount(0);
 
         await page.goto('/?v=api-keys');
-        await expect(page.getByText(/ne permet pas de consulter/i)).toBeVisible({ timeout: 15_000 });
+        // `.first()` : le message apparaît en tête de vue ET dans la bannière
+        // d'indisponibilité. Deux occurrences légitimes, pas une ambiguïté.
+        await expect(page.getByText(/ne permet pas de consulter/i).first()).toBeVisible({
+            timeout: 15_000,
+        });
         await expect(page.getByRole('button', { name: /Créer la clé/i })).toHaveCount(0);
     });
 

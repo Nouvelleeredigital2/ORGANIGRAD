@@ -57,9 +57,16 @@ export async function clientPour(c: Compte): Promise<SupabaseClient> {
  */
 export async function workspaceDe(client: SupabaseClient, c: Compte): Promise<string> {
     if (c.workspaceId) return c.workspaceId;
+    // Filtre par utilisateur INDISPENSABLE : la policy « wm read members »
+    // renvoie les lignes de TOUS les co-membres des workspaces où l'on est
+    // membre. Sans ce filtre, un compte owner peut récupérer la ligne d'un
+    // viewer et se croire viewer — c'est l'anomalie R-05 du 2026-08-09, revue
+    // ici côté test.
+    const { data: auth } = await client.auth.getUser();
     const { data, error } = await client
         .from('workspace_members')
         .select('workspace_id, role')
+        .eq('user_id', auth.user?.id ?? '')
         .in('role', ['owner', 'admin', 'member'])
         .limit(1);
     if (error) throw new Error(`lecture des workspaces impossible : ${error.message}`);

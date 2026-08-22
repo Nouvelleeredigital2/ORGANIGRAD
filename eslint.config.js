@@ -7,7 +7,16 @@ import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
   // Ne jamais linter les sorties de build ni les dépendances.
-  globalIgnores(['dist', '**/dist/**', 'coverage', 'node_modules']),
+  globalIgnores([
+    'dist',
+    '**/dist/**',
+    'coverage',
+    'node_modules',
+    // Artefacts générés par la pile Supabase locale (`supabase start`) : du
+    // code tiers minifié, qui n'a rien à faire dans notre lint.
+    'supabase/.temp',
+    'supabase/.branches',
+  ]),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [

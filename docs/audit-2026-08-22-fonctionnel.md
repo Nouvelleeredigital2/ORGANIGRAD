@@ -162,6 +162,52 @@ sur ces fichiers (motif `eyJ…`).
 - Dérive de l'historique `supabase_migrations` (O-04) : comptabilité seulement,
   objets conformes.
 
+## 2 bis. Trois défauts « installation neuve » — trouvés le 2026-08-22, corrigés
+
+En montant une **pile Supabase locale** (`supabase start` + Docker), j'ai pu
+exécuter pour la première fois les 23 tests connectés. Trois défauts sont
+apparus, tous de la même famille : des réglages qui n'existaient QUE dans le
+dashboard de production, donc absents du dépôt. Aucun ne se voit tant qu'on ne
+provisionne pas un environnement neuf.
+
+### D-1 · Les migrations seules ne démarrent pas
+
+`supabase start` applique les migrations dans l'ordre et échoue sur
+`20260803120300` : `function public.workspace_role_of(uuid) does not exist`.
+Confirmation, par l'outil officiel cette fois, que le dossier `migrations/`
+n'est pas autonome — il faut le baseline d'abord. Contourné localement par
+`[db.migrations] enabled = false` dans `supabase/config.toml`.
+
+### D-2 · Aucun privilège de table — l'application ne peut RIEN lire ✅ corrigé
+
+Toute lecture répondait `42501 permission denied for table workspace_members`.
+Les 10 tables ont bien la RLS et leurs policies, mais **la RLS filtre des
+lignes, elle n'accorde aucun privilège** : `authenticated` n'avait que
+`REFERENCES, TRIGGER, TRUNCATE`. Une installation neuve donnait donc une base
+totalement inutilisable.
+
+Migration `20260822090000` : privilèges dérivés des policies, table par table.
+`anon` n'obtient rien — tout est cloisonné par workspace.
+
+### D-3 · Le temps réel ne fonctionne pas ✅ corrigé
+
+La publication `supabase_realtime` existait mais était **vide**, et rien dans
+le dépôt n'y ajoutait de table. `postgres_changes` ne diffusait donc jamais
+rien : Orchestration et Journal d'activité restaient muets, **sans erreur** —
+le canal passe pourtant bien en `SUBSCRIBED`.
+
+Migration `20260822090100`, tolérante à un PostgreSQL nu (les bancs de test
+hermétiques n'ont pas cette publication).
+
+### Résultat
+
+**23/23 tests connectés passent** contre une vraie pile Supabase. La ligne
+« jamais exécuté » du tableau ci-dessous n'est plus vraie pour eux.
+
+> Les trois défauts ci-dessus n'affectent pas la production actuelle, dont le
+> schéma a été créé hors dépôt. Ils affectent **toute nouvelle installation** —
+> préproduction, restauration après incident, ou poste de développement.
+
 ## 3. Ce qui est inconnu — jamais exécuté
 
 Ce n'est ni bon ni mauvais : c'est **non vérifié**, et il faut le compter comme
@@ -169,12 +215,12 @@ tel.
 
 | Zone | Pourquoi |
 |---|---|
-| 23 tests E2E connectés | écrits, jamais lancés — aucun projet de test |
-| Invitations de bout en bout | dernière vérification le 2026-08-05, avant plusieurs correctifs |
+| ~~23 tests E2E connectés~~ | ✅ **23/23 passent** sur pile Supabase locale (2026-08-22) |
+| ~~Invitations de bout en bout~~ | ✅ création, doublon refusé, rôle owner refusé |
 | Validation humaine (HITL) réelle | dépend de B-2 |
 | Inscription, lien magique | demandent une vraie boîte mail |
 | Recette manuelle des 4 rôles | 50 points écrits, jamais déroulés |
-| Realtime à deux consommateurs | correctif jamais confronté au vrai client |
+| ~~Realtime à deux consommateurs~~ | ✅ vérifié sur vrai client Realtime |
 
 ---
 
