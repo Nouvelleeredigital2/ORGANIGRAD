@@ -160,7 +160,13 @@ function AppContent() {
             );
             setFilamentState('error');
         } else {
-            feedback.success(`Export PDF terminé${poleLabel ? ` — ${poleLabel}` : ''}.`);
+            // Un export peut nécessiter quelques secondes de finalisation côté
+            // navigateur. Le succès doit donc rester lisible après le
+            // téléchargement, au-delà de la durée générique des toasts verts.
+            feedback.success(
+                `Export PDF terminé${poleLabel ? ` — ${poleLabel}` : ''}.`,
+                { autoDismissMs: 15_000 },
+            );
             setFilamentState('success');
         }
 
@@ -271,9 +277,12 @@ function AppContent() {
                     />
                 }
             >
-                {loading ? (
+                {/* L'orchestration dispose de sa propre source de nœuds (locale
+                    ou serveur). Elle doit rester consultable pendant le
+                    chargement indépendant des fiches RH. */}
+                {loading && activeView !== 'orchestration' ? (
                     <OriginLoader />
-                ) : error && activeView !== 'settings' ? (
+                ) : error && activeView !== 'settings' && activeView !== 'orchestration' ? (
                     /* L'écran d'erreur reste une impasse tant qu'il n'offre pas de sortie :
                        on propose donc un nouvel essai et l'accès aux Paramètres, seule vue
                        encore utile sans données (changement de source / import). (ORG-005) */

@@ -20,10 +20,20 @@ async function semer(page: Page, nodes: Record<string, unknown>[]) {
 
 async function ouvrirOrchestration(page: Page) {
     await page.goto('/?v=orchestration');
-    await expect(page.getByRole('heading', { name: /Orchestration\./i })).toBeVisible();
+    // Le premier chargement du module lazy en serveur Vite peut dépasser les
+    // cinq secondes implicites de Playwright; cette attente couvre le chargement
+    // du code, pas celui de la source RH (celle-ci est explicitement en échec).
+    await expect(page.getByRole('heading', { name: /Orchestration\./i })).toBeVisible({
+        timeout: 25_000,
+    });
 }
 
 test('un nœud peut être supprimé, et la suppression survit au rafraîchissement', async ({ page }) => {
+    test.setTimeout(60_000);
+    // L'orchestration doit rester utilisable avec ses nœuds locaux même si la
+    // source RH est indisponible. Sans cette séparation, App.tsx remplace toute
+    // la vue par sa page d'erreur globale.
+    await page.route('**/data.csv', (route) => route.abort('failed'));
     await semer(page, [
         {
             id: 'aaaaaaaa-bbbb-4ccc-9ddd-eeeeeeeeeeee',
