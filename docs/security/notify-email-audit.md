@@ -37,9 +37,9 @@ complètement demanderait de transporter un identifiant de transition dans
 `TransitionEvent` — `node_transitions.id` existe côté Postgres, mais pas dans le
 store en mémoire.
 
-## Non corrigé — signalé : double envoi possible en concurrence
+## Corrigé le 2026-08-22 — double envoi en concurrence
 
-L'ordre des opérations dans la fonction est :
+L'ordre des opérations **était** :
 
 1. `SELECT` sur `notifications` pour la clé d'idempotence ;
 2. **envoi de l'e-mail** ;
@@ -56,30 +56,51 @@ Le commentaire de `20260617140000_notifications_idempotency.sql` affirme que
 « l'unicité partielle garantit qu'un même envoi réussi n'est pas dupliqué » :
 c'est faux dans cet ordre d'opérations.
 
-**Correction recommandée** — réserver la clé *avant* d'envoyer :
+**Correction appliquée** — réserver la clé *avant* d'envoyer :
 
 1. `INSERT` avec `status = 'pending'` ; une violation d'unicité (23505) signifie
    qu'un autre envoi est déjà en cours ou fait → répondre `deduped`, ne rien
    envoyer ;
 2. envoyer ;
-3. `UPDATE` de la ligne avec le statut final ; en cas d'échec d'envoi,
-   **supprimer** la réservation pour qu'un retry légitime puisse repasser.
+3. `UPDATE` de la ligne avec le statut final. En cas d'échec d'envoi, la clé
+   d'idempotence est remise à **`NULL`** plutôt que la ligne supprimée : l'index
+   unique étant partiel (`where idempotency_key is not null`), la trace de
+   l'échec est conservée **et** un retry légitime peut repasser.
 
-Reste à traiter dans ce schéma : une fonction interrompue entre 1 et 3 laisse
-une ligne `pending` qui bloquerait les retries — prévoir une reprise des
-`pending` plus anciens qu'un délai donné.
+Aucune migration : `pending` est déjà la valeur par défaut de la colonne et fait
+partie de sa contrainte `CHECK`.
 
-Non appliqué ici volontairement : la fonction n'est ni exécutable ni déployable
-depuis cet environnement (pas de Deno), et modifier le chemin d'envoi sans
-pouvoir le tester ferait courir un risque supérieur au défaut corrigé — lequel
-suppose deux invocations réellement concurrentes.
+**Pourquoi appliqué maintenant, alors que je refusais le 14/08 ?** Le refus
+reposait sur « ne pas toucher un chemin d'envoi qui fonctionne sans pouvoir le
+tester ». L'audit du 22/08 a établi que la fonction **n'est pas déployée** (404
+sur `functions/v1/notify-email`, confirmé trois fois) : il n'y a aucun
+comportement en production à casser, et la version corrigée est celle qui sera
+déployée. Le risque a changé de camp.
+
+**Non exécuté** : toujours pas de Deno dans cet environnement. À éprouver au
+premier déploiement (jalon 2 du plan).
+
+**Limite connue** : une fonction interrompue entre la réservation et sa clôture
+laisse une ligne `pending` qui bloquera les retries de cet événement. Requête de
+reprise à prévoir si le cas se présente :
+
+```sql
+-- Libère les réservations restées en attente au-delà de 15 minutes
+update public.notifications
+   set idempotency_key = null, status = 'failed',
+       error = coalesce(error, 'reservation orpheline')
+ where status = 'pending'
+   and idempotency_key is not null
+   and created_at < now() - interval '15 minutes';
+```
 
 ## À constater sur le projet déployé
 
 Ces points ne se lisent pas dans le dépôt.
 
-1. La fonction est-elle **déployée** sur `xucmfdggetwxmpquqjvj`, et dans quelle
-   version ? (Dashboard → Edge Functions, ou `supabase functions list`.)
+1. ~~La fonction est-elle **déployée** ?~~ **Répondu le 2026-08-22 : NON.**
+   `POST functions/v1/notify-email` renvoie **404** (trois essais). Elle est donc
+   à déployer : `supabase functions deploy notify-email`.
 2. Le code déployé correspond-il à `supabase/functions/notify-email/index.ts` ?
    Même question que pour le schéma en P0-2 : le dépôt doit être la source.
 3. Les variables sont-elles renseignées : `RESEND_API_KEY`, `EMAIL_FROM` ?

@@ -35,14 +35,20 @@ lecture des documents de recette antérieurs.
 | E2E hermétiques Playwright | ✅ 47 tests |
 | Sécurité SQL sur PostgreSQL réel | ✅ 11 tests |
 | `https://orchestrator.srv1017182.hstgr.cloud/` | **404** (hôte joignable) |
-| `…/api/health` | **401** → l'orchestrateur **tourne**, protégé |
-| `…/healthz` et `…/health` | **délai dépassé** — anomalie mineure |
+| `…/healthz` | **200 `{"ok":true}`** → l'orchestrateur **tourne et est sain** |
+| `…/api/health` | **401** → routes applicatives protégées, comme prévu |
 | `…supabase.co/functions/v1/notify-email` | **404** → **non déployée** |
 | `https://organigrad.vercel.app` | **404** → **SPA non publiée** |
 
-> Correction d'une conclusion hâtive : ma première sonde (`/healthz`) a expiré et
-> j'allais conclure que l'orchestrateur était mort. `/api/health` répond 401 :
-> il tourne. L'anomalie O-01 du 2026-08-05 est donc **levée**.
+> **Deux conclusions hâtives corrigées en cours d'audit.** Mes premières sondes
+> vers `/healthz` ont expiré (deux fois) et j'allais conclure que l'orchestrateur
+> était mort, puis qu'un point de santé « pendait ». Réessayé : **200
+> `{"ok":true}`**. C'était de l'instabilité réseau, pas un défaut.
+> L'anomalie O-01 du 2026-08-05 est donc **levée**, et le grief sur `/healthz`
+> retiré.
+>
+> Leçon appliquée aux deux constats rouges ci-dessous : ils ont été **reconfirmés
+> trois fois chacun** avant d'être maintenus.
 
 ---
 
@@ -101,17 +107,29 @@ Ce n'est pas un bug au sens strict — c'est une politique qui n'a jamais été
 choisie. Quatre options sont posées dans
 `architecture/concurrence-ecritures.md` ; la décision t'appartient.
 
-### 🟡 B-5 · Double envoi d'e-mail possible en concurrence
+### 🟡 B-5 · Double envoi d'e-mail en concurrence — ✅ **corrigé le 2026-08-22**
 
-`notify-email` fait `SELECT` → **envoi** → `INSERT`. Deux invocations
-concurrentes portant la même clé envoient deux e-mails ; l'index unique
-n'intervient qu'après l'envoi et son échec est avalé. Correction spécifiée dans
-`security/notify-email-audit.md`, non appliquée faute de pouvoir exécuter du
-Deno ici.
+`notify-email` faisait `SELECT` → **envoi** → `INSERT`. Deux invocations
+concurrentes portant la même clé envoyaient deux e-mails ; l'index unique
+n'intervenait qu'après l'envoi et son échec était avalé.
 
-### 🟡 B-6 · Hygiène : trois fichiers d'environnement viennent d'être renseignés
+L'ordre est inversé : la clé est **réservée** (`status = 'pending'`) avant
+l'envoi, et c'est la contrainte d'unicité qui arbitre. Aucune migration —
+`pending` est déjà la valeur par défaut de la colonne et fait partie de sa
+contrainte `CHECK`.
 
-Modification non commitée au moment de l'audit :
+> **Pourquoi maintenant, alors que je refusais hier ?** Mon refus reposait sur
+> « ne pas toucher un chemin d'envoi qui fonctionne sans pouvoir le tester ».
+> L'audit vient d'établir que la fonction **n'est pas déployée** : il n'y a
+> aucun chemin en fonctionnement à casser, et la version corrigée est celle qui
+> sera déployée au jalon 2. Le risque a changé de camp.
+>
+> Reste vrai : **cette modification n'a pas été exécutée** (pas de Deno ici).
+> Elle sera éprouvée au jalon 2, étape 3.
+
+### 🟡 B-6 · Hygiène : trois fichiers d'environnement — ✅ **corrigé le 2026-08-22**
+
+État constaté au moment de l'audit (modification non commitée) :
 
 - **`.env.connected.example`** pointe désormais la **production**, alors que son
   propre en-tête dit « projet de TEST uniquement ». Or la suite connectée
@@ -131,9 +149,6 @@ sur ces fichiers (motif `eyJ…`).
 
 - `whatsappId` est déclaré dans le schéma sans aucune implémentation. Non exposé
   dans l'interface — dormant, pas cassé. À retirer ou à implémenter.
-- `/healthz` et `/health` de l'orchestrateur **pendent** au lieu de répondre ;
-  seul `/api/health` répond, et en 401. Un point de santé qui exige une
-  authentification est difficile à superviser.
 - Dérive de l'historique `supabase_migrations` (O-04) : comptabilité seulement,
   objets conformes.
 
@@ -214,15 +229,17 @@ Bloque : le passage de « les tests passent » à « ça marche ».
 | Politique de concurrence (4 options) | j'implémente ; ma reco : verrou optimiste sur `updated_at`, sans migration |
 | Idempotence `notify-email` : je livre non exécuté, ou tu testes après modification ? | je corrige l'ordre « réserver → envoyer → confirmer » |
 | `whatsappId` : retirer ou implémenter ? | je fais l'un ou l'autre |
-| `/healthz` : exposer un point de santé non authentifié ? | je l'ajoute |
 
-### Immédiat, avant tout le reste
+### ✅ Immédiat — fait le 2026-08-22
 
-Décider du sort des trois `.env` modifiés (B-6). Ma recommandation : **remettre
-`.env.connected.example` et `.env.test` à vide**, et garder les vraies valeurs
-uniquement dans `.env.local` et `.env.connected`, tous deux gitignorés. Sinon la
-CI échoue, et le risque de lancer la suite connectée sur la production reste
-ouvert. Dis-moi et je le fais.
+Les trois `.env` versionnés sont revenus à leurs valeurs de gabarit
+(`.env.example` : placeholder ; `.env.test` et `.env.connected.example` : vides).
+Les vraies valeurs restent dans `.env.local`, gitignoré, qui les portait déjà —
+le développement local n'a rien perdu. Copie de sauvegarde des versions
+renseignées conservée hors dépôt.
+
+Le contrôle « Hygiène » repasse, et le risque de lancer la suite connectée sur la
+production est refermé.
 
 ---
 
