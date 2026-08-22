@@ -15,7 +15,7 @@ orchestrateur `orchestrator.srv1017182.hstgr.cloud`.
 |---|---|
 | Qualité du code, tests, CI | **solide** — 581 tests verts, 5 jobs CI |
 | Comportement vérifié en conditions réelles | **très faible** — l'essentiel n'a jamais été exécuté contre un vrai Supabase |
-| Chaîne déployée | **incomplète** — deux briques sur trois manquent |
+| Chaîne déployée | **presque complète** — SPA et orchestrateur en ligne ; manquent l'Edge Function et deux variables (CORS, APP_URL) |
 
 Dit autrement : rien ne prouve aujourd'hui qu'un utilisateur puisse se servir
 d'Organigrad de bout en bout, parce que **l'application n'est pas accessible** et
@@ -38,7 +38,7 @@ lecture des documents de recette antérieurs.
 | `…/healthz` | **200 `{"ok":true}`** → l'orchestrateur **tourne et est sain** |
 | `…/api/health` | **401** → routes applicatives protégées, comme prévu |
 | `…supabase.co/functions/v1/notify-email` | **404** → **non déployée** |
-| `https://organigrad.vercel.app` | **404** → **SPA non publiée** |
+| `https://organigrad.nouvelleeredigital.fr` | **200** → **SPA publiée sur le VPS** (l'URL Vercel que j'avais sondée était périmée) |
 
 > **Deux conclusions hâtives corrigées en cours d'audit.** Mes premières sondes
 > vers `/healthz` ont expiré (deux fois) et j'allais conclure que l'orchestrateur
@@ -69,13 +69,67 @@ lecture des documents de recette antérieurs.
 
 ## 2. Ce qui n'est pas fonctionnel — par gravité
 
-### 🔴 B-1 · La SPA n'est pas publiée
+### ~~🔴 B-1 · La SPA n'est pas publiée~~ — ❌ **CONSTAT FAUX, corrigé le 2026-08-22**
 
-`https://organigrad.vercel.app` répond **404**, et le relevé d'écosystème ne
-liste qu'un seul domaine pour Organigrad : celui de l'orchestrateur. Il n'y a
-donc **aucune interface accessible** à un utilisateur.
+**Je me suis trompé.** J'avais sondé `https://organigrad.vercel.app` (404) et
+conclu à l'absence de déploiement. Cette URL vient d'un `.env.production`
+périmé : le projet a quitté Vercel pour le VPS.
 
-C'est le blocage numéro un : tout le reste est théorique tant qu'il tient.
+La SPA **est déployée et correctement configurée** :
+
+| Vérification | Résultat |
+|---|---|
+| `https://organigrad.nouvelleeredigital.fr` | **200** |
+| Titre servi | « Organigrad — Orchestration hybride » |
+| Configuration dans le bundle | `xucmfdggetwxmpquqjvj.supabase.co` + clé anon **présentes** |
+
+Ce dernier point compte : le build n'est **pas** en « mode local ». Le piège que
+je redoutais (site public sans authentification, données en localStorage) n'a pas
+eu lieu.
+
+> Deux documents m'ont induit en erreur, et sont périmés :
+> `orchestrator/.env.production` (`APP_URL` pointe encore Vercel) et le relevé
+> d'écosystème du 20/08, qui affirme qu'« Organigrad n'a pas de sous-domaine
+> `nouvelleeredigital.fr` côté VPS ». Le déploiement est postérieur.
+>
+> La leçon vaut d'être retenue : j'avais reconfirmé ce 404 **trois fois**, ce qui
+> prouvait sa stabilité — mais pas que je sondais la bonne adresse. Répéter une
+> mesure ne corrige pas une prémisse fausse.
+
+### 🔴 B-1 bis · La SPA déployée ne peut pas joindre l'orchestrateur (CORS)
+
+Trouvé en vérifiant le déploiement réel. L'orchestrateur ne renvoie **aucun**
+en-tête `Access-Control-Allow-Origin`, y compris pour le domaine de la SPA :
+
+```
+GET /healthz  Origin: https://organigrad.nouvelleeredigital.fr
+→ 200, Vary: Origin, mais PAS d'Access-Control-Allow-Origin
+```
+
+`Vary: Origin` prouve que la politique CORS est bien active et qu'elle **évalue**
+l'origine — elle la refuse simplement. `CORS_ALLOWED_ORIGINS` sur le VPS ne
+contient pas le nouveau domaine (vraisemblablement resté sur l'URL Vercel).
+
+**Conséquence** : dans l'application déployée, tout ce qui passe par
+l'orchestrateur est bloqué **par le navigateur** — orchestration, exécution,
+approbation/refus, SSE. Ce qui passe directement par Supabase (organigramme,
+fiches, membres, clés API) fonctionne normalement.
+
+Second effet du même oubli : `APP_URL` sert à construire les liens profonds des
+notifications (`${appUrl}?view=orchestration&nodeId=…`, dans les blocs Slack et
+le gabarit d'e-mail). Restée sur Vercel, **chaque e-mail de validation enverrait
+l'utilisateur sur un 404**.
+
+**Correctif, sur le VPS dans `/opt/organigrad/.env`** :
+
+```
+APP_URL=https://organigrad.nouvelleeredigital.fr
+CORS_ALLOWED_ORIGINS=https://organigrad.nouvelleeredigital.fr
+```
+
+puis redémarrer l'orchestrateur (`pm2 restart` via `ecosystem.config.cjs`).
+Contrôle : le `GET /healthz` ci-dessus doit alors renvoyer
+`Access-Control-Allow-Origin: https://organigrad.nouvelleeredigital.fr`.
 
 ### 🔴 B-2 · Aucun e-mail ne part
 
