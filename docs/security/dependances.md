@@ -31,52 +31,36 @@ donc la correction reste non cassante.
 
 Résultat : orchestrateur **0 vulnérabilité**, frontend **1** (ci-dessous).
 
-## Risques acceptés
+## Correctifs livrés
 
-### `xlsx` (SheetJS) — high — accepté jusqu'au 2026-11-14
+### xlsx (SheetJS) — vulnérabilités high corrigées
 
 | | |
 |---|---|
 | Avis | [GHSA-4r6h-8v6p-xvw6](https://github.com/advisories/GHSA-4r6h-8v6p-xvw6) (prototype pollution, corrigé en 0.19.3) · [GHSA-5pgg-2g8v-p4x9](https://github.com/advisories/GHSA-5pgg-2g8v-p4x9) (ReDoS, corrigé en 0.20.2) |
-| Version installée | `0.18.5` |
-| Correctif applicable | **Aucun via npm** |
+| Version installée | 0.20.3, vendored dans vendor/xlsx-0.20.3.tgz |
+| Provenance | CDN officiel SheetJS; SHA-256 8DC73FC3B00203E72D176E85B50938627C7B086E607C682E8D3C22C02BB99FE8 |
 
-**Pourquoi aucun correctif.** SheetJS ne publie plus sur le registre npm : la
-dernière version qui s'y trouve est `0.18.5`, antérieure aux deux correctifs.
-Les versions ≥ 0.19.3 ne sont distribuées que depuis le CDN de l'éditeur.
-Aucun `npm audit fix` ne peut donc résoudre cette entrée — ce n'est pas un
-oubli de mise à jour.
+Le registre npm s'arrête à 0.18.5; le tarball 0.20.3 est donc versionné localement
+pour garder une installation reproductible sans dépendre du CDN en CI. La version
+est postérieure aux deux versions corrigées indiquées par les avis.
 
-**Exposition réelle.** `xlsx` ne s'exécute que dans le navigateur, sur un
-fichier que l'utilisateur choisit lui-même d'importer. Il n'est jamais appelé
-côté serveur, ni sur une entrée réseau non sollicitée.
+**Exposition réelle.** xlsx ne s'exécute que dans le navigateur, sur un fichier
+que l'utilisateur choisit lui-même d'importer. Il n'est jamais appelé côté serveur,
+ni sur une entrée réseau non sollicitée.
 
-**Atténuations en place** (antérieures à cette revue, vérifiées le 2026-08-14) :
+**Défenses complémentaires** :
 
-- import dynamique (`await import('xlsx')` dans `src/services/importService.ts`) :
-  la bibliothèque part dans un chunk séparé — `vendor-xlsx-*.js`, confirmé au
-  build — chargé au seul moment d'un import XLSX, jamais au démarrage ;
-- lecture défensive : `cellFormula: false`, `cellHTML: false`, `bookVBA: false`,
-  et `sheetRows` borné à `maxRows + 1` ;
-- bornes d'import dans `src/services/sheetSecurity.ts` : 5 Mo, 20 feuilles,
-  20 000 lignes, 100 colonnes, 10 000 caractères par cellule ;
-- les dimensions déclarées par la feuille sont vérifiées **avant**
-  matérialisation des lignes.
+- import dynamique : la bibliothèque reste dans un chunk séparé, chargé au seul
+  moment d'un import XLSX;
+- lecture défensive : cellFormula, cellHTML et bookVBA sont désactivés, et
+  sheetRows est borné à maxRows + 1;
+- bornes d'import : 5 Mo, 20 feuilles, 20 000 lignes, 100 colonnes, 10 000
+  caractères par cellule;
+- dimensions déclarées vérifiées avant matérialisation des lignes.
 
-Ces bornes couvrent bien le ReDoS. Elles réduisent la surface du prototype
-pollution sans l'éliminer : la pollution se produirait à l'intérieur de
-`XLSX.read` / `sheet_to_json`, en amont de nos contrôles.
-
-**Options pour la revue du 2026-11-14** — à trancher, aucune n'est engagée :
-
-1. **Vendorer** le tarball SheetJS ≥ 0.20.2 depuis le CDN de l'éditeur, comme
-   c'est déjà fait pour `@apps2026/voice-client`. Corrige réellement les deux
-   avis, mais ajoute un binaire au dépôt et déplace la confiance du registre
-   npm vers le CDN de l'éditeur : c'est une décision de chaîne
-   d'approvisionnement, pas une mise à jour de routine.
-2. **Remplacer** par une bibliothèque maintenue sur npm (p. ex. `exceljs`).
-   Coût de portage réel, `xlsx` étant aussi utilisé par les tests d'import.
-3. **Reconduire** l'acceptation si l'exposition n'a pas changé.
+Ces bornes restent nécessaires contre les fichiers disproportionnés et complètent
+la version corrigée du parseur.
 
 ## Ajouter une acceptation
 
