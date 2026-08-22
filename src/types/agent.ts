@@ -35,6 +35,14 @@ export interface Agent {
     // fichier A et d'un fichier B pouvaient entrer en collision : un agent
     // supprimé dans A disparaissait silencieusement de B.
     /** Clé métier stable (nom|prénom|fonction), indépendante de l'ordre des lignes. */
+    /**
+     * Jeton de version — `org_agents.updated_at` tel que chargé.
+     *
+     * Sert de garde optimiste à l'enregistrement : la mise à jour ne s'applique
+     * que si la ligne n'a pas bougé depuis. Absent sur une fiche jamais
+     * persistée (création, ou source CSV en mode local).
+     */
+    updatedAt?: string;
     externalKey?: string;
     sourceKind?: AgentSourceKind;
     /** Nom de fichier importé, URL CSV normalisée, ou '' en saisie manuelle. */

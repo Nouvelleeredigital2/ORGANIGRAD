@@ -63,4 +63,9 @@ export interface HybridNode {
     avatarUrl?: string;
 
     status: NodeStatus;
+    /**
+     * Jeton de version (`hybrid_nodes.updated_at`). Garde optimiste : une mise
+     * à jour ne s'applique que si la ligne n'a pas bougé depuis son chargement.
+     */
+    updatedAt?: string;
 }

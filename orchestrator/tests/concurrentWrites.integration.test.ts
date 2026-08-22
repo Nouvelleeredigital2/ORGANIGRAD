@@ -1,26 +1,20 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import postgres, { type Sql } from 'postgres';
-import { PgGraphStore } from '../src/state/pgGraphStore.js';
+import { PgGraphStore, ConflitDeVersionError, NodeNotFoundError } from '../src/state/pgGraphStore.js';
 
 /**
  * P2-14 — écriture concurrente sur la même fiche.
  *
- * ⚠️ TEST DE CARACTÉRISATION, pas un test de conformité. Il documente le
- * comportement ACTUEL, qui est un « dernier écrivain gagne » SILENCIEUX : la
- * seconde écriture écrase la première sans erreur, sans avertissement, et sans
- * que l'auteur de la première l'apprenne jamais.
+ * Ce fichier était un test de CARACTÉRISATION : il documentait le « dernier
+ * écrivain gagne » silencieux, en attendant qu'une politique soit choisie.
+ * La politique retenue le 2026-08-22 est le **verrou optimiste** sur
+ * `updated_at` (option 2 de docs/architecture/concurrence-ecritures.md) ; il
+ * devient donc un test de CONFORMITÉ, comme prévu.
  *
- * Ce comportement n'est pas nécessairement faux — c'est une politique
- * défendable pour un organigramme. Mais il n'a jamais été CHOISI : il découle du
- * `on conflict do update set <toutes les colonnes> = excluded.*` des deux
- * chemins d'écriture (orchestrateur ici, upsert PostgREST côté SPA), sans
- * prédicat de version.
- *
- * Ce test existe pour que ce point devienne une décision consciente : le jour
- * où une politique (verrou optimiste, détection de conflit, versionnage) sera
- * retenue, il ÉCHOUERA — et c'est exactement ce qu'on veut. Il faudra alors le
- * réécrire en test de conformité, pas le supprimer.
+ * Ce que le verrou fait : supprimer la perte SILENCIEUSE.
+ * Ce qu'il ne fait pas : fusionner. Le second auteur est prévenu et doit
+ * recharger — mais il n'écrase plus personne sans le savoir.
  *
  * Hermétique par défaut : ne tourne QUE si `TEST_DATABASE_URL` est défini.
  *
@@ -32,10 +26,20 @@ import { PgGraphStore } from '../src/state/pgGraphStore.js';
 
 const TEST_DB_URL = process.env.TEST_DATABASE_URL;
 
-describe.runIf(Boolean(TEST_DB_URL))('Écritures concurrentes — politique effective', () => {
+describe.runIf(Boolean(TEST_DB_URL))('Écritures concurrentes — verrou optimiste', () => {
     let sql: Sql;
     const workspaceId = randomUUID();
-    const nodeId = randomUUID();
+
+    const noeud = (id: string) => ({
+        id,
+        type: 'AGENT_IA' as const,
+        nom: 'Nom initial',
+        roleTitre: 'Rôle initial',
+        parentID: null,
+        gradeId: 'Expert',
+        skills: [],
+        status: 'IDLE' as const,
+    });
 
     beforeAll(async () => {
         sql = postgres(TEST_DB_URL!, { max: 4 });
@@ -53,7 +57,6 @@ describe.runIf(Boolean(TEST_DB_URL))('Écritures concurrentes — politique effe
             node_id uuid not null, from_status text not null, to_status text not null, payload jsonb,
             actor_kind text not null default 'orchestrator', actor_id text,
             created_at timestamptz not null default now())`;
-
         await sql`insert into public.workspaces (id, name) values (${workspaceId}, 'concurrence')`;
     });
 
@@ -65,71 +68,102 @@ describe.runIf(Boolean(TEST_DB_URL))('Écritures concurrentes — politique effe
         await sql.end({ timeout: 5 });
     });
 
-    it('la seconde écriture écrase la première, sans erreur ni trace', async () => {
-        // Deux sessions distinctes sur le même workspace, comme deux onglets ou
-        // deux personnes.
-        const sessionA = new PgGraphStore(sql, workspaceId, { kind: 'user', id: 'alice' });
-        const sessionB = new PgGraphStore(sql, workspaceId, { kind: 'user', id: 'bob' });
+    const sessionA = () => new PgGraphStore(sql, workspaceId, { kind: 'user', id: 'alice' });
+    const sessionB = () => new PgGraphStore(sql, workspaceId, { kind: 'user', id: 'bob' });
 
-        await sessionA.upsertNode({
-            id: nodeId,
-            type: 'AGENT_IA',
-            nom: 'Nom initial',
-            roleTitre: 'Rôle initial',
-            parentID: null,
-            gradeId: 'Expert',
-            skills: [],
-            status: 'IDLE',
-        });
+    it("la seconde écriture est REFUSÉE, et la première survit", async () => {
+        const id = randomUUID();
+        const a = sessionA();
+        const b = sessionB();
+        await a.upsertNode(noeud(id));
 
-        // 1. Les deux ouvrent la fiche — même état de départ.
-        const vueA = await sessionA.get(nodeId);
-        const vueB = await sessionB.get(nodeId);
-        expect(vueA.nom).toBe('Nom initial');
-        expect(vueB.nom).toBe('Nom initial');
+        // Les deux ouvrent la fiche — même état, même jeton de version.
+        const vueA = await a.get(id);
+        const vueB = await b.get(id);
+        expect(vueA.updatedAt).toBeTruthy();
+        expect(vueB.updatedAt).toBe(vueA.updatedAt);
 
-        // 2. A modifie le NOM et enregistre.
-        await sessionA.upsertNode({ ...vueA, nom: 'Nom corrigé par Alice' });
-        expect((await sessionA.get(nodeId)).nom).toBe('Nom corrigé par Alice');
+        // Alice corrige le NOM et enregistre.
+        await a.upsertNode({ ...vueA, nom: 'Nom corrigé par Alice' }, vueA.updatedAt);
 
-        // 3. B modifie le RÔLE et enregistre. Sa charge porte encore le nom
-        //    qu'il avait chargé — il n'a pas touché à ce champ, mais il le
-        //    réécrit quand même.
-        const ecritureB = sessionB.upsertNode({ ...vueB, roleTitre: 'Rôle corrigé par Bob' });
+        // Bob corrige le RÔLE. Sa charge porte encore l'ancien nom — c'est
+        // exactement ce qui écrasait la correction d'Alice auparavant.
+        await expect(
+            b.upsertNode({ ...vueB, roleTitre: 'Rôle corrigé par Bob' }, vueB.updatedAt),
+        ).rejects.toBeInstanceOf(ConflitDeVersionError);
 
-        // 4. Aucune erreur : rien ne signale le conflit à B.
-        await expect(ecritureB).resolves.toBeDefined();
-
-        // 5. Et la correction d'Alice a disparu.
-        const finale = await sessionA.get(nodeId);
-        expect(finale.roleTitre).toBe('Rôle corrigé par Bob');
-        expect(finale.nom).toBe('Nom initial'); // ← modification d'Alice perdue
-        expect(finale.nom).not.toBe('Nom corrigé par Alice');
+        // La correction d'Alice est intacte, et rien de Bob n'est passé.
+        const finale = await a.get(id);
+        expect(finale.nom).toBe('Nom corrigé par Alice');
+        expect(finale.roleTitre).toBe('Rôle initial');
     });
 
-    it("le journal des transitions ne garde aucune trace de l'écrasement", async () => {
-        // Conséquence pratique : ni Alice ni un auditeur ne peuvent savoir
-        // après coup qu'une modification a été écrasée. `node_transitions` ne
-        // couvre que les changements de STATUT, pas les champs métier.
-        const lignes = await sql`
-            select count(*)::int as n from public.node_transitions
-             where workspace_id = ${workspaceId} and node_id = ${nodeId}`;
-        expect(lignes[0]!.n).toBe(0);
+    it('un jeton frais permet de réappliquer sa modification', async () => {
+        // Le verrou détecte, il ne fusionne pas : le parcours attendu est
+        // « recharger, puis réappliquer ». Il doit fonctionner sans friction.
+        const id = randomUUID();
+        const a = sessionA();
+        const b = sessionB();
+        await a.upsertNode(noeud(id));
+
+        const vueA = await a.get(id);
+        await a.upsertNode({ ...vueA, nom: 'Alice' }, vueA.updatedAt);
+
+        const rechargee = await b.get(id); // Bob recharge
+        await b.upsertNode({ ...rechargee, roleTitre: 'Bob' }, rechargee.updatedAt);
+
+        const finale = await a.get(id);
+        expect(finale.nom).toBe('Alice'); // conservé
+        expect(finale.roleTitre).toBe('Bob'); // appliqué
     });
 
-    it('la dernière écriture est bien celle qui gagne, pas la plus récente en date de chargement', async () => {
-        // Précision utile : la politique n'est pas « la modification la plus
-        // récente gagne » mais « le dernier ENREGISTREMENT gagne ». Un onglet
-        // ouvert depuis une heure écrase une modification faite il y a dix
-        // secondes.
-        const session = new PgGraphStore(sql, workspaceId, { kind: 'user', id: 'carol' });
-        const ancienneVue = await session.get(nodeId); // chargée maintenant
+    it("l'écriture renvoie le NOUVEAU jeton, utilisable aussitôt", async () => {
+        // Sans cela, un second enregistrement consécutif déclencherait un faux
+        // conflit contre son propre écrit.
+        const id = randomUUID();
+        const a = sessionA();
+        await a.upsertNode(noeud(id));
 
-        await session.upsertNode({ ...ancienneVue, nom: 'Modification récente' });
-        // `ancienneVue` est désormais périmée — l'enregistrer la réimpose.
-        await session.upsertNode({ ...ancienneVue, roleTitre: 'Rôle depuis un onglet périmé' });
+        const vue = await a.get(id);
+        const apres = await a.upsertNode({ ...vue, nom: 'Premier' }, vue.updatedAt);
+        expect(apres.updatedAt).toBeTruthy();
+        expect(apres.updatedAt).not.toBe(vue.updatedAt);
 
-        const finale = await session.get(nodeId);
-        expect(finale.nom).not.toBe('Modification récente');
+        await expect(
+            a.upsertNode({ ...apres, nom: 'Second' }, apres.updatedAt),
+        ).resolves.toBeDefined();
+        expect((await a.get(id)).nom).toBe('Second');
+    });
+
+    it('sans jeton attendu, le comportement historique est conservé', async () => {
+        // Les écritures qui n'ont pas de jeton — création, import de masse —
+        // ne doivent pas être bloquées. La garde est neutre quand le jeton est
+        // absent, sinon l'import deviendrait impossible.
+        const id = randomUUID();
+        const a = sessionA();
+        await a.upsertNode(noeud(id));
+        const vue = await a.get(id);
+
+        await expect(a.upsertNode({ ...vue, nom: 'Sans garde' })).resolves.toBeDefined();
+        expect((await a.get(id)).nom).toBe('Sans garde');
+    });
+
+    it("un nœud supprimé entre-temps n'est pas ressuscité", async () => {
+        // Avec un jeton, l'intention est « mettre à jour ce que j'ai chargé ».
+        // Si la fiche a été supprimée depuis, la recréer en silence serait la
+        // même perte silencieuse sous une autre forme. Et l'erreur doit être
+        // distincte du conflit : « recharge » n'a aucun sens pour une fiche
+        // disparue.
+        const id = randomUUID();
+        const a = sessionA();
+        await a.upsertNode(noeud(id));
+        const vue = await a.get(id);
+        await a.deleteNode(id);
+
+        await expect(a.upsertNode({ ...vue, nom: 'Zombie' }, vue.updatedAt)).rejects.toBeInstanceOf(
+            NodeNotFoundError,
+        );
+        const [reste] = await sql`select id from public.hybrid_nodes where id = ${id}`;
+        expect(reste).toBeUndefined();
     });
 });

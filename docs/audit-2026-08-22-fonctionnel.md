@@ -98,14 +98,21 @@ cinq minutes.
 
 Tant que ce point n'est pas levé, on ne sait pas si la faille est ouverte.
 
-### 🟠 B-4 · Écrasement silencieux en écriture concurrente
+### 🟠 B-4 · Écrasement silencieux en écriture concurrente — ✅ **corrigé le 2026-08-22**
 
-Deux personnes sur la même fiche : la seconde écrase la première, **sans erreur,
-sans trace, sans que personne l'apprenne**. Prouvé sur PostgreSQL réel.
+Deux personnes sur la même fiche : la seconde écrasait la première, **sans
+erreur, sans trace, sans que personne l'apprenne**.
 
-Ce n'est pas un bug au sens strict — c'est une politique qui n'a jamais été
-choisie. Quatre options sont posées dans
-`architecture/concurrence-ecritures.md` ; la décision t'appartient.
+Politique retenue : **verrou optimiste** sur `updated_at` (option 2). Appliqué
+aux trois chemins d'écriture — fiches et nœuds côté Supabase, et via
+l'orchestrateur, dont l'API transporte désormais le jeton. Aucune migration.
+
+Prouvé sur **PostgreSQL réel** (5 tests en CI) : la seconde écriture est refusée
+et la première survit ; après rechargement le second auteur réapplique sa
+modification ; une fiche supprimée entre-temps n'est pas ressuscitée.
+
+Le verrou détecte, il ne fusionne pas — voir
+`architecture/concurrence-ecritures.md` pour la limite assumée.
 
 ### 🟡 B-5 · Double envoi d'e-mail en concurrence — ✅ **corrigé le 2026-08-22**
 

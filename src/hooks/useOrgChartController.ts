@@ -172,7 +172,14 @@ export const useOrgChartController = () => {
         setServerAgents(suivant);
 
         try {
-            await agentRepo.upsert(fusionne, repoCtx);
+            // La fiche renvoyée porte le NOUVEAU jeton de version. Sans cette
+            // reprise, l'enregistrement suivant se comparerait à un jeton
+            // périmé et se refuserait lui-même — un faux conflit contre son
+            // propre écrit (cf. services/conflitVersion.ts).
+            const enregistre = await agentRepo.upsert(fusionne, repoCtx);
+            setServerAgents((precedent) =>
+                precedent.map((a) => (a.id === id ? enregistre : a)),
+            );
             return { ok: true };
         } catch (err) {
             setServerAgents(base);

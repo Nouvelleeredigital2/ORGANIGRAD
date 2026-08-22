@@ -1,12 +1,36 @@
-# Écritures concurrentes — état des lieux et décision à prendre
+# Écritures concurrentes — politique retenue
 
 **Constat établi le 2026-08-14** (P2-14 du plan de correction).
 
-> **Statut : politique NON CHOISIE.** Le comportement décrit ci-dessous n'est
-> pas le résultat d'une décision produit — il découle de la forme des requêtes
-> d'écriture. Ce document existe pour que le choix soit fait consciemment.
+> **Statut : tranché le 2026-08-22 — option 2, verrou optimiste.** Appliqué sur
+> les trois chemins d'écriture. Le reste de ce document décrit le comportement
+> d'AVANT et le raisonnement qui a mené au choix ; il est conservé parce qu'il
+> explique pourquoi les autres options ont été écartées.
+>
+> **Ce qui a changé.** La mise à jour ne s'applique que si la ligne n'a pas
+> bougé depuis son chargement (`updated_at` comme jeton). Zéro ligne affectée ⇒
+> refus explicite au lieu d'un écrasement silencieux. Aucune migration : la
+> colonne et son trigger existaient déjà.
+>
+> | Chemin | État |
+> |---|---|
+> | SPA → Supabase, fiches (`org_agents`) | ✅ gardé |
+> | SPA → Supabase, nœuds (`hybrid_nodes`) | ✅ gardé |
+> | SPA → orchestrateur → Postgres | ✅ gardé (jeton transmis par l'API) |
+> | Import de masse | délibérément NON gardé — il assume l'écrasement |
+>
+> **Ce que le verrou ne fait pas** : fusionner. Le second auteur est prévenu et
+> doit recharger. Sa saisie est conservée (le formulaire reste ouvert), mais il
+> doit réappliquer sa modification.
+>
+> **Limite connue** : la comparaison se fait à la milliseconde. PostgreSQL
+> stocke des microsecondes, mais un jeton ayant transité par un `Date`
+> JavaScript les perd ; tronquer des deux côtés rend la comparaison stable quelle
+> que soit la provenance du jeton. Deux écritures dans la même milliseconde
+> pourraient donc encore se recouvrir — un cas sans réalité pour une édition
+> humaine.
 
-## Comportement actuel : « dernier écrivain gagne », silencieux
+## Le comportement d’AVANT : « dernier écrivain gagne », silencieux
 
 Les deux chemins d'écriture d'un nœud font le même `on conflict do update set`
 sur **toutes** les colonnes, sans prédicat de version :
@@ -102,9 +126,20 @@ l'auditabilité, mais on peut les décider plus tard ; laisser une écriture
 disparaître sans que personne ne l'apprenne est ce qui pose problème
 aujourd'hui.
 
-## Suite
+## Vérification
 
-Le test `concurrentWrites.integration.test.ts` est un **test de
-caractérisation** : il verrouille le comportement actuel. Le jour où une
-politique est retenue, il échouera — c'est voulu. Il faudra alors le réécrire en
-test de conformité, pas le supprimer.
+`orchestrator/tests/concurrentWrites.integration.test.ts` — 5 tests contre un
+**PostgreSQL réel**, en CI :
+
+- la seconde écriture est refusée **et la première survit** ;
+- après rechargement, le second auteur peut réappliquer sa modification ;
+- l'écriture renvoie le nouveau jeton, utilisable aussitôt (sans quoi un second
+  enregistrement consécutif se refuserait lui-même) ;
+- sans jeton, le comportement historique est conservé (création, import) ;
+- une fiche supprimée entre-temps n'est **pas ressuscitée** — et l'erreur est
+  distincte du conflit, « recharge » n'ayant aucun sens pour une fiche disparue.
+
+Côté SPA, `src/services/agentRepoConflit.test.ts` verrouille la forme de la
+requête (l'oubli d'un filtre sur le jeton rouvrirait la brèche sans rien casser
+d'autre). Ce n'est pas une preuve de bout en bout : il n'y a pas de PostgREST
+dans cet environnement.

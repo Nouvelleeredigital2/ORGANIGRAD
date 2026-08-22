@@ -30,6 +30,8 @@ export interface OrchestratorGraphNode {
     skills: string[];
     avatarUrl?: string;
     status: NodeStatus;
+    /** Jeton de version après écriture, à réutiliser au prochain enregistrement. */
+    updatedAt?: string;
     hasSystemPrompt: boolean;
     mcp: { configured: boolean; connectedTo: string[] };
     notifications: { slack: boolean; email: boolean; whatsapp: boolean };
@@ -66,6 +68,12 @@ export interface NodeMutationPayload {
     mcpConfig?: McpConfig | null;
     notificationChannels?: NotificationChannels | null;
     avatarUrl?: string | null;
+    /**
+     * Jeton de version tel que chargé (`hybrid_nodes.updated_at`). Fourni ⇒
+     * l'orchestrateur refuse l'écriture si la ligne a changé depuis
+     * (cf. services/conflitVersion.ts).
+     */
+    expectedUpdatedAt?: string;
 }
 
 export interface UserAuth {

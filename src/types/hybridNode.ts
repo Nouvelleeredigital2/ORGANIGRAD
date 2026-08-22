@@ -62,6 +62,12 @@ export interface HybridNode {
 
     // Spécificité Humain (Gatekeeper) — canaux de notification HITL
     notificationChannels?: NotificationChannels;
+    /**
+     * Jeton de version — `hybrid_nodes.updated_at` tel que chargé. Garde
+     * optimiste à l'enregistrement (cf. services/conflitVersion.ts). Absent
+     * sur un nœud jamais persisté.
+     */
+    updatedAt?: string;
 
     // Visuels Humain
     avatarUrl?: string;

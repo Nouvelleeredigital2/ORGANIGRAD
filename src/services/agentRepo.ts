@@ -2,6 +2,7 @@ import { supabase } from '../lib/supabase';
 import type { Agent, AgentSourceKind, GradeStyle } from '../types/agent';
 import type { Database } from '../types/supabase';
 import { agentStore } from './agentStore';
+import { ConflitDeVersionError } from './conflitVersion';
 
 /**
  * Repository des fiches RH — backend Supabase si configuré ET workspace fourni,
@@ -42,6 +43,8 @@ export function rowToAgent(row: Row): Agent {
         externalKey: row.external_key,
         sourceKind: toSourceKind(row.source_kind),
         sourceRef: row.source_ref,
+        // Jeton de version pour le verrou optimiste (cf. Agent.updatedAt).
+        ...(row.updated_at ? { updatedAt: row.updated_at } : {}),
     };
 }
 
@@ -133,9 +136,33 @@ export const agentRepo = {
             return agent;
         }
 
+        const charge = agentToInsert(agent, ctx.workspaceId!);
+
+        // ── Fiche déjà persistée : mise à jour GARDÉE ────────────────────────
+        //
+        // `updated_at` est le jeton de version. La comparaison est faite par
+        // PostgreSQL après conversion en timestamptz, pas textuellement : le
+        // format de sérialisation n'a donc pas d'importance.
+        //
+        // Zéro ligne affectée ⇒ la fiche a changé depuis son chargement. On
+        // refuse plutôt que d'écraser en silence.
+        if (agent.updatedAt) {
+            const { data, error } = await supabase!
+                .from('org_agents')
+                .update(charge)
+                .eq('id', agent.id)
+                .eq('workspace_id', ctx.workspaceId!)
+                .eq('updated_at', agent.updatedAt)
+                .select('*');
+            if (error) throw error;
+            if (!data || data.length === 0) throw new ConflitDeVersionError(agent.id);
+            return rowToAgent(data[0]!);
+        }
+
+        // ── Création (ou fiche jamais persistée) ─────────────────────────────
         const { data, error } = await supabase!
             .from('org_agents')
-            .upsert(agentToInsert(agent, ctx.workspaceId!), { onConflict: 'id' })
+            .upsert(charge, { onConflict: 'id' })
             .select('*')
             .single();
         if (error) throw error;

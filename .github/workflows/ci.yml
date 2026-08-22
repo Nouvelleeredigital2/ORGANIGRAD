@@ -130,11 +130,11 @@ jobs:
         run: npm test -- workspaceRpcSecurity
         env:
           TEST_DATABASE_URL: postgres://postgres:test@localhost:5432/postgres
-      # Test de CARACTÉRISATION : il verrouille le « dernier écrivain gagne »
-      # actuel, qui n'a jamais été choisi (cf. docs/architecture/concurrence-ecritures.md).
-      # Il DOIT échouer le jour où une politique de concurrence est retenue —
-      # il faudra alors le réécrire en test de conformité, pas le supprimer.
-      - name: Concurrence — politique d'écriture effective
+      # Conformité au VERROU OPTIMISTE retenu le 2026-08-22
+      # (cf. docs/architecture/concurrence-ecritures.md). Ces tests étaient des
+      # tests de caractérisation du « dernier écrivain gagne » ; ils ont été
+      # réécrits quand la politique a été tranchée, comme prévu.
+      - name: Concurrence — verrou optimiste
         run: npm test -- concurrentWrites
         env:
           TEST_DATABASE_URL: postgres://postgres:test@localhost:5433/postgres
