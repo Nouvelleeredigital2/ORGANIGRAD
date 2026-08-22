@@ -154,8 +154,11 @@ sur ces fichiers (motif `eyJ…`).
 
 ### 🟢 B-7 · Points mineurs
 
-- `whatsappId` est déclaré dans le schéma sans aucune implémentation. Non exposé
-  dans l'interface — dormant, pas cassé. À retirer ou à implémenter.
+- ~~`whatsappId` déclaré sans implémentation~~ — ✅ **retiré le 2026-08-22**.
+  Le champ, son pilote no-op et l'indicateur du DTO public ont disparu ; le
+  canal ne promet plus rien. La contrainte `CHECK` de `notifications.channel`
+  accepte encore `'whatsapp'` : rien ne l'écrivait, et restreindre une
+  contrainte en production sans nécessité serait un risque gratuit.
 - Dérive de l'historique `supabase_migrations` (O-04) : comptabilité seulement,
   objets conformes.
 
@@ -235,7 +238,6 @@ Bloque : le passage de « les tests passent » à « ça marche ».
 |---|---|
 | Politique de concurrence (4 options) | j'implémente ; ma reco : verrou optimiste sur `updated_at`, sans migration |
 | Idempotence `notify-email` : je livre non exécuté, ou tu testes après modification ? | je corrige l'ordre « réserver → envoyer → confirmer » |
-| `whatsappId` : retirer ou implémenter ? | je fais l'un ou l'autre |
 
 ### ✅ Immédiat — fait le 2026-08-22
 

@@ -112,8 +112,7 @@ function isNotifChannels(v: unknown): v is NotificationChannels {
     const r = v as Record<string, unknown>;
     return (
         (r['slackWebhook'] == null || typeof r['slackWebhook'] === 'string') &&
-        (r['email'] == null || typeof r['email'] === 'string') &&
-        (r['whatsappId'] == null || typeof r['whatsappId'] === 'string')
+        (r['email'] == null || typeof r['email'] === 'string')
     );
 }
 
@@ -144,7 +143,7 @@ export interface PublicNodeDTO {
     /** Indicateurs non sensibles. */
     hasSystemPrompt: boolean;
     mcp: { configured: boolean; connectedTo: string[] };
-    notifications: { slack: boolean; email: boolean; whatsapp: boolean };
+    notifications: { slack: boolean; email: boolean };
 }
 
 export function toPublicNodeDTO(node: HybridNode): PublicNodeDTO {
@@ -169,7 +168,6 @@ export function toPublicNodeDTO(node: HybridNode): PublicNodeDTO {
         notifications: {
             slack: Boolean(nc?.slackWebhook),
             email: Boolean(nc?.email),
-            whatsapp: Boolean(nc?.whatsappId),
         },
     };
 }

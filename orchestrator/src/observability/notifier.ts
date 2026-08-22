@@ -28,7 +28,14 @@ export interface ObservableStore {
 
 export interface NotificationAuditEntry {
     node_id: string | null;
-    channel: 'slack_webhook' | 'email' | 'whatsapp';
+    /**
+     * La contrainte CHECK de `notifications.channel` accepte encore
+     * `'whatsapp'` — le canal a été retiré de l'application le 2026-08-22, mais
+     * la colonne n'a pas été migrée (rien ne l'écrivait, et restreindre une
+     * contrainte en production sans nécessité serait un risque gratuit). Ce
+     * type-ci reflète ce que le notifier ÉCRIT, pas ce que la base tolère.
+     */
+    channel: 'slack_webhook' | 'email';
     target: string;
     message: string;
     status: 'sent' | 'failed';

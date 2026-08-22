@@ -34,7 +34,7 @@ export interface OrchestratorGraphNode {
     updatedAt?: string;
     hasSystemPrompt: boolean;
     mcp: { configured: boolean; connectedTo: string[] };
-    notifications: { slack: boolean; email: boolean; whatsapp: boolean };
+    notifications: { slack: boolean; email: boolean };
 }
 
 /** Réponse de POST /api/integrations/link/import. */
