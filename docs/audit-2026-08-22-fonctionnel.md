@@ -120,16 +120,41 @@ notifications (`${appUrl}?view=orchestration&nodeId=…`, dans les blocs Slack e
 le gabarit d'e-mail). Restée sur Vercel, **chaque e-mail de validation enverrait
 l'utilisateur sur un 404**.
 
-**Correctif, sur le VPS dans `/opt/organigrad/.env`** :
+#### Confirmé sur la machine le 2026-08-25
+
+Constaté directement sur `srv1017182` (terminal web hPanel, root). Le
+déploiement réel :
+
+| Élément | Valeur relevée |
+|---|---|
+| Machine | VM **1017182**, `72.60.185.225` (l'enregistrement DNS `organigrad` y pointe) |
+| SPA | conteneur Docker `organigrad-front` (`nginx:alpine`, `127.0.0.1:3075`), projet `serve` |
+| Orchestrateur | **hors Docker** : `node /opt/organigrad/dist/src/api/bootstrap.js`, utilisateur `deploy`, `127.0.0.1:3001` |
+| Supervision | pm2 **de l'utilisateur `deploy`** — `pm2 list` en root est vide, c'est normal |
+| Application pm2 | `orchestrator` (`/opt/organigrad/ecosystem.config.cjs`) |
+| Environnement | chargé par node lui-même : `--env-file=/opt/organigrad/.env` |
+
+Les deux variables fautives, lues dans ce fichier :
 
 ```
-APP_URL=https://organigrad.nouvelleeredigital.fr
-CORS_ALLOWED_ORIGINS=https://organigrad.nouvelleeredigital.fr
+APP_URL=https://organigrad.vercel.app
+CORS_ALLOWED_ORIGINS=https://organigrad.vercel.app
 ```
 
-puis redémarrer l'orchestrateur (`pm2 restart` via `ecosystem.config.cjs`).
+Le constat est donc établi, plus seulement déduit.
+
+**Correctif** — une sauvegarde `.env.bak.20260825-cors` a déjà été prise ;
+restent deux commandes, à lancer en root sur la machine :
+
+```bash
+sed -i 's#^APP_URL=.*#APP_URL=https://organigrad.nouvelleeredigital.fr#; s#^CORS_ALLOWED_ORIGINS=.*#CORS_ALLOWED_ORIGINS=https://organigrad.nouvelleeredigital.fr#' /opt/organigrad/.env
+su - deploy -c 'pm2 restart orchestrator'
+```
+
 Contrôle : le `GET /healthz` ci-dessus doit alors renvoyer
 `Access-Control-Allow-Origin: https://organigrad.nouvelleeredigital.fr`.
+Tant qu'il ne le renvoie pas, le redémarrage n'a pas pris — `--env-file`
+n'est relu qu'au démarrage du processus.
 
 ### 🔴 B-2 · Aucun e-mail ne part
 
