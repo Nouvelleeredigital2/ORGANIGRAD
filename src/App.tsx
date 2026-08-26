@@ -160,7 +160,10 @@ function AppContent() {
             );
             setFilamentState('error');
         } else {
-            feedback.success(`Export PDF terminé${poleLabel ? ` — ${poleLabel}` : ''}.`);
+            feedback.success(
+                `Export PDF terminé${poleLabel ? ` — ${poleLabel}` : ''}.`,
+                { autoDismissMs: 15_000 },
+            );
             setFilamentState('success');
         }
 
@@ -271,9 +274,9 @@ function AppContent() {
                     />
                 }
             >
-                {loading ? (
+                {loading && activeView !== 'orchestration' ? (
                     <OriginLoader />
-                ) : error && activeView !== 'settings' ? (
+                ) : error && activeView !== 'settings' && activeView !== 'orchestration' ? (
                     /* L'écran d'erreur reste une impasse tant qu'il n'offre pas de sortie :
                        on propose donc un nouvel essai et l'accès aux Paramètres, seule vue
                        encore utile sans données (changement de source / import). (ORG-005) */

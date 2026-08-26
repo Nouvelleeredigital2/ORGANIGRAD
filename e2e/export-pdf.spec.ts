@@ -87,7 +87,9 @@ test.describe('export PDF — le fichier, pas le toast', () => {
         //    texte par jsPDF, donc lisible dans le flux sans décompression.
         expect(pdf.texte).toContain('Organigrad');
 
-        // 5. Et seulement alors, le succès est annoncé.
+        // 5. Le succès reste lisible après la fin effective du téléchargement,
+        // au-delà de la durée générique d'un toast vert.
+        await page.waitForTimeout(4_500);
         await expect(page.getByText(/Export PDF terminé/i)).toBeVisible();
     });
 
