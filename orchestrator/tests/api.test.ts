@@ -51,6 +51,13 @@ describe('API REST + SSE', () => {
         await app.close();
     });
 
+    it('GET /healthz répond 200 en mode mémoire', async () => {
+        const res = await app.inject({ method: 'GET', url: '/healthz' });
+
+        expect(res.statusCode).toBe(200);
+        expect(res.json()).toEqual({ ok: true });
+    });
+
     it('GET /api/graph renvoie le graphe (DTO public)', async () => {
         const res = await app.inject({ method: 'GET', url: '/api/graph' });
         expect(res.statusCode).toBe(200);

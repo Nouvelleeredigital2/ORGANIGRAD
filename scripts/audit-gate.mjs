@@ -37,21 +37,7 @@ const BLOQUANTS = new Set(['high', 'critical']);
  * l'invocation en cours — sinon auditer l'orchestrateur seul signalerait à tort
  * l'acceptation d'une dépendance du frontend.
  */
-const ACCEPTES = {
-    xlsx: {
-        paquet: '.',
-        avis: ['GHSA-4r6h-8v6p-xvw6', 'GHSA-5pgg-2g8v-p4x9'],
-        raison:
-            "Prototype pollution (<0.19.3) et ReDoS (<0.20.2). Les versions corrigées " +
-            "ne sont PAS publiées sur npm — la dernière y est 0.18.5 ; SheetJS ne " +
-            "distribue plus que via son propre CDN. Aucun `npm audit fix` ne peut " +
-            "résoudre cette entrée. Atténuations en place : import dynamique (chunk " +
-            "hors bundle initial, chargé au seul import XLSX), lecture défensive " +
-            "(cellFormula/cellHTML/bookVBA désactivés, sheetRows borné) et bornes " +
-            "taille/feuilles/lignes/colonnes/cellules côté sheetSecurity.ts.",
-        revoir: '2026-11-14',
-    },
-};
+const ACCEPTES = {};
 
 const paquets = process.argv.slice(2);
 const cibles = paquets.length ? paquets : ['.', 'orchestrator'];

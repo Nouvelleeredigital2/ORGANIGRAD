@@ -10,6 +10,7 @@ export interface ServerDeps {
 
 export function buildServer(deps: ServerDeps): FastifyInstance {
     const app = Fastify({ logger: false });
+    app.get('/healthz', async () => ({ ok: true }));
     registerRoutes(app, deps);
     return app;
 }
