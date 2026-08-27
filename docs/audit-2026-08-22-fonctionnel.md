@@ -15,11 +15,13 @@ orchestrateur `orchestrator.srv1017182.hstgr.cloud`.
 |---|---|
 | Qualité du code, tests, CI | **solide** — 581 tests verts, 5 jobs CI |
 | Comportement vérifié en conditions réelles | **très faible** — l'essentiel n'a jamais été exécuté contre un vrai Supabase |
-| Chaîne déployée | **presque complète** — SPA et orchestrateur en ligne ; manquent l'Edge Function et deux variables (CORS, APP_URL) |
+| Chaîne déployée | **presque complète** — SPA et orchestrateur en ligne, CORS et `APP_URL` corrigés le 27/08 ; manque l'Edge Function `notify-email` |
 
 Dit autrement : rien ne prouve aujourd'hui qu'un utilisateur puisse se servir
-d'Organigrad de bout en bout, parce que **l'application n'est pas accessible** et
-que **les e-mails ne partent pas**.
+d'Organigrad de bout en bout. **L'application est bien accessible** — c'était
+une erreur de ma part, corrigée en B-1 — et depuis le 2026-08-27 elle peut
+enfin joindre son orchestrateur (B-1 bis). Restent deux trous : **les e-mails ne
+partent pas** (B-2) et **l'état réel de la base n'a jamais été vérifié** (B-3).
 
 ---
 
@@ -96,7 +98,7 @@ eu lieu.
 > prouvait sa stabilité — mais pas que je sondais la bonne adresse. Répéter une
 > mesure ne corrige pas une prémisse fausse.
 
-### 🔴 B-1 bis · La SPA déployée ne peut pas joindre l'orchestrateur (CORS)
+### 🔴 B-1 bis · La SPA déployée ne peut pas joindre l'orchestrateur (CORS) — ✅ **corrigé le 2026-08-27**
 
 Trouvé en vérifiant le déploiement réel. L'orchestrateur ne renvoie **aucun**
 en-tête `Access-Control-Allow-Origin`, y compris pour le domaine de la SPA :
@@ -151,10 +153,29 @@ sed -i 's#^APP_URL=.*#APP_URL=https://organigrad.nouvelleeredigital.fr#; s#^CORS
 su - deploy -c 'pm2 restart orchestrator'
 ```
 
-Contrôle : le `GET /healthz` ci-dessus doit alors renvoyer
-`Access-Control-Allow-Origin: https://organigrad.nouvelleeredigital.fr`.
-Tant qu'il ne le renvoie pas, le redémarrage n'a pas pris — `--env-file`
-n'est relu qu'au démarrage du processus.
+#### Appliqué et vérifié le 2026-08-27
+
+Les deux commandes ont été passées sur la machine, puis
+`su - deploy -c 'pm2 restart orchestrator'` a relancé l'application pm2
+`orchestrator` (nouveau PID, `online`). `--env-file` n'étant relu qu'au
+démarrage du processus, le redémarrage n'est pas optionnel.
+
+Contrôle depuis l'extérieur, deux origines pour ne pas confondre « autorisé »
+et « ouvert à tous » :
+
+```
+GET /healthz  Origin: https://organigrad.nouvelleeredigital.fr
+→ 200 · Access-Control-Allow-Origin: https://organigrad.nouvelleeredigital.fr
+        Access-Control-Allow-Credentials: true
+
+GET /healthz  Origin: https://exemple-non-autorise.invalid
+→ 200 · Vary: Origin, aucun Access-Control-Allow-Origin
+```
+
+L'origine de la SPA est acceptée, une origine quelconque reste refusée : ce
+n'est donc pas un caractère générique posé par facilité. Orchestration,
+exécution, approbation/refus et SSE ne sont plus bloqués par le navigateur, et
+les liens profonds des notifications pointent désormais un domaine vivant.
 
 ### 🔴 B-2 · Aucun e-mail ne part
 
