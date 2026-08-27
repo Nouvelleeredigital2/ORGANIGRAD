@@ -8,20 +8,28 @@ orchestrateur `orchestrator.srv1017182.hstgr.cloud`.
 
 ## Réponse
 
-**Non.** Et l'écart ne se situe pas là où on l'attend : le **code** est en bon
-état, c'est le **déployé** qui ne l'est pas.
+**Non — mais il ne reste plus qu'une clé d'API.** L'écart ne se situait pas là
+où on l'attend : le **code** était en bon état, c'est le **déployé** qui ne
+l'était pas. Trois des quatre écarts ont été fermés les 25 et 27 août.
+
+> Ce document est daté du 22/08 et **mis à jour au fil des corrections**. Les
+> sections barrées sont résolues ; celles qui portent une date de vérification
+> ont été constatées, pas déduites.
 
 | Plan | État |
 |---|---|
 | Qualité du code, tests, CI | **solide** — 581 tests verts, 5 jobs CI |
-| Comportement vérifié en conditions réelles | **très faible** — l'essentiel n'a jamais été exécuté contre un vrai Supabase |
-| Chaîne déployée | **presque complète** — SPA et orchestrateur en ligne, CORS et `APP_URL` corrigés le 27/08 ; manque l'Edge Function `notify-email` |
+| Comportement vérifié en conditions réelles | **partiel** — 23 tests connectés sur pile locale, et les 4 requêtes P0-2 passées sur la production le 27/08 |
+| Chaîne déployée | **complète, une clé près** — SPA, orchestrateur et `notify-email` en ligne ; manque `RESEND_API_KEY` |
 
-Dit autrement : rien ne prouve aujourd'hui qu'un utilisateur puisse se servir
-d'Organigrad de bout en bout. **L'application est bien accessible** — c'était
-une erreur de ma part, corrigée en B-1 — et depuis le 2026-08-27 elle peut
-enfin joindre son orchestrateur (B-1 bis). Restent deux trous : **les e-mails ne
-partent pas** (B-2) et **l'état réel de la base n'a jamais été vérifié** (B-3).
+Dit autrement : **l'application est accessible** — c'était une erreur de ma part,
+corrigée en B-1 — elle peut depuis le 2026-08-27 joindre son orchestrateur
+(B-1 bis), et **la faille de sécurité est prouvée fermée en production** (B-3).
+
+Il reste **un** trou fonctionnel : les e-mails. `notify-email` est déployée
+depuis le 27/08, mais sans `RESEND_API_KEY` elle répond `ok: true` sans rien
+envoyer — voir l'avertissement en B-2, le déploiement seul a rendu la panne
+silencieuse au lieu de la supprimer.
 
 ---
 
@@ -39,7 +47,7 @@ lecture des documents de recette antérieurs.
 | `https://orchestrator.srv1017182.hstgr.cloud/` | **404** (hôte joignable) |
 | `…/healthz` | **200 `{"ok":true}`** → l'orchestrateur **tourne et est sain** |
 | `…/api/health` | **401** → routes applicatives protégées, comme prévu |
-| `…supabase.co/functions/v1/notify-email` | **404** → **non déployée** |
+| `…supabase.co/functions/v1/notify-email` | 404 le 22/08 → **déployée le 27/08**, répond désormais **401** |
 | `https://organigrad.nouvelleeredigital.fr` | **200** → **SPA publiée sur le VPS** (l'URL Vercel que j'avais sondée était périmée) |
 
 > **Deux conclusions hâtives corrigées en cours d'audit.** Mes premières sondes
@@ -188,15 +196,57 @@ Second piège au moment du déploiement : **sans `RESEND_API_KEY`, la fonction
 répond `ok: true` sans rien envoyer**. Déployer ne suffira pas, il faudra
 confirmer une réception.
 
-### 🟠 B-3 · L'état réel de la base n'a jamais été vérifié
+#### Déployée le 2026-08-27 — mais la moitié du problème demeure
 
-Le correctif de sécurité a été appliqué via un outil qui, depuis, ne répond plus
-(`28P01`, anomalie O-05). **Personne n'a confirmé que la production porte la
-version corrigée.** Le dépôt ne peut pas répondre à cette question ; les requêtes
-sont prêtes (`security/verification-p0-2-supabase.md`, R1 et R4), elles prennent
-cinq minutes.
+`notify-email` est déployée (version 1, `ACTIVE`, `verify_jwt: true`) via le
+connecteur MCP `93ec54b8`. Elle répond désormais **401** au lieu de 404 : elle
+existe et refuse un appel non authentifié.
 
-Tant que ce point n'est pas levé, on ne sait pas si la faille est ouverte.
+Le socle d'idempotence a été vérifié en base avant de déployer — la table
+`notifications` porte bien l'index unique **partiel**
+`notifications_idempotency_uniq` sur `(workspace_id, idempotency_key)
+where idempotency_key is not null`. La réservation avant envoi s'appuie donc sur
+une contrainte réelle.
+
+> ⚠️ **À ce stade, l'échec est devenu SILENCIEUX au lieu d'être bruyant.**
+> Tant que `RESEND_API_KEY` n'est pas posée, la fonction journalise un
+> avertissement, marque la notification `sent`, et répond `ok: true` **sans
+> qu'aucun e-mail ne parte**. Avant le déploiement, un appel rendait 404 : la
+> panne se voyait. Maintenant elle ne se voit plus.
+>
+> Le déploiement seul n'est donc **pas** une amélioration nette. Il ne le devient
+> qu'une fois `RESEND_API_KEY` et `EMAIL_FROM` posées dans les secrets du projet
+> (dashboard Supabase → Edge Functions → Secrets), et une réception réelle
+> confirmée. Le connecteur MCP ne gère pas les secrets ; cette étape demande
+> l'accès au dashboard, donc le compte propriétaire du projet.
+
+Contrôle qui tranche, une fois la clé posée : déclencher **deux fois** la même
+occurrence HITL. Il doit partir **un seul** e-mail, et le second appel doit
+répondre `{ ok: true, deduped: true }`.
+
+### ~~🟠 B-3 · L'état réel de la base n'a jamais été vérifié~~ — ✅ **levé le 2026-08-27**
+
+**La faille est fermée en production.** Les quatre requêtes de
+[`security/verification-p0-2-supabase.md`](security/verification-p0-2-supabase.md)
+ont été exécutées sur `xucmfdggetwxmpquqjvj` :
+
+| Requête | Résultat |
+|---|---|
+| R1 — forme des deux RPC | `CORRIGE` pour les deux |
+| R2 — même motif ailleurs | seulement ces deux fonctions, bornées par `COALESCE` |
+| R3 — policies RLS | aucune comparaison négative |
+| **R4 — attaque réelle** | **`refuse (forbidden)` sur les deux**, transaction annulée |
+
+R4 est celle qui compte : elle ne lit pas le code, elle tente l'action depuis un
+utilisateur non membre et se fait refuser.
+
+> Ce qui bloquait n'était pas un manque de droits, c'était de **chercher au
+> mauvais endroit**. Le compte Supabase du navigateur ne voit qu'une autre
+> organisation ; le connecteur MCP `93ec54b8`, lui, vise bien ce projet. La
+> leçon est la même qu'en B-1 : j'ai constaté trois fois le même refus et j'en ai
+> conclu à une impossibilité, alors que je n'avais essayé qu'une seule voie.
+> **Confirmer par `get_project_url` avant tout `execute_sql`** — un connecteur
+> voisin viserait une autre application.
 
 ### 🟠 B-4 · Écrasement silencieux en écriture concurrente — ✅ **corrigé le 2026-08-22**
 

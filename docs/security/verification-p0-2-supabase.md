@@ -3,9 +3,29 @@
 Requêtes à exécuter dans le **SQL Editor** du dashboard Supabase, projet
 `xucmfdggetwxmpquqjvj`. À faire **avant** toute nouvelle migration.
 
-Le MCP Supabase répond `You do not have permission to perform this action` sur
-`execute_sql` : la vérification ne peut pas être automatisée pour l'instant,
-d'où ce document.
+> ## ✅ Vérification effectuée le 2026-08-27 — la faille est FERMÉE en production
+>
+> **Verdict : R1, R2, R3 et R4 sont tous conformes.** Le détail par requête est
+> consigné dans chaque section ci-dessous. La question ouverte depuis le
+> 2026-08-12 — « la production porte-t-elle vraiment le correctif, ou seulement
+> Git ? » — a désormais une réponse : **oui**, et pas seulement sur la forme du
+> code : R4 a tenté l'attaque et s'est fait refuser.
+>
+> **Ce qui a débloqué la situation** : le connecteur MCP `93ec54b8` cible
+> `xucmfdggetwxmpquqjvj` et fonctionne. Le blocage n'était donc pas un manque de
+> droits en soi — c'était qu'on cherchait au mauvais endroit (compte Supabase du
+> navigateur, qui ne voit qu'une autre organisation). La table de correspondance
+> UUID → ref est la clé ; **toujours confirmer par `get_project_url` avant
+> d'exécuter quoi que ce soit**, un connecteur voisin viserait une autre app.
+>
+> Les requêtes ci-dessous restent valables telles quelles pour les passages
+> suivants — c'est un contrôle à rejouer, pas un événement unique.
+
+Historiquement, le MCP Supabase répondait
+`You do not have permission to perform this action` sur `execute_sql`, d'où la
+rédaction de ce document pour un passage manuel au **SQL Editor**. Les deux
+voies fonctionnent ; le SQL Editor reste le recours si le connecteur MCP n'est
+pas disponible.
 
 Chaque requête rend un **verdict** en clair — rien à interpréter à l'œil nu.
 Toutes sont en lecture seule, **sauf la R4** qui écrit puis annule (voir sa
@@ -51,7 +71,12 @@ migration correspondante.
 
 | Date | `create_workspace_api_key` | `invite_workspace_member` |
 |---|---|---|
-| _à remplir au 1ᵉʳ passage_ | | |
+| 2026-08-27 | `f16c8cbb0ec6e66d1c2d254a9f7ba989` | `36703ae142894c74c4104457686bb2ad` |
+
+**Résultat du 2026-08-27** : deux lignes, toutes deux
+`CORRIGE — comparaison sure au NULL`. Ces deux empreintes sont le témoin de
+référence : si elles changent sans migration correspondante, quelqu'un a modifié
+une fonction de sécurité en dehors du dépôt.
 
 **Si `🚨 FAILLE`** : ne pas rejouer la migration à l'aveugle, appliquer
 seulement `supabase/migrations/20260812122608_fix_workspace_role_of_null_bypass.sql`,
@@ -87,6 +112,9 @@ order by 2 desc, 1;
 **Attendu** : uniquement les deux fonctions de R1, en `✅`. Toute autre ligne est
 une découverte à traiter.
 
+**Résultat du 2026-08-27** : exactement les deux fonctions de R1, toutes deux
+`borne par COALESCE`. Aucune découverte.
+
 Sur la réplique locale, le dépôt compte 8 fonctions `SECURITY DEFINER` et seules
 ces deux-là utilisent une comparaison négative. Si la prod en renvoie
 davantage, c'est qu'elle porte des fonctions absentes de Git → voir R6.
@@ -108,6 +136,8 @@ where schemaname = 'public'
   and (coalesce(qual, '') || coalesce(with_check, '')) ~* '(not\s+in|<>|!=)'
 order by tablename, policyname;
 ```
+
+**Résultat du 2026-08-27 : aucune ligne.** Conforme.
 
 **Attendu : aucune ligne.** Les policies doivent comparer positivement
 (`= any (array[...])`, `= 'owner'`), forme sous laquelle `NULL` donne `NULL`,
@@ -183,6 +213,21 @@ end $$;
 ```
 
 **Attendu** : les deux lignes en `✅ refuse (forbidden)`.
+
+**Résultat du 2026-08-27** — l'attaque a réellement été tentée sur la
+production, et refusée :
+
+```
+===== VERDICT P0-2 =====
+workspace teste          : 31681f0d-a036-431c-963f-b0deed1d24e0
+utilisateur non membre   : 1976f187-4fec-421f-9d48-7a5569525822
+create_workspace_api_key : refuse (forbidden)
+invite_workspace_member  : refuse (forbidden)
+(transaction annulee — aucune cle ni invitation creee)
+```
+
+C'est cette requête qui compte : R1 lit du texte, R4 constate un comportement.
+Un correctif présent mais contourné par un chemin annexe aurait échoué ici.
 
 Tout `🚨 REUSSI` signifie que la faille est **ouverte en production** : la
 corriger avant toute autre chose.
