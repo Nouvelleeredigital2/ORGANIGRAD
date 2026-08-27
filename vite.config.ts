@@ -19,7 +19,8 @@ export default defineConfig({
           if (id.includes('react-zoom-pan-pinch')) return 'vendor-zoom'
           if (id.includes('@supabase')) return 'vendor-supabase'
           if (id.includes('xlsx')) return 'vendor-xlsx'
-          if (id.includes('jspdf') || id.includes('html2canvas')) return 'vendor-pdf'
+          if (id.includes('jspdf')) return 'vendor-jspdf'
+          if (id.includes('html2canvas')) return 'vendor-html2canvas'
           return 'vendor'
         },
       },
