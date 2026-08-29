@@ -10,7 +10,7 @@ import { WorkspaceCtx } from './WorkspaceContext';
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
     const { session } = useSession();
     const userId = session?.user.id ?? null;
-    const { workspaces, activeId, setActive, refresh, loading } = useWorkspace(
+    const { workspaces, activeId, setActive, refresh, loading, error } = useWorkspace(
         userId ?? undefined,
     );
 
@@ -18,7 +18,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
     return (
         <WorkspaceCtx.Provider
-            value={{ userId, workspaces, activeId, activeWorkspace, setActive, refresh, loading }}
+            value={{ userId, workspaces, activeId, activeWorkspace, setActive, refresh, loading, error }}
         >
             {children}
         </WorkspaceCtx.Provider>

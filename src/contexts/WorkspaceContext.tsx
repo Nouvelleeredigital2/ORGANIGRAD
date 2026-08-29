@@ -9,6 +9,8 @@ export interface WorkspaceContextValue {
     setActive: (id: string) => void;
     refresh: () => Promise<WorkspaceWithRole[]>;
     loading: boolean;
+    /** Message d'échec du dernier chargement, ou `null`. Voir useWorkspace. */
+    error: string | null;
 }
 
 // Le composant `WorkspaceProvider` vit dans un fichier séparé (WorkspaceProvider.tsx)
@@ -23,6 +25,7 @@ const DEFAULT_CTX: WorkspaceContextValue = {
     setActive: () => {},
     refresh: async () => [],
     loading: false,
+    error: null,
 };
 
 /**

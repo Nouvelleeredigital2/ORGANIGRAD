@@ -61,6 +61,9 @@ export function MembersView() {
     const [inviteRole, setInviteRole] = useState<WorkspaceRole>('member');
     const [creating, setCreating] = useState(false);
     const [revealed, setRevealed] = useState<{ url: string; email: string } | null>(null);
+    /** `user_id` du membre dont le rôle est en cours de modification — anti
+     * double-clic et retour visuel pendant l'appel. Audit P2/P3. */
+    const [changingRoleFor, setChangingRoleFor] = useState<string | null>(null);
 
     const refresh = useCallback(async () => {
         // Sortie muette auparavant : la vue affichait « Aucun membre » alors
@@ -184,20 +187,33 @@ export function MembersView() {
     };
 
     const handleChangeRole = async (memberId: string, next: WorkspaceRole) => {
-        if (!supabase || !activeId) return;
+        if (!supabase || !activeId || changingRoleFor) return; // anti double-clic — audit P2
+        const cible = members.find((m) => m.user_id === memberId);
+        const nom = cible?.email ?? 'ce membre';
+        // Un changement de rôle est une action de permission, pas un simple
+        // champ de formulaire : elle s'appliquait jusqu'ici instantanément au
+        // `onChange`, sans confirmation ni retour visuel pendant l'appel.
+        // Audit P2.
+        if (!confirm(`Changer le rôle de ${nom} en « ${next} » ?`)) return;
+
+        setChangingRoleFor(memberId);
         setError(null);
-        const { error: err } = await supabase
-            .from('workspace_members')
-            .update({ role: next })
-            .eq('workspace_id', activeId)
-            .eq('user_id', memberId);
-        if (err) {
-            setError(err.message);
-            feedback.error(`Rôle non modifié : ${err.message}`);
-        } else {
-            feedback.success(`Rôle mis à jour : ${next}.`);
+        try {
+            const { error: err } = await supabase
+                .from('workspace_members')
+                .update({ role: next })
+                .eq('workspace_id', activeId)
+                .eq('user_id', memberId);
+            if (err) {
+                setError(err.message);
+                feedback.error(`Rôle non modifié : ${err.message}`);
+            } else {
+                feedback.success(`Rôle mis à jour : ${next}.`);
+            }
+            await refresh();
+        } finally {
+            setChangingRoleFor(null);
         }
-        await refresh();
     };
 
     /**
@@ -420,6 +436,7 @@ export function MembersView() {
                                         {canModify ? (
                                             <Select
                                                 value={m.role}
+                                                disabled={changingRoleFor === m.user_id}
                                                 onChange={(e) =>
                                                     void handleChangeRole(
                                                         m.user_id,

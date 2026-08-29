@@ -1,4 +1,4 @@
-import { useState, useRef, lazy, Suspense } from 'react';
+import { useState, useRef, useEffect, lazy, Suspense } from 'react';
 import { AlertCircle, RefreshCw, MapPin, Settings } from 'lucide-react';
 import { useOrgChartController } from './hooks/useOrgChartController';
 import { SpotlightSearch } from './components/spotlight/SpotlightSearch';
@@ -96,6 +96,8 @@ function AppContent() {
         importCommitError,
         confirmImport,
         cancelImport,
+        isServerBacked,
+        agentsStale,
     } = useOrgChartController();
 
     const { activeWorkspace } = useWorkspaceContext();
@@ -216,12 +218,21 @@ function AppContent() {
             feedback.info("Importez des fiches avant d'exporter.");
             return;
         }
-        const { exportToCsv } = await import('./services/csvService');
-        if (activeView === 'orgchart' && selectedPole) {
-            exportToCsv(selectedPole.agents);
-            return;
+        // Contrairement à l'export PDF (bilan succès/échec complet), cet export
+        // partait sans try/catch : un `import()` dynamique en échec (perte
+        // réseau juste après le chargement) ou une erreur dans exportToCsv
+        // filaient en rejet non géré — aucun message, l'utilisateur croyait le
+        // fichier parti. Audit P2.
+        try {
+            const { exportToCsv } = await import('./services/csvService');
+            if (activeView === 'orgchart' && selectedPole) {
+                exportToCsv(selectedPole.agents);
+            } else {
+                exportToCsv(rawAgents);
+            }
+        } catch (err) {
+            feedback.error(`Export CSV impossible : ${describeError(err)}`);
         }
-        exportToCsv(rawAgents);
     };
 
     return (
@@ -255,6 +266,11 @@ function AppContent() {
                                     focusAgentPole(id);
                                     setHighlightedSearch({ id, path: new Set(path) });
                                 }}
+                                // Le Spotlight de la vue Orchestration a son propre
+                                // raccourci ⌘K (HybridSpotlight) — la topbar reste
+                                // montée sur toutes les vues, donc sans ce garde les
+                                // deux panneaux s'ouvraient en même temps. Audit P2.
+                                disableShortcut={activeView === 'orchestration'}
                             />
                         }
                         handleImportFile={handleImportFile}
@@ -297,6 +313,25 @@ function AppContent() {
                         id="exportable-org-chart"
                         className={`w-full h-full flex flex-col ${isPdfMode ? 'bg-slate-50 overflow-auto' : ''}`}
                     >
+                        {/* `agentsStale` était calculé mais jamais affiché : en mode
+                            connecté, une panne Supabase faisait retomber silencieusement
+                            sur le cache local, présenté comme s'il était à jour — même
+                            défaut que l'orchestration corrigeait déjà avec son propre
+                            bandeau (OrchestrationView). Audit P2. */}
+                        {isServerBacked && agentsStale && (
+                            <div
+                                role="status"
+                                className="mx-4 mt-4 rounded-xl px-4 py-2.5 text-[13px] sm:mx-6 lg:mx-10"
+                                style={{
+                                    background: 'rgba(255,149,0,0.08)',
+                                    color: 'var(--system-orange, #b25e00)',
+                                    boxShadow: 'inset 0 0 0 1px rgba(255,149,0,0.3)',
+                                }}
+                            >
+                                Connexion au serveur impossible — organigramme affiché
+                                potentiellement obsolète (cache local).
+                            </div>
+                        )}
                         <Suspense fallback={<OriginLoader />}>
                         {activeView === 'dashboard' ? (
                             <DashboardView
@@ -479,6 +514,17 @@ function PostAuthGate({ children }: { children: React.ReactNode }) {
 
 function AuthGate({ children }: { children: React.ReactNode }) {
     const { session, loading } = useSession();
+    // Capture le token d'invitation le plus tôt possible — AVANT que
+    // l'utilisateur ne clique « Créer un compte » ou un lien magique.
+    // `readPendingInviteToken` le persiste en localStorage et nettoie l'URL ;
+    // sans cet appel précoce, un invité passant par un de ces deux parcours
+    // perdait son invitation : la redirection post-auth
+    // (`emailRedirectTo: window.location.origin`) revient SANS `?invite=`,
+    // et rien ne l'avait encore écrit en localStorage à ce moment-là.
+    // Idempotent et sans effet si l'URL ne porte pas `?invite=`. Audit P2.
+    useEffect(() => {
+        readPendingInviteToken();
+    }, []);
     // Mode offline / dev sans Supabase : on saute l'auth et le repo bascule en localStorage.
     if (!isSupabaseConfigured) return <>{children}</>;
     if (loading) return <OriginLoader />;

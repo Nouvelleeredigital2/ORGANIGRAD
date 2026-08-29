@@ -149,6 +149,35 @@ describe('OrchestrationView', () => {
     });
 
     /**
+     * Audit P2 : les timers de la simulation locale n'étaient jamais annulés.
+     * « Réinitialiser » pendant une simulation en cours vidait les statuts,
+     * puis les timers restants les remuaient quand même juste après — la
+     * carte repassait « En exécution » alors que l'utilisateur venait de
+     * cliquer Réinitialiser.
+     */
+    it("« Réinitialiser » pendant une simulation empêche les timers restants de remuer le statut", () => {
+        vi.useFakeTimers();
+        try {
+            seed([{ id: 'solo', nom: 'Solo' }]);
+            render(<OrchestrationView rawAgents={[]} />);
+
+            fireEvent.click(screen.getByRole('button', { name: /Lancer la chaîne/i }));
+            // Réinitialisation IMMÉDIATE — avant qu'aucun timer de la
+            // simulation (le premier a un délai de 0 ms) n'ait eu la main.
+            fireEvent.click(screen.getByRole('button', { name: /Réinitialiser/i }));
+
+            // Si les timers n'avaient pas été purgés, ceci ferait passer la
+            // carte en « En exécution » puis « En repos ».
+            act(() => vi.runAllTimers());
+
+            expect(screen.queryByText(/En exécution/i)).toBeNull();
+            expect(screen.getByText(/En repos/i)).toBeInTheDocument();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    /**
      * Risque couvert : une décision humaine perdue. Le panneau se refermait et
      * le motif de rejet était vidé même quand l'appel distant avait échoué.
      */
