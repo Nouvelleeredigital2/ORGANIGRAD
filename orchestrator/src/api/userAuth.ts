@@ -45,7 +45,10 @@ function readVerifiedPayload(payloadB64: string, now: () => number): VerifiedUse
     } catch {
         return null;
     }
-    if (typeof payload.exp === 'number' && payload.exp * 1000 <= now()) return null;
+    // `exp` est OBLIGATOIRE : un jeton forgé/exporté sans cette revendication
+    // (ou avec une valeur non numérique) serait sinon accepté indéfiniment.
+    if (typeof payload.exp !== 'number' || !Number.isFinite(payload.exp)) return null;
+    if (payload.exp * 1000 <= now()) return null;
     if (typeof payload.sub !== 'string' || payload.sub.length === 0) return null;
 
     return {

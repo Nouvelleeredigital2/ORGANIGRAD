@@ -36,13 +36,35 @@ interface PendingValidation {
   actionUrl?: string;
   at?: string;
   workspaceId: string;
+  /** Horodatage d'ingestion — sert au balayage TTL ci-dessous. */
+  receivedAt: number;
 }
 
 const POLL_MS = 3000;
+/**
+ * Une validation jamais décidée restait en mémoire POUR TOUJOURS (aucune TTL,
+ * aucune borne) — fuite mémoire lente sur un process long-vivant. 24 h est
+ * largement au-delà du délai raisonnable de décision humaine ; passé ce délai,
+ * l'entrée est balayée (elle réapparaîtra au prochain poll si l'événement
+ * source est toujours dans les 50 derniers du bus). Audit P2.
+ */
+const MAX_PENDING_AGE_MS = 24 * 60 * 60 * 1000;
 
-export function registerSynapseConsumer(app: FastifyInstance): void {
+export function registerSynapseConsumer(
+  app: FastifyInstance,
+  opts: { now?: () => number; pollMs?: number } = {},
+): void {
   const base = process.env.SYNAPSE_URL?.replace(/\/$/, "");
+  const now = opts.now ?? (() => Date.now());
+  const pollMs = opts.pollMs ?? POLL_MS;
   const pending = new Map<string, PendingValidation>();
+
+  const sweepExpired = (): void => {
+    const cutoff = now() - MAX_PENDING_AGE_MS;
+    for (const [id, v] of pending) {
+      if (v.receivedAt < cutoff) pending.delete(id);
+    }
+  };
 
   app.get("/api/synapse/validations", async (req: FastifyRequest) => ({
     items: [...pending.values()].filter((v) => v.workspaceId === req.workspaceId),
@@ -142,11 +164,13 @@ export function registerSynapseConsumer(app: FastifyInstance): void {
         actionUrl: typeof p.actionUrl === "string" ? p.actionUrl : undefined,
         at: typeof e.createdAt === "string" ? e.createdAt : undefined,
         workspaceId,
+        receivedAt: now(),
       });
     }
   };
 
   const poll = async (): Promise<void> => {
+    sweepExpired();
     try {
       const authHeaders = await synapseAuthHeaders();
       const r = await fetch(`${base}/api/events?limit=50`, { headers: authHeaders });
@@ -159,7 +183,7 @@ export function registerSynapseConsumer(app: FastifyInstance): void {
   };
 
   void poll();
-  const timer = setInterval(() => void poll(), POLL_MS);
+  const timer = setInterval(() => void poll(), pollMs);
   app.addHook("onClose", async () => clearInterval(timer));
   app.log.info(`[synapse-consumer] actif — bus ${base}`);
 }

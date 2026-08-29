@@ -23,10 +23,15 @@ export interface NodeMutationBody {
     parentID?: string | null;
     gradeId: string;
     systemPrompt?: string | null | undefined;
-    skills?: string[];
+    // Même sémantique que les champs sensibles ci-dessous : ABSENT ⇒ conserver
+    // l'existant. Avant ce correctif, `skills` valait toujours `[]` quand omis
+    // (dto.ts ne distinguait pas « absent » de « tableau vide »), donc TOUT PUT
+    // qui ne renvoyait pas `skills` effaçait les compétences existantes — de
+    // même pour `avatarUrl`, toujours ramené à `null` quand omis. Audit P2.
+    skills?: string[] | undefined;
     mcpConfig?: McpConfig | null | undefined;
     notificationChannels?: NotificationChannels | null | undefined;
-    avatarUrl?: string | null;
+    avatarUrl?: string | null | undefined;
 }
 
 const NODE_TYPES = new Set<string>(['HUMAN', 'AGENT_IA', 'SOFTWARE_MCP']);
@@ -76,12 +81,16 @@ export function validateNodeMutation(raw: unknown): NodeMutationBody {
         systemPrompt: 'systemPrompt' in b
             ? (typeof b['systemPrompt'] === 'string' ? b['systemPrompt'] : null)
             : undefined,
-        skills: Array.isArray(b['skills']) ? (b['skills'] as string[]).filter((s) => typeof s === 'string') : [],
+        skills: 'skills' in b
+            ? (Array.isArray(b['skills']) ? (b['skills'] as string[]).filter((s) => typeof s === 'string') : [])
+            : undefined,
         mcpConfig: 'mcpConfig' in b ? (isMcpConfig(b['mcpConfig']) ? b['mcpConfig'] : null) : undefined,
         notificationChannels: 'notificationChannels' in b
             ? (isNotifChannels(b['notificationChannels']) ? b['notificationChannels'] : null)
             : undefined,
-        avatarUrl: typeof b['avatarUrl'] === 'string' ? b['avatarUrl'] : null,
+        avatarUrl: 'avatarUrl' in b
+            ? (typeof b['avatarUrl'] === 'string' ? b['avatarUrl'] : null)
+            : undefined,
     };
 }
 

@@ -71,5 +71,39 @@ describe('useWorkspace', () => {
         await waitFor(() => expect(result.current.loading).toBe(false));
         expect(result.current.workspaces).toEqual([]);
         expect(eqSpy).not.toHaveBeenCalled();
+        expect(result.current.error).toBeNull();
+    });
+});
+
+// Audit P2 : un échec de lecture (RLS, réseau) rendait la liste vide sans
+// AUCUN signal — indiscernable d'un compte sans workspace.
+describe('useWorkspace — échec de chargement', () => {
+    beforeEach(() => {
+        localStorage.clear();
+    });
+
+    it('expose error au lieu de se taire quand la requête échoue', async () => {
+        vi.resetModules();
+        vi.doMock('../lib/supabase', () => {
+            const builder = {
+                select: vi.fn(() => builder),
+                eq: vi.fn(() => builder),
+                // Un PostgrestError réel (supabase-js) EST une instance
+                // d'Error — c'est ce que useWorkspace distingue pour choisir
+                // entre son message et un message générique.
+                order: vi.fn(() =>
+                    Promise.resolve({ data: null, error: new Error('permission denied') }),
+                ),
+            };
+            return {
+                isSupabaseConfigured: true,
+                supabase: { from: vi.fn(() => builder) },
+            };
+        });
+        const { useWorkspace: useWorkspaceFresh } = await import('./useWorkspace');
+        const { result } = renderHook(() => useWorkspaceFresh('user-viewer'));
+        await waitFor(() => expect(result.current.loading).toBe(false));
+        expect(result.current.error).toContain('permission denied');
+        expect(result.current.workspaces).toEqual([]);
     });
 });

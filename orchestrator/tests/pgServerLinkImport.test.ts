@@ -60,11 +60,16 @@ const OWNER_JWT = signJwt({ sub: 'user-owner', exp: FUTURE });
 
 /** Session humaine : `workspace_members.role` = owner (→ scope workspace:admin). */
 function makeSql() {
-    return vi.fn((strings: TemplateStringsArray) => {
+    const fn = vi.fn((strings: TemplateStringsArray) => {
         const q = String(strings.join(' ')).toLowerCase();
         if (q.includes('workspace_members')) return Promise.resolve([{ role: 'owner' }]);
         return Promise.resolve([]);
-    }) as unknown as import('postgres').Sql;
+    });
+    // L'import LINK écrit désormais dans une transaction (atomicité — audit
+    // P2) : le mock doit fournir `.begin()` et exécuter le callback avec le
+    // même faux `sql` en guise de handle de transaction.
+    (fn as unknown as { begin: (cb: (tx: unknown) => unknown) => unknown }).begin = (cb) => cb(fn);
+    return fn as unknown as import('postgres').Sql;
 }
 
 const AGENTS_BODY = {

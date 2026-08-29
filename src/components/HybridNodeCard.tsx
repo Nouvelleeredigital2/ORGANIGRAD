@@ -140,6 +140,7 @@ export default function HybridNodeCard({
 }: HybridNodeCardProps) {
     const archetype = ARCHETYPE[node.type];
     const isLocked = node.status === 'WAITING_HUMAN_APPROVAL';
+    const isExecuting = node.status === 'EXECUTING';
 
     const skills = useMemo(() => node.skills?.slice(0, 4) ?? [], [node.skills]);
     const extraSkills = (node.skills?.length ?? 0) - skills.length;
@@ -354,12 +355,18 @@ export default function HybridNodeCard({
                         <Button
                             tone="blue"
                             size="sm"
+                            // Anti double-clic : `onRun` déclenche un POST asynchrone
+                            // et le statut EXECUTING ne revient qu'après un aller-retour
+                            // réseau (Realtime/SSE) — sans cette garde, chaque clic
+                            // pendant cette fenêtre relançait le même nœud. Audit P2.
+                            disabled={isExecuting}
                             onClick={(e) => {
                                 e.stopPropagation();
+                                if (isExecuting) return;
                                 onRun(node);
                             }}
                         >
-                            <Play size={11} strokeWidth={1.8} /> Run
+                            <Play size={11} strokeWidth={1.8} /> {isExecuting ? 'En cours…' : 'Run'}
                         </Button>
                     )}
 
