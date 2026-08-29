@@ -11,6 +11,7 @@ const GLYPH_ICON: Record<'disc' | 'aperture' | 'chiclet', string> = {
 };
 import { useEscapeClose } from '../hooks/useEscapeClose';
 import { randomUuid } from '../utils/randomId';
+import { useFeedback } from '../feedback/FeedbackContext';
 
 /**
  * Éditeur de HybridNode — création ou édition. Construit sur les primitives
@@ -71,6 +72,7 @@ function EncryptedFieldNotice({ label, onReplace }: { label: string; onReplace: 
 type SecretField = 'systemPrompt' | 'mcpConfig' | 'notificationChannels';
 
 export function NodeEditor({ isOpen, node, availableNodes = [], onClose, onSave }: NodeEditorProps) {
+    const feedback = useFeedback();
     const parentOptions: HybridNode[] = useMemo(() => availableNodes, [availableNodes]);
     const [draft, setDraft] = useState<HybridNode>(() => node ?? emptyNode());
     const [skillsInput, setSkillsInput] = useState<string>((node?.skills ?? []).join(', '));
@@ -139,15 +141,17 @@ export function NodeEditor({ isOpen, node, availableNodes = [], onClose, onSave 
             ...(stillEncrypted ? { encrypted } : { encrypted: undefined }),
         };
         if (!finalNode.nom.trim() || !finalNode.roleTitre.trim()) return;
-        // Validation URLs
+        // Validation URLs — `alert()` natif remplacé par le canal feedback
+        // commun à tout le reste de l'application (bloquant le thread et hors
+        // du design system, contrairement au reste des erreurs). Audit P3.
         const mcpUrl = finalNode.mcpConfig?.serverUrl;
         if (mcpUrl && !isValidUrl(mcpUrl)) {
-            alert('URL du serveur MCP invalide.');
+            feedback.error('URL du serveur MCP invalide.');
             return;
         }
         const slackUrl = finalNode.notificationChannels?.slackWebhook;
         if (slackUrl && !isValidUrl(slackUrl)) {
-            alert('URL du webhook Slack invalide.');
+            feedback.error('URL du webhook Slack invalide.');
             return;
         }
         setIsSaving(true);

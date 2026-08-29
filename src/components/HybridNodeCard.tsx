@@ -163,6 +163,24 @@ export default function HybridNodeCard({
         <article
             data-node-id={node.id}
             onClick={() => onOpen?.(node)}
+            // La carte entière est cliquable mais n'était atteignable ni au
+            // clavier ni par lecteur d'écran (aucun rôle, aucun ordre de
+            // tabulation) — les boutons imbriqués (Run, Contact…) le sont via
+            // leur propre <button>, `e.stopPropagation()` évite le conflit.
+            // Audit P3.
+            role={onOpen ? 'button' : undefined}
+            tabIndex={onOpen ? 0 : undefined}
+            aria-label={onOpen ? `Ouvrir la fiche de ${node.nom}` : undefined}
+            onKeyDown={
+                onOpen
+                    ? (e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              onOpen(node);
+                          }
+                      }
+                    : undefined
+            }
             className={cx(
                 'group relative w-full max-w-xs sm:w-72 cursor-pointer select-none p-5 transition-all duration-300',
                 'bg-white rounded-[28px]',

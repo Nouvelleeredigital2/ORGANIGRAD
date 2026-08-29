@@ -1,9 +1,16 @@
 import postgres, { type Sql, type TransactionSql } from 'postgres';
 import { transition, type NodeStatus } from '../domain/stateMachine.js';
 import type { HybridNode, JsonObject, McpConfig, NotificationChannels, NodeType } from '../domain/types.js';
-import { type GraphStore, type TransitionEvent } from './graphStore.js';
+import { type GraphStore, type TransitionEvent, NodeNotFoundError } from './graphStore.js';
 import type { SecretCipher } from '../security/crypto.js';
 import { decryptText, decryptJson, encryptText, encryptJson } from '../security/nodeSecrets.js';
+
+// `NodeNotFoundError` est réexportée pour ne pas casser les imports existants
+// (`import { NodeNotFoundError } from './pgGraphStore.js'`) — la classe elle-
+// même vit désormais UNIQUEMENT dans graphStore.js. Avant ce correctif, deux
+// classes distinctes portaient le même nom : un `instanceof` sur l'une ne
+// reconnaissait jamais une erreur levée par l'autre store. Audit P3.
+export { NodeNotFoundError };
 
 /**
  * GraphStore Postgres-backed — alternative pour la production.
@@ -21,13 +28,6 @@ import { decryptText, decryptJson, encryptText, encryptJson } from '../security/
  * crée/cache une instance par requête à partir du `workspace_id` résolu de la
  * clé API.
  */
-
-export class NodeNotFoundError extends Error {
-    constructor(public readonly nodeId: string) {
-        super(`Nœud introuvable : ${nodeId}`);
-        this.name = 'NodeNotFoundError';
-    }
-}
 
 type TransitionListener = (evt: TransitionEvent) => void;
 

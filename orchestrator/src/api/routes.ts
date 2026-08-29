@@ -135,5 +135,13 @@ function handleError(reply: import('fastify').FastifyReply, err: unknown) {
             to: err.to,
         });
     }
-    return reply.code(500).send({ error: err instanceof Error ? err.message : String(err) });
+    // Même règle que pgServer.ts : le détail va dans les logs, jamais dans la
+    // réponse. Audit P3.
+    const requestId = reply.request?.id;
+    console.error('[api] erreur interne (mode in-memory)', {
+        requestId,
+        error: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined,
+    });
+    return reply.code(500).send({ error: 'INTERNAL_ERROR', requestId });
 }

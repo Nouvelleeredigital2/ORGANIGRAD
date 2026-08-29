@@ -695,5 +695,15 @@ function handleError(reply: import('fastify').FastifyReply, err: unknown) {
     if (err instanceof IllegalTransitionError) {
         return reply.code(409).send({ error: 'ILLEGAL_TRANSITION', from: err.from, to: err.to });
     }
-    return reply.code(500).send({ error: err instanceof Error ? err.message : String(err) });
+    // Un 500 = `err.message` brut peut divulguer des détails internes (erreurs
+    // SQL du driver `postgres`, chemins de fichiers, etc.) à l'appelant. Le
+    // détail va dans les LOGS serveur, jamais dans la réponse — seul un id de
+    // requête est renvoyé pour permettre de corréler côté support. Audit P3.
+    const requestId = reply.request?.id;
+    console.error('[api] erreur interne', {
+        requestId,
+        error: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined,
+    });
+    return reply.code(500).send({ error: 'INTERNAL_ERROR', requestId });
 }
