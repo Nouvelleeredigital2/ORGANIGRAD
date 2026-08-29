@@ -14,7 +14,10 @@
  *      configuré sur le nœud (`hybrid_nodes.notification_channels.email`) pour ce
  *      workspace — pas d'envoi vers une adresse arbitraire.
  *   4. Expéditeur (`from`) JAMAIS issu de la requête : fixé par EMAIL_FROM.
- *   5. Idempotence : `idempotencyKey` déduplique les envois (retries).
+ *   5. Idempotence : la clé est RÉSERVÉE en base (`status = 'pending'`) AVANT
+ *      l'envoi. C'est la contrainte d'unicité qui arbitre entre deux
+ *      invocations concurrentes, donc une seule envoie. Vérifier avant d'agir
+ *      (SELECT puis envoi) laissait passer deux e-mails.
  *   6. `response.ok` Resend vérifié ; échec réel journalisé.
  *
  * Variables d'environnement :
@@ -101,17 +104,44 @@ Deno.serve(async (req: Request): Promise<Response> => {
         return json({ error: 'recipient not authorized for this node' }, 403);
     }
 
-    // ── 5. Idempotence : ne pas renvoyer deux fois le même e-mail ─────────────
-    const { data: existing } = await supabase
-        .from('notifications')
-        .select('id')
-        .eq('workspace_id', workspaceId)
-        .eq('idempotency_key', idempotencyKey)
-        .maybeSingle();
-    if (existing) return json({ ok: true, deduped: true });
-
-    // ── Rendu + envoi ─────────────────────────────────────────────────────────
+    // ── 5. Idempotence : RÉSERVER la clé AVANT d'envoyer ─────────────────────
+    //
+    // L'ordre est le cœur de la garantie. Auparavant : SELECT, puis envoi, puis
+    // INSERT. Deux invocations concurrentes portant la même clé passaient toutes
+    // deux le SELECT avant que l'une n'atteigne l'INSERT — DEUX e-mails
+    // partaient. L'index unique n'intervenait qu'après l'envoi, et son échec
+    // était avalé par le catch : la seconde invocation répondait `ok: true` en
+    // ayant envoyé un doublon, sans rien journaliser.
+    //
+    // Désormais c'est la base qui arbitre, atomiquement : celui qui obtient la
+    // ligne envoie, l'autre est dédupliqué sans rien envoyer. `pending` est déjà
+    // la valeur par défaut de la colonne et fait partie de sa contrainte CHECK —
+    // aucune migration n'est nécessaire.
     const email = type === 'hitl' ? buildHitlEmail(data as HitlEmailData) : buildFluxEmail(data as FluxEmailData);
+
+    const { data: reservation, error: reserveErr } = await supabase
+        .from('notifications')
+        .insert({
+            workspace_id: workspaceId,
+            node_id: nodeId,
+            channel: 'email',
+            target: to,
+            message: email.text,
+            status: 'pending',
+            idempotency_key: idempotencyKey,
+        })
+        .select('id')
+        .single();
+
+    if (reserveErr) {
+        // 23505 = violation d'unicité sur (workspace_id, idempotency_key) :
+        // un autre envoi pour le même événement est en cours ou déjà fait.
+        if (reserveErr.code === '23505') return json({ ok: true, deduped: true });
+        console.error('[notify-email] réservation impossible');
+        return json({ error: 'reservation failed' }, 500);
+    }
+
+    // ── Envoi ─────────────────────────────────────────────────────────────────
     const resendKey = Deno.env.get('RESEND_API_KEY');
     const fromEmail = Deno.env.get('EMAIL_FROM') ?? 'Organigrad <no-reply@organigrad.app>';
 
@@ -147,21 +177,24 @@ Deno.serve(async (req: Request): Promise<Response> => {
         }
     }
 
-    // ── Audit (service_role, bypass RLS) avec clé d'idempotence ──────────────
+    // ── 6. Clore la réservation ───────────────────────────────────────────────
+    //
+    // En cas d'ÉCHEC, la clé d'idempotence est remise à NULL. L'index unique est
+    // partiel (`where idempotency_key is not null`) : la ligne d'audit du
+    // rattrapage échoué est donc conservée, tout en laissant un retry légitime
+    // repasser. Supprimer la ligne aurait effacé la trace de l'échec.
     try {
-        await supabase.from('notifications').insert({
-            workspace_id: workspaceId,
-            node_id: nodeId,
-            channel: 'email',
-            target: to,
-            message: email.text,
-            status,
-            error: errorMsg,
-            sent_at: sentAt,
-            idempotency_key: idempotencyKey,
-        });
+        await supabase
+            .from('notifications')
+            .update({
+                status,
+                error: errorMsg,
+                sent_at: sentAt,
+                ...(status === 'failed' ? { idempotency_key: null } : {}),
+            })
+            .eq('id', reservation.id);
     } catch {
-        console.error('[notify-email] échec audit DB');
+        console.error('[notify-email] échec cloture audit DB');
     }
 
     return status === 'failed' ? json({ ok: false, error: errorMsg }, 502) : json({ ok: true, sentAt });

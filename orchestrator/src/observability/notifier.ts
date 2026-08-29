@@ -28,7 +28,14 @@ export interface ObservableStore {
 
 export interface NotificationAuditEntry {
     node_id: string | null;
-    channel: 'slack_webhook' | 'email' | 'whatsapp';
+    /**
+     * La contrainte CHECK de `notifications.channel` accepte encore
+     * `'whatsapp'` — le canal a été retiré de l'application le 2026-08-22, mais
+     * la colonne n'a pas été migrée (rien ne l'écrivait, et restreindre une
+     * contrainte en production sans nécessité serait un risque gratuit). Ce
+     * type-ci reflète ce que le notifier ÉCRIT, pas ce que la base tolère.
+     */
+    channel: 'slack_webhook' | 'email';
     target: string;
     message: string;
     status: 'sent' | 'failed';
@@ -385,6 +392,7 @@ export class Notifier {
                         appUrl: this.appUrl,
                         generatedAt: isoNow(),
                     },
+                    occurrence: evt.timestamp,
                 }),
             );
         }
@@ -441,6 +449,7 @@ export class Notifier {
                         error: errorStr,
                         generatedAt: isoNow(),
                     },
+                    occurrence: evt.timestamp,
                 }),
             );
         }
@@ -459,12 +468,37 @@ export class Notifier {
         to: string;
         type: 'hitl' | 'flux';
         data: Record<string, unknown>;
+        /**
+         * Horodatage de la transition (`TransitionEvent.timestamp`) — identifie
+         * l'OCCURRENCE. Indispensable à la clé d'idempotence : voir ci-dessous.
+         */
+        occurrence: number;
     }): Promise<void> {
         if (!this.emailEdgeFunctionUrl) return;
         if (!this.allowOutbound()) return;
 
         // Contrat partagé : clé d'idempotence déterministe (stable entre retries
         // de la MÊME transition) + validation runtime avant tout appel réseau.
+        //
+        // L'OCCURRENCE fait partie de la clé. Sans elle, la clé se réduisait à
+        // `workspace:nœud:type:de->vers` : deux passages successifs par la même
+        // transition produisaient la même clé, et l'Edge Function dédupliquait
+        // le SECOND envoi. Concrètement, un nœud qui repasse en attente de
+        // validation après un refus ne prévenait plus personne — jamais, tant
+        // que la ligne d'audit du premier envoi existait.
+        //
+        // `timestamp` de la transition distingue les occurrences tout en
+        // restant stable sur les retries du même événement, qui est exactement
+        // ce que l'idempotence doit couvrir.
+        //
+        // Limite assumée : deux occurrences de la MÊME transition séparées de
+        // moins d'une milliseconde partagent la clé et la seconde serait
+        // dédupliquée. Les transitions notifiées supposent une action humaine
+        // ou d'agent entre les deux, donc ce cas ne se présente pas en
+        // pratique. Un identifiant de transition porté par l'événement le
+        // lèverait complètement — `node_transitions.id` existe côté Postgres,
+        // mais pas dans le store en mémoire, et `TransitionEvent` ne le
+        // transporte pas aujourd'hui.
         const candidate: EmailNotification = {
             workspaceId: payload.workspaceId ?? '',
             nodeId: payload.nodeId,
@@ -473,7 +507,7 @@ export class Notifier {
             data: payload.data,
             idempotencyKey: `${payload.workspaceId ?? 'ws'}:${payload.nodeId}:${payload.type}:${String(
                 payload.data.fromStatus ?? '',
-            )}->${String(payload.data.toStatus ?? '')}`,
+            )}->${String(payload.data.toStatus ?? '')}@${payload.occurrence}`,
         };
         const parsed = parseEmailNotification(candidate);
         if (!parsed.ok) {

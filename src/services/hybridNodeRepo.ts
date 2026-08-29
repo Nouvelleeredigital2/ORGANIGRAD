@@ -1,4 +1,6 @@
 import { supabase } from '../lib/supabase';
+import { souscrirePartage } from './realtimeShared';
+import { ConflitDeVersionError } from './conflitVersion';
 import type {
     HybridNode,
     NodeType,
@@ -9,6 +11,13 @@ import type {
 import type { Database } from '../types/supabase';
 import { hybridNodeStore } from './hybridNodeStore';
 import type { NodeMutationPayload, OrchestratorClient } from './orchestratorService';
+
+/**
+ * Registre module-level des channels Realtime actifs, un par workspace —
+ * voir la jsdoc de `hybridNodeRepo.subscribe` pour la raison d'être.
+ */
+/** Événement diffusé aux abonnés : DELETE ne porte que l'identifiant. */
+type EvenementNoeud = ['INSERT' | 'UPDATE' | 'DELETE', HybridNode | { id: string }];
 
 /**
  * Préfixe posé par l'orchestrateur sur une valeur chiffrée au repos.
@@ -66,6 +75,8 @@ export function rowToNode(row: Row): HybridNode {
             : ((row.notification_channels as NotificationChannels | null) ?? undefined),
         avatarUrl: row.avatar_url ?? undefined,
         status: row.status as NodeStatus,
+        // Jeton de version pour le verrou optimiste.
+        ...(row.updated_at ? { updatedAt: row.updated_at } : {}),
         ...(encrypted ? { encrypted } : {}),
     };
 }
@@ -168,6 +179,10 @@ export const hybridNodeRepo = {
                 gradeId: node.gradeId,
                 skills: node.skills,
                 avatarUrl: node.avatarUrl ?? null,
+                // Verrou optimiste : le chemin orchestrateur doit être gardé
+                // comme le chemin Supabase direct, sinon configurer un
+                // orchestrateur rouvrirait la brèche sans le dire.
+                ...(node.updatedAt ? { expectedUpdatedAt: node.updatedAt } : {}),
             };
             if (!node.encrypted?.systemPrompt) {
                 payload.systemPrompt = node.systemPrompt ?? null;
@@ -185,6 +200,9 @@ export const hybridNodeRepo = {
             const merged: HybridNode = {
                 ...node,
                 status: dto.status,
+                // Jeton rafraîchi : sans lui, l'enregistrement suivant se
+                // comparerait à une version périmée et se refuserait lui-même.
+                ...(dto.updatedAt ? { updatedAt: dto.updatedAt } : {}),
             };
             hybridNodeStore.save(ctx.workspaceId, [
                 ...hybridNodeStore.list(ctx.workspaceId).filter((n) => n.id !== node.id),
@@ -201,6 +219,23 @@ export const hybridNodeRepo = {
             return node;
         }
         const payload = nodeToInsert(node, ctx.workspaceId);
+
+        // Nœud déjà persisté : mise à jour GARDÉE par le jeton de version.
+        // Zéro ligne ⇒ quelqu'un est passé avant ⇒ refus plutôt qu'écrasement
+        // silencieux (cf. services/conflitVersion.ts).
+        if (node.updatedAt) {
+            const { data, error } = await supabase
+                .from('hybrid_nodes')
+                .update(payload)
+                .eq('id', node.id)
+                .eq('workspace_id', ctx.workspaceId)
+                .eq('updated_at', node.updatedAt)
+                .select('*');
+            if (error) throw error;
+            if (!data || data.length === 0) throw new ConflitDeVersionError(node.id);
+            return rowToNode(data[0]!);
+        }
+
         const { data, error } = await supabase
             .from('hybrid_nodes')
             .upsert(payload, { onConflict: 'id' })
@@ -239,36 +274,44 @@ export const hybridNodeRepo = {
     /**
      * Souscrit aux changements live (Realtime Postgres) pour un workspace.
      * Renvoie une fonction de cleanup.
+     *
+     * Mutualisé par workspace : ActivityLog et OrchestrationView s'abonnent
+     * tous deux au même workspace en parallèle, et `supabase.channel(topic)`
+     * renvoie l'instance EXISTANTE — d'où le crash de toute la SPA constaté en
+     * recette connectée le 2026-08-11. Le registre partagé et le comptage de
+     * références vivent dans `realtimeShared.ts`, avec le détail du piège.
      */
     subscribe(
         ctx: RepoContext,
         handler: (event: 'INSERT' | 'UPDATE' | 'DELETE', node: HybridNode | { id: string }) => void,
     ): () => void {
         if (!supabase || !ctx.workspaceId) return () => {};
-        const channel = supabase
-            .channel(`hybrid_nodes:${ctx.workspaceId}`)
-            .on(
-                'postgres_changes',
-                {
-                    event: '*',
-                    schema: 'public',
-                    table: 'hybrid_nodes',
-                    filter: `workspace_id=eq.${ctx.workspaceId}`,
-                },
-                (payload) => {
-                    if (payload.eventType === 'DELETE') {
-                        handler('DELETE', { id: (payload.old as Row).id });
-                    } else {
-                        handler(
-                            payload.eventType as 'INSERT' | 'UPDATE',
-                            rowToNode(payload.new as Row),
-                        );
-                    }
-                },
-            )
-            .subscribe();
-        return () => {
-            void supabase?.removeChannel(channel);
-        };
+        const workspaceId = ctx.workspaceId;
+
+        return souscrirePartage<EvenementNoeud>(
+            `hybrid_nodes:${workspaceId}`,
+            (channel, emettre) =>
+                channel.on(
+                    'postgres_changes',
+                    {
+                        event: '*',
+                        schema: 'public',
+                        table: 'hybrid_nodes',
+                        // Le filtre par workspace tient l'isolation côté serveur ;
+                        // le topic la tient côté client.
+                        filter: `workspace_id=eq.${workspaceId}`,
+                    },
+                    (payload) =>
+                        emettre(
+                            payload.eventType === 'DELETE'
+                                ? ['DELETE', { id: (payload.old as Row).id }]
+                                : [
+                                      payload.eventType as 'INSERT' | 'UPDATE',
+                                      rowToNode(payload.new as Row),
+                                  ],
+                        ),
+                ),
+            ([event, node]) => handler(event, node),
+        );
     },
 };

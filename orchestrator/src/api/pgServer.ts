@@ -361,8 +361,9 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
             assertScope(req.scopes, SCOPES.graphWrite);
             const body = validateNodeMutation(req.body);
             const store = storeFor(req.workspaceId!, req.apiKeyId, req.userId);
+            const { expectedUpdatedAt, ...champsNoeud } = body;
             const nodePayload = {
-                ...body,
+                ...champsNoeud,
                 parentID: body.parentID ?? null,
                 systemPrompt: body.systemPrompt ?? undefined,
                 mcpConfig: body.mcpConfig ?? undefined,
@@ -370,7 +371,7 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
                 avatarUrl: body.avatarUrl ?? undefined,
                 status: 'IDLE' as const,
             };
-            const node = await store.upsertNode(nodePayload);
+            const node = await store.upsertNode(nodePayload, expectedUpdatedAt);
             recordAudit(req, 'graph:create', node.id, 'success');
             return reply.code(201).send({ node: toPublicNodeDTO(node) });
         } catch (err) {

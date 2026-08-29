@@ -30,9 +30,11 @@ export interface OrchestratorGraphNode {
     skills: string[];
     avatarUrl?: string;
     status: NodeStatus;
+    /** Jeton de version après écriture, à réutiliser au prochain enregistrement. */
+    updatedAt?: string;
     hasSystemPrompt: boolean;
     mcp: { configured: boolean; connectedTo: string[] };
-    notifications: { slack: boolean; email: boolean; whatsapp: boolean };
+    notifications: { slack: boolean; email: boolean };
 }
 
 /** Réponse de POST /api/integrations/link/import. */
@@ -66,6 +68,12 @@ export interface NodeMutationPayload {
     mcpConfig?: McpConfig | null;
     notificationChannels?: NotificationChannels | null;
     avatarUrl?: string | null;
+    /**
+     * Jeton de version tel que chargé (`hybrid_nodes.updated_at`). Fourni ⇒
+     * l'orchestrateur refuse l'écriture si la ligne a changé depuis
+     * (cf. services/conflitVersion.ts).
+     */
+    expectedUpdatedAt?: string;
 }
 
 export interface UserAuth {
@@ -73,6 +81,23 @@ export interface UserAuth {
     token: string;
     /** Workspace courant (envoyé en en-tête X-Workspace-Id). */
     workspaceId: string;
+}
+
+/** Délai au-delà duquel un orchestrateur muet est traité comme injoignable. */
+export const SONDE_TIMEOUT_MS = 8_000;
+
+/**
+ * Signal d'abandon après `ms`. `AbortSignal.timeout` n'existe pas partout
+ * (jsdom ancien, environnements de test) : on retombe alors sur un
+ * `AbortController` + `setTimeout`, plutôt que de perdre le délai maximal.
+ */
+function delaiMaximal(ms: number): AbortSignal {
+    if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+        return AbortSignal.timeout(ms);
+    }
+    const controleur = new AbortController();
+    setTimeout(() => controleur.abort(), ms);
+    return controleur.signal;
 }
 
 export interface OrchestratorClientOptions {
@@ -121,14 +146,25 @@ export class OrchestratorClient {
         return this.authHeaders();
     }
 
-    async isReachable(): Promise<boolean> {
+    /**
+     * Sonde de disponibilité, BORNÉE DANS LE TEMPS.
+     *
+     * Sans délai maximal, un orchestrateur qui accepte la connexion TCP mais ne
+     * répond jamais (service figé, proxy qui retient la requête) laissait cette
+     * promesse en attente indéfiniment. L'interface restait alors bloquée sur
+     * son état d'avant-sonde, sans jamais pouvoir dire « indisponible » : un
+     * serveur muet est plus difficile à diagnostiquer qu'un serveur en erreur.
+     */
+    async isReachable(timeoutMs = SONDE_TIMEOUT_MS): Promise<boolean> {
         try {
             const res = await this.fetchImpl(`${this.baseUrl}/graph`, {
                 method: 'GET',
                 headers: { accept: 'application/json', ...this.authHeaders() },
+                signal: delaiMaximal(timeoutMs),
             });
             return res.ok;
         } catch {
+            // Inclut l'expiration du délai : injoignable en pratique.
             return false;
         }
     }
@@ -279,7 +315,17 @@ export class OrchestratorClient {
      * réutiliserait un ticket déjà consommé) : on gère nous-mêmes la reconnexion
      * en redemandant un ticket frais. Renvoie une fonction de cleanup.
      */
-    subscribe(onEvent: (evt: SseStatusEvent) => void, onError?: (err: Event) => void): () => void {
+    subscribe(
+        onEvent: (evt: SseStatusEvent) => void,
+        onError?: (err: Event) => void,
+        /**
+         * Appelé à CHAQUE ouverture du flux, y compris après une reconnexion.
+         * Sans ce rappel, une interruption laissait l'interface en « dégradé »
+         * définitivement : `onError` faisait basculer l'état, et rien ne le
+         * ramenait jamais — même une fois le flux rétabli.
+         */
+        onOpen?: () => void,
+    ): () => void {
         if (!this.eventSourceImpl) {
             // Environnement sans EventSource (Node sans polyfill) → no-op
             return () => {};
@@ -306,6 +352,9 @@ export class OrchestratorClient {
                     `${this.baseUrl}/events?ticket=${encodeURIComponent(ticket)}`,
                 );
                 es.addEventListener('NODE_STATUS_CHANGED', handler as EventListener);
+                es.addEventListener('open', () => {
+                    if (!closed) onOpen?.();
+                });
                 es.addEventListener('error', (ev) => {
                     onError?.(ev);
                     // Connexion perdue → on ferme et on reconnecte avec un ticket frais.

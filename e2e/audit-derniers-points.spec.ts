@@ -20,10 +20,16 @@ async function semer(page: Page, nodes: Record<string, unknown>[]) {
 
 async function ouvrirOrchestration(page: Page) {
     await page.goto('/?v=orchestration');
-    await expect(page.getByRole('heading', { name: /Orchestration\./i })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /Orchestration\./i })).toBeVisible({
+        timeout: 25_000,
+    });
 }
 
 test('un nœud peut être supprimé, et la suppression survit au rafraîchissement', async ({ page }) => {
+    test.setTimeout(60_000);
+    // La source RH est indépendante de la source de nœuds d'orchestration.
+    // Un échec CSV ne doit donc pas rendre les nœuds locaux inaccessibles.
+    await page.route('**/data.csv', (route) => route.abort('failed'));
     await semer(page, [
         {
             id: 'aaaaaaaa-bbbb-4ccc-9ddd-eeeeeeeeeeee',

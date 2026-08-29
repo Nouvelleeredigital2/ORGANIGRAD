@@ -4,7 +4,6 @@
  * Drivers actifs :
  *  - slackWebhook  → POST JSON au webhook Slack (fetch natif)
  *  - email         → Supabase Edge Function `notify-email`
- *  - whatsappId    → no-op (canal déclaré, aucune API configurée)
  *  - telegram      → no-op (informatif : canal d'écoute d'un bot importé de
  *                    LINK, Organigrad n'émet jamais VERS Telegram)
  */
@@ -60,13 +59,6 @@ const drivers: Record<NotificationChannelKey, NotificationDriver> = {
         );
     },
 
-    /** WhatsApp Business — canal déclaré dans le schéma, aucune API configurée. */
-    whatsappId: (_to, { node, message }) => {
-        console.warn(
-            `[notify:whatsapp] Driver non implémenté — message ignoré : "${message}" (nœud ${node.id})`,
-        );
-    },
-
     /**
      * Telegram — purement informatif (canal d'écoute d'un bot importé de LINK,
      * ex. 'telegram-hermes'). Organigrad n'a aucune API pour émettre vers
@@ -90,8 +82,8 @@ export interface NotificationEventDetail {
     failed: Array<{ key: NotificationChannelKey; reason: string }>;
     /**
      * Canaux configurés qui ne partent pas depuis le navigateur : l'e-mail est
-     * délégué à l'orchestrateur, WhatsApp n'a aucune API branchée. Les compter
-     * comme « notifiés » laisserait croire que l'humain a été prévenu.
+     * délégué à l'orchestrateur, Telegram reste à la charge de LINK/Hermes. Les
+     * compter comme « notifiés » laisserait croire que l'humain a été prévenu.
      */
     deferred: Array<{ key: NotificationChannelKey; reason: string }>;
     timestamp: number;
@@ -100,7 +92,6 @@ export interface NotificationEventDetail {
 /** Canaux qui n'émettent rien depuis la SPA — cf. en-tête de fichier. */
 const NON_EMETTEURS: Partial<Record<NotificationChannelKey, string>> = {
     email: "délégué à l'orchestrateur, rien n'est envoyé depuis le navigateur",
-    whatsappId: 'aucune API configurée',
     telegram: "informatif — canal du bot, LINK/Hermes reste l'émetteur",
 };
 

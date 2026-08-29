@@ -45,7 +45,7 @@ import { WorkspaceProvider } from './contexts/WorkspaceProvider';
 import { isSupabaseConfigured } from './lib/supabase';
 import { useFeedback } from './feedback/FeedbackContext';
 import { FeedbackProvider } from './feedback/FeedbackProvider';
-import { describeError } from './utils/asyncGuard';
+import { messageErreurUtilisateur } from './utils/asyncGuard';
 import { usePermissions } from './auth/usePermissions';
 import { ImportPreviewModal } from './components/import/ImportPreviewModal';
 
@@ -73,7 +73,7 @@ function AppContent() {
         poleStats,
         highlightedSearch,
         setHighlightedSearch,
-        isEditMode,
+        isEditMode: editionDemandee,
         setIsEditMode,
         handleDeleteAgent,
         handleUpdateAgent,
@@ -97,6 +97,16 @@ function AppContent() {
         confirmImport,
         cancelImport,
     } = useOrgChartController();
+
+    // `?edit=1` vient de l'URL : un viewer peut l'écrire à la main. Le mode
+    // édition est donc BORNÉ ICI, une seule fois, plutôt qu'à chaque endroit qui
+    // le consomme — un site oublié suffisait à rouvrir la brèche, et c'est
+    // exactement ce qui s'était produit : l'organigramme était bien borné, mais
+    // ProfileModal et ContactModal recevaient le drapeau brut et proposaient
+    // leur formulaire d'enregistrement à un lecteur seul.
+    // La RLS refusait bien l'écriture ; l'interface promettait quand même une
+    // action qui finissait en 403 muet.
+    const isEditMode = editionDemandee && peutEditerAgents;
 
     const { activeWorkspace } = useWorkspaceContext();
     const activeWorkspaceName = activeWorkspace?.name ?? null;
@@ -146,11 +156,14 @@ function AppContent() {
         // Le succès n'est affiché que si l'export a réellement abouti (ORG-003).
         if (failure) {
             feedback.error(
-                `Export PDF échoué${poleLabel ? ` — ${poleLabel}` : ''} : ${describeError(failure)}. Aucun fichier n'a été téléchargé.`,
+                `Export PDF échoué${poleLabel ? ` — ${poleLabel}` : ''} : ${messageErreurUtilisateur(failure)}. Aucun fichier n'a été téléchargé.`,
             );
             setFilamentState('error');
         } else {
-            feedback.success(`Export PDF terminé${poleLabel ? ` — ${poleLabel}` : ''}.`);
+            feedback.success(
+                `Export PDF terminé${poleLabel ? ` — ${poleLabel}` : ''}.`,
+                { autoDismissMs: 15_000 },
+            );
             setFilamentState('success');
         }
 
@@ -261,9 +274,9 @@ function AppContent() {
                     />
                 }
             >
-                {loading ? (
+                {loading && activeView !== 'orchestration' ? (
                     <OriginLoader />
-                ) : error && activeView !== 'settings' ? (
+                ) : error && activeView !== 'settings' && activeView !== 'orchestration' ? (
                     /* L'écran d'erreur reste une impasse tant qu'il n'offre pas de sortie :
                        on propose donc un nouvel essai et l'accès aux Paramètres, seule vue
                        encore utile sans données (changement de source / import). (ORG-005) */
@@ -328,7 +341,7 @@ function AppContent() {
                                 selectedPole={selectedPole}
                                 orgChartRef={orgChartRef}
                                 isPdfMode={isPdfMode}
-                                isEditMode={isEditMode && peutEditerAgents}
+                                isEditMode={isEditMode}
                                 onToggleEditMode={
                                     peutEditerAgents ? () => setIsEditMode(!isEditMode) : undefined
                                 }

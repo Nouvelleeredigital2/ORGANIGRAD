@@ -4,6 +4,10 @@ WORKDIR /app
 
 # Installer les dépendances (layer cachée si package.json inchangé)
 COPY package*.json ./
+# Le verrou declare une dependance VENDOREE (file:vendor/*.tgz) : sans cette
+# copie AVANT `npm ci`, l'installation echoue en ENOENT. Le contrat partage
+# n'est pas publie sur un registre — piege documente en CLAUDE.md §14.
+COPY vendor/ ./vendor/
 RUN npm ci --ignore-scripts
 
 # Copier les sources et builder

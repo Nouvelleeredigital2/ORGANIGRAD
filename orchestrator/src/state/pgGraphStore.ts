@@ -22,6 +22,19 @@ import { decryptText, decryptJson, encryptText, encryptJson } from '../security/
  * clé API.
  */
 
+/**
+ * Écriture concurrente détectée : la ligne a changé depuis son chargement.
+ *
+ * Politique retenue le 2026-08-22 (verrou optimiste). Auparavant la seconde
+ * écriture écrasait la première sans erreur ni trace.
+ */
+export class ConflitDeVersionError extends Error {
+    constructor(public readonly nodeId: string) {
+        super(`ConflitDeVersion: ${nodeId} a été modifié entre-temps`);
+        this.name = 'ConflitDeVersionError';
+    }
+}
+
 export class NodeNotFoundError extends Error {
     constructor(public readonly nodeId: string) {
         super(`Nœud introuvable : ${nodeId}`);
@@ -45,6 +58,17 @@ interface DbRow {
     notification_channels: unknown;
     avatar_url: string | null;
     status: NodeStatus;
+    /**
+     * Jeton de version, rendu en TEXTE par PostgreSQL.
+     *
+     * Surtout pas la colonne telle quelle : le pilote la convertit en `Date`
+     * JavaScript, qui ne porte que la milliseconde alors que PostgreSQL stocke
+     * la microseconde. Deux écritures dans la même milliseconde produisaient
+     * alors le MÊME jeton — et le verrou laissait passer un écrasement. Le
+     * texte est reconverti en `timestamptz` pour la comparaison, donc le
+     * rendu (fuseau, DateStyle) n'a aucune importance.
+     */
+    updated_at_txt?: string | null;
 }
 
 export class PgGraphStore implements GraphStore {
@@ -74,13 +98,14 @@ export class PgGraphStore implements GraphStore {
             notificationChannels: decryptJson<NotificationChannels>(this.cipher, r.notification_channels) ?? undefined,
             avatarUrl: r.avatar_url ?? undefined,
             status: r.status,
+            updatedAt: r.updated_at_txt ?? undefined,
         };
     }
 
     /** Charge tous les nœuds du workspace. */
     async list(): Promise<readonly HybridNode[]> {
         const rows = await this.sql<DbRow[]>`
-            select * from public.hybrid_nodes
+            select *, updated_at::text as updated_at_txt from public.hybrid_nodes
              where workspace_id = ${this.workspaceId}
              order by created_at asc
         `;
@@ -89,7 +114,7 @@ export class PgGraphStore implements GraphStore {
 
     async get(id: string): Promise<HybridNode> {
         const rows = await this.sql<DbRow[]>`
-            select * from public.hybrid_nodes
+            select *, updated_at::text as updated_at_txt from public.hybrid_nodes
              where workspace_id = ${this.workspaceId} and id = ${id}
              limit 1
         `;
@@ -113,10 +138,64 @@ export class PgGraphStore implements GraphStore {
      * Le `status` est TOUJOURS forcé à IDLE à la création ; la machine à états
      * interdit de créer un nœud dans un état autre que IDLE.
      */
-    async upsertNode(node: HybridNode): Promise<HybridNode> {
+    /**
+     * @param attenduUpdatedAt Jeton de version attendu. Fourni ⇒ la mise à jour
+     *   n'est appliquée que si la ligne n'a pas bougé ; sinon `ConflitDeVersionError`.
+     *   Omis ⇒ comportement d'origine (création, ou import qui assume l'écrasement).
+     */
+    async upsertNode(node: HybridNode, attenduUpdatedAt?: string): Promise<HybridNode> {
         const encPrompt = encryptText(this.cipher, node.systemPrompt ?? null);
         const encMcp = encryptJson(this.cipher, node.mcpConfig ?? null) as JsonObject | null;
         const encNotif = encryptJson(this.cipher, node.notificationChannels ?? null) as JsonObject | null;
+
+        // ── Chemin GARDÉ : le client sait quelle version il a chargé ────────
+        //
+        // Un `UPDATE` explicite, pas un `UPSERT` : si la ligne n'existe plus
+        // (supprimée entre-temps), la recréer en silence serait la même perte
+        // silencieuse sous une autre forme — une résurrection que personne n'a
+        // demandée. On distingue donc « modifié » de « disparu ».
+        //
+        // Comparaison EXACTE, à la microseconde.
+        //
+        // `::text::timestamptz` et non `::timestamptz` : postgres.js applique un
+        // sérialiseur CÔTÉ CLIENT d'après le cast qui suit le paramètre. Avec
+        // `::timestamptz` il convertit la chaîne en `Date` JavaScript — qui ne
+        // porte que la milliseconde — et le jeton perd ses microsecondes en
+        // chemin. Le `::text` intercalé le fait passer en texte, et c'est
+        // PostgreSQL qui le convertit, sans perte. Vérifié : sans ce détour,
+        // toute écriture gardée partait en faux conflit.
+        //
+        // Cela vaut pour les deux provenances de jeton : le rendu texte de
+        // PostgreSQL et la forme ISO de PostgREST sont l'un comme l'autre
+        // convertis exactement, côté serveur.
+        if (attenduUpdatedAt) {
+            const majRows = await this.sql<DbRow[]>`
+                update public.hybrid_nodes set
+                    type                  = ${node.type},
+                    nom                   = ${node.nom},
+                    role_titre            = ${node.roleTitre},
+                    parent_id             = ${node.parentID ?? null},
+                    grade_id              = ${node.gradeId},
+                    system_prompt         = ${encPrompt ?? null},
+                    skills                = ${this.sql.array(node.skills ?? [])},
+                    mcp_config            = ${encMcp != null ? this.sql.json(encMcp) : null},
+                    notification_channels = ${encNotif != null ? this.sql.json(encNotif) : null},
+                    avatar_url            = ${node.avatarUrl ?? null},
+                    updated_at            = now()
+                 where id = ${node.id}
+                   and workspace_id = ${this.workspaceId}
+                   and updated_at = ${attenduUpdatedAt}::text::timestamptz
+                returning *, updated_at::text as updated_at_txt
+            `;
+            const maj = majRows[0];
+            if (maj) return this.rowToNode(maj);
+
+            const [existe] = await this.sql<{ id: string }[]>`
+                select id from public.hybrid_nodes
+                 where id = ${node.id} and workspace_id = ${this.workspaceId}`;
+            if (existe) throw new ConflitDeVersionError(node.id);
+            throw new NodeNotFoundError(node.id);
+        }
 
         const rows = await this.sql<DbRow[]>`
             insert into public.hybrid_nodes
@@ -144,7 +223,7 @@ export class PgGraphStore implements GraphStore {
                 avatar_url            = excluded.avatar_url,
                 updated_at            = now()
             where public.hybrid_nodes.workspace_id = ${this.workspaceId}
-            returning *
+            returning *, updated_at::text as updated_at_txt
         `;
         const row = rows[0];
         if (!row) throw new NodeNotFoundError(node.id);
@@ -170,7 +249,7 @@ export class PgGraphStore implements GraphStore {
     ): Promise<HybridNode> {
         return this.sql.begin(async (tx) => {
             const before = await tx<DbRow[]>`
-                select * from public.hybrid_nodes
+                select *, updated_at::text as updated_at_txt from public.hybrid_nodes
                  where workspace_id = ${this.workspaceId} and id = ${nodeId}
                  for update
             `;

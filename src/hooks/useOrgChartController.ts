@@ -14,7 +14,7 @@ import { agentRepo } from '../services/agentRepo';
 import { useWorkspaceContext } from '../contexts/WorkspaceContext';
 import { usePermissions } from '../auth/usePermissions';
 import { useFeedback } from '../feedback/FeedbackContext';
-import { describeError } from '../utils/asyncGuard';
+import { messageErreurUtilisateur } from '../utils/asyncGuard';
 
 export type AppView = 'orgchart' | 'dashboard' | 'orchestration' | 'members' | 'api-keys' | 'settings';
 
@@ -182,7 +182,7 @@ export const useOrgChartController = () => {
         try {
             base = await preparePersistentSnapshot();
         } catch (err) {
-            return { ok: false, message: `Préparation de la sauvegarde impossible : ${describeError(err)}` };
+            return { ok: false, message: `Préparation de la sauvegarde impossible : ${messageErreurUtilisateur(err)}` };
         }
 
         const cible = resolveInSnapshot(base, id);
@@ -194,11 +194,18 @@ export const useOrgChartController = () => {
         setServerAgents(suivant);
 
         try {
-            await agentRepo.upsert(fusionne, repoCtx);
+            // La fiche renvoyée porte le NOUVEAU jeton de version. Sans cette
+            // reprise, l'enregistrement suivant se comparerait à un jeton
+            // périmé et se refuserait lui-même — un faux conflit contre son
+            // propre écrit (cf. services/conflitVersion.ts).
+            const enregistre = await agentRepo.upsert(fusionne, repoCtx);
+            setServerAgents((precedent) =>
+                precedent.map((a) => (a.id === id ? enregistre : a)),
+            );
             return { ok: true };
         } catch (err) {
             setServerAgents(base);
-            return { ok: false, message: `Modification non enregistrée : ${describeError(err)}` };
+            return { ok: false, message: `Modification non enregistrée : ${messageErreurUtilisateur(err)}` };
         }
     };
 
@@ -221,7 +228,7 @@ export const useOrgChartController = () => {
         try {
             base = await preparePersistentSnapshot();
         } catch (err) {
-            feedback.error(`Suppression non effectuée : ${describeError(err)}`);
+            feedback.error(`Suppression non effectuée : ${messageErreurUtilisateur(err)}`);
             return;
         }
         // L'id « vue » peut être un id client d'avant promotion : on résout la
@@ -245,7 +252,7 @@ export const useOrgChartController = () => {
             feedback.success(`${cible.prenom} ${cible.nom} retiré de l'organigramme.`);
         } catch (err) {
             setServerAgents(base);
-            feedback.error(`Suppression non enregistrée : ${describeError(err)}`);
+            feedback.error(`Suppression non enregistrée : ${messageErreurUtilisateur(err)}`);
         }
     };
 
@@ -271,7 +278,7 @@ export const useOrgChartController = () => {
             setServerAgents([]);
             feedback.success(`${supprimes} fiche(s) supprimée(s).`);
         } catch (err) {
-            feedback.error(`Suppression non effectuée : ${describeError(err)}`);
+            feedback.error(`Suppression non effectuée : ${messageErreurUtilisateur(err)}`);
         }
     };
 
@@ -330,7 +337,7 @@ export const useOrgChartController = () => {
                     '.',
             );
         } catch (err) {
-            setImportCommitError(describeError(err));
+            setImportCommitError(messageErreurUtilisateur(err));
         } finally {
             setIsCommittingImport(false);
         }

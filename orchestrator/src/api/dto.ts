@@ -27,6 +27,13 @@ export interface NodeMutationBody {
     mcpConfig?: McpConfig | null | undefined;
     notificationChannels?: NotificationChannels | null | undefined;
     avatarUrl?: string | null;
+    /**
+     * Jeton de version de la ligne telle que le client l'a chargée
+     * (`hybrid_nodes.updated_at`). Fourni ⇒ verrou optimiste : la mise à jour
+     * est refusée si la ligne a changé depuis. Absent ⇒ création, ou import
+     * qui assume l'écrasement.
+     */
+    expectedUpdatedAt?: string;
 }
 
 const NODE_TYPES = new Set<string>(['HUMAN', 'AGENT_IA', 'SOFTWARE_MCP']);
@@ -77,6 +84,12 @@ export function validateNodeMutation(raw: unknown): NodeMutationBody {
             ? (typeof b['systemPrompt'] === 'string' ? b['systemPrompt'] : null)
             : undefined,
         skills: Array.isArray(b['skills']) ? (b['skills'] as string[]).filter((s) => typeof s === 'string') : [],
+        // Jeton de version : accepté seulement s'il ressemble à une date. Une
+        // valeur farfelue vaut mieux ignorée que passée telle quelle au SQL.
+        ...(typeof b['expectedUpdatedAt'] === 'string'
+            && !Number.isNaN(Date.parse(b['expectedUpdatedAt'] as string))
+            ? { expectedUpdatedAt: b['expectedUpdatedAt'] as string }
+            : {}),
         mcpConfig: 'mcpConfig' in b ? (isMcpConfig(b['mcpConfig']) ? b['mcpConfig'] : null) : undefined,
         notificationChannels: 'notificationChannels' in b
             ? (isNotifChannels(b['notificationChannels']) ? b['notificationChannels'] : null)
@@ -99,8 +112,7 @@ function isNotifChannels(v: unknown): v is NotificationChannels {
     const r = v as Record<string, unknown>;
     return (
         (r['slackWebhook'] == null || typeof r['slackWebhook'] === 'string') &&
-        (r['email'] == null || typeof r['email'] === 'string') &&
-        (r['whatsappId'] == null || typeof r['whatsappId'] === 'string')
+        (r['email'] == null || typeof r['email'] === 'string')
     );
 }
 
@@ -126,10 +138,12 @@ export interface PublicNodeDTO {
     skills: string[];
     avatarUrl?: string;
     status: HybridNode['status'];
+    /** Jeton de version, à renvoyer tel quel au prochain enregistrement. */
+    updatedAt?: string;
     /** Indicateurs non sensibles. */
     hasSystemPrompt: boolean;
     mcp: { configured: boolean; connectedTo: string[] };
-    notifications: { slack: boolean; email: boolean; whatsapp: boolean };
+    notifications: { slack: boolean; email: boolean };
 }
 
 export function toPublicNodeDTO(node: HybridNode): PublicNodeDTO {
@@ -144,6 +158,7 @@ export function toPublicNodeDTO(node: HybridNode): PublicNodeDTO {
         skills: node.skills ?? [],
         avatarUrl: node.avatarUrl,
         status: node.status,
+        ...(node.updatedAt ? { updatedAt: node.updatedAt } : {}),
         hasSystemPrompt: Boolean(node.systemPrompt && node.systemPrompt.length > 0),
         mcp: {
             configured: Boolean(node.mcpConfig?.serverUrl),
@@ -153,7 +168,6 @@ export function toPublicNodeDTO(node: HybridNode): PublicNodeDTO {
         notifications: {
             slack: Boolean(nc?.slackWebhook),
             email: Boolean(nc?.email),
-            whatsapp: Boolean(nc?.whatsappId),
         },
     };
 }

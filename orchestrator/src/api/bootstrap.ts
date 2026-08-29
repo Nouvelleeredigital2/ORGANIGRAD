@@ -17,6 +17,11 @@ import { loadEnv } from '../config/env.js';
 import { createSupabaseJwtVerifier } from './userAuth.js';
 import { pathToFileURL } from 'node:url';
 
+// Adresse d'ecoute. Defaut historique `0.0.0.0` conserve pour ne rien
+// casser ; poser `ORCHESTRATOR_HOST=127.0.0.1` restreint l'orchestrateur a
+// la boucle locale, ce qui suffit puisque Caddy tourne en reseau host.
+const HOTE_ECOUTE = process.env.ORCHESTRATOR_HOST || '0.0.0.0';
+
 export async function startOrchestrator() {
     // Validation centralisée — échoue tôt avec un message clair si config invalide.
     const env = loadEnv();
@@ -64,8 +69,8 @@ export async function startOrchestrator() {
             registerSynapseConsumer(app);
             console.log('[orchestrator] consumer Synapse ACTIF (mode pg)');
         }
-        await app.listen({ port, host: '0.0.0.0' });
-        console.log(`[orchestrator] mode Postgres + API key sur http://0.0.0.0:${port}`);
+        await app.listen({ port, host: HOTE_ECOUTE });
+        console.log(`[orchestrator] mode Postgres + API key sur http://${HOTE_ECOUTE}:${port}`);
         return { app, mode: 'pg' as const };
     }
 
@@ -96,8 +101,8 @@ export async function startOrchestrator() {
     registerSynapseConsumer(app);
     // Proxy vocal (SDK @apps2026/voice-client) — même patron qu'en mode pg.
     registerVoiceGatewayRoutes(app);
-    await app.listen({ port, host: '0.0.0.0' });
-    console.log(`[orchestrator] mode in-memory sur http://0.0.0.0:${port}`);
+    await app.listen({ port, host: HOTE_ECOUTE });
+    console.log(`[orchestrator] mode in-memory sur http://${HOTE_ECOUTE}:${port}`);
     return { app, store, engine, notifier, mode: 'memory' as const };
 }
 

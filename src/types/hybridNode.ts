@@ -25,7 +25,6 @@ export interface McpConfig {
 export interface NotificationChannels {
     slackWebhook?: string;
     email?: string;
-    whatsappId?: string;
     /** Canal Telegram d'un bot importé (ex. 'telegram-hermes' — informatif). */
     telegram?: string;
 }
@@ -62,6 +61,12 @@ export interface HybridNode {
 
     // Spécificité Humain (Gatekeeper) — canaux de notification HITL
     notificationChannels?: NotificationChannels;
+    /**
+     * Jeton de version — `hybrid_nodes.updated_at` tel que chargé. Garde
+     * optimiste à l'enregistrement (cf. services/conflitVersion.ts). Absent
+     * sur un nœud jamais persisté.
+     */
+    updatedAt?: string;
 
     // Visuels Humain
     avatarUrl?: string;

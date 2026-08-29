@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { souscrirePartage } from './realtimeShared';
 import type { Database } from '../types/supabase';
 import type { NodeStatus } from '../types/hybridNode';
 
@@ -73,25 +74,28 @@ export const transitionsRepo = {
         /** Statut réel du canal — le badge « Live » doit en dépendre. */
         onStatus?: (subscribed: boolean) => void,
     ): () => void {
-        if (!supabase) {
-            onStatus?.(false);
-            return () => {};
-        }
-        const channel = supabase
-            .channel(`node_transitions:${workspaceId}`)
-            .on(
-                'postgres_changes',
-                {
-                    event: 'INSERT',
-                    schema: 'public',
-                    table: 'node_transitions',
-                    filter: `workspace_id=eq.${workspaceId}`,
-                },
-                (payload) => onInsert(rowToRecord(payload.new as Row)),
-            )
-            .subscribe((status) => onStatus?.(status === 'SUBSCRIBED'));
-        return () => {
-            void supabase?.removeChannel(channel);
-        };
+        // Passe par le registre partagé (`realtimeShared.ts`), comme
+        // hybrid_nodes. Ce canal n'a aujourd'hui qu'un seul consommateur, donc
+        // le crash « .on() après .subscribe() » ne s'y est jamais manifesté —
+        // mais le motif était identique, et `removeChannel` étant asynchrone,
+        // un démontage suivi d'un remontage rapide suffisait à retomber sur
+        // l'instance déjà souscrite. Un second consommateur aurait, lui,
+        // reproduit le crash à l'identique.
+        return souscrirePartage<TransitionRecord>(
+            `node_transitions:${workspaceId}`,
+            (channel, emettre) =>
+                channel.on(
+                    'postgres_changes',
+                    {
+                        event: 'INSERT',
+                        schema: 'public',
+                        table: 'node_transitions',
+                        filter: `workspace_id=eq.${workspaceId}`,
+                    },
+                    (payload) => emettre(rowToRecord(payload.new as Row)),
+                ),
+            onInsert,
+            onStatus,
+        );
     },
 };
