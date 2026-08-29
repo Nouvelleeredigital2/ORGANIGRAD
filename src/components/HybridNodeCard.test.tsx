@@ -65,6 +65,18 @@ describe('HybridNodeCard', () => {
         expect(onRun).not.toHaveBeenCalled();
     });
 
+    // Audit P3 : la carte entière est cliquable (onOpen) mais n'était
+    // atteignable ni au clavier ni par lecteur d'écran (aucun rôle, aucun
+    // ordre de tabulation).
+    it('ouvre la fiche au clavier (Entrée) — accessibilité', () => {
+        const onOpen = vi.fn();
+        render(<HybridNodeCard node={baseNode} onOpen={onOpen} />);
+        const card = screen.getByRole('button', { name: /Ouvrir la fiche de Alice Martin/i });
+        expect(card).toHaveAttribute('tabIndex', '0');
+        fireEvent.keyDown(card, { key: 'Enter' });
+        expect(onOpen).toHaveBeenCalledWith(baseNode);
+    });
+
     it("verrouille la carte en attente d'approbation humaine", () => {
         const node: HybridNode = {
             ...baseNode,

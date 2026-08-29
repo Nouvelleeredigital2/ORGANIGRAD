@@ -117,21 +117,28 @@ export const OrgChart = forwardRef<OrgChartRef, OrgChartProps>(({
                         {onToggleEditMode && (
                         <div className="pointer-events-none absolute bottom-8 left-1/2 z-50 -translate-x-1/2 print:hidden">
                             <div className="pointer-events-auto flex items-center gap-5 rounded-full border border-white/80 bg-white/88 px-5 py-2.5 text-slate-600 shadow-[0_18px_50px_rgba(148,163,184,0.2)] backdrop-blur-xl">
-                                <div
+                                {/* `<button>` plutôt que `<div onClick>` : seule zone
+                                    cliquable de l'app à ne pas être atteignable au
+                                    clavier / lecteur d'écran avant ce correctif. Audit P3. */}
+                                <button
+                                    type="button"
+                                    aria-pressed={!isEditMode}
                                     className={`flex cursor-pointer items-center gap-2 transition-opacity ${!isEditMode ? 'opacity-100' : 'opacity-40 hover:opacity-100'}`}
                                     onClick={() => isEditMode && onToggleEditMode()}
                                 >
                                     {!isEditMode && <div className="h-2 w-2 rounded-full bg-sky-500"></div>}
                                     <span className="text-[11px] font-extrabold uppercase tracking-[0.24em]">Navigation</span>
-                                </div>
+                                </button>
                                 <div className="h-4 w-px bg-slate-200"></div>
-                                <div
+                                <button
+                                    type="button"
+                                    aria-pressed={isEditMode}
                                     className={`flex cursor-pointer items-center gap-2 transition-opacity ${isEditMode ? 'opacity-100' : 'opacity-40 hover:opacity-100'}`}
                                     onClick={() => !isEditMode && onToggleEditMode()}
                                 >
                                     {isEditMode && <div className="h-2 w-2 rounded-full bg-amber-500"></div>}
                                     <span className={`text-[11px] font-extrabold uppercase tracking-[0.24em] ${isEditMode ? 'text-amber-600' : ''}`}>Edition</span>
-                                </div>
+                                </button>
                             </div>
                         </div>
                         )}

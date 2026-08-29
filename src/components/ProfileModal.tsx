@@ -26,6 +26,12 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose, age
         reader.onload = (ev) => {
             setFormData((prev) => ({ ...prev, avatarUrl: ev.target?.result as string }));
         };
+        // Une lecture qui échoue (fichier corrompu, permission refusée) était
+        // totalement silencieuse — aucun retour, la photo restait simplement
+        // inchangée sans explication. Audit P3.
+        reader.onerror = () => {
+            feedback.error("Lecture de l'image impossible. Réessayez avec un autre fichier.");
+        };
         reader.readAsDataURL(file);
     };
 
@@ -79,24 +85,39 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose, age
             <div className="flex flex-col md:flex-row gap-8">
                 {/* Photo & Basic Info */}
                 <div className="flex flex-col items-center flex-shrink-0">
-                    <div
-                        className="w-32 h-32 rounded-full border-4 border-slate-50 shadow-xl overflow-hidden mb-4 relative group"
-                        onClick={isEditMode ? () => fileInputRef.current?.click() : undefined}
-                        style={isEditMode ? { cursor: 'pointer' } : undefined}
-                    >
-                        {(isEditMode ? formData.avatarUrl : agent.avatarUrl) ? (
-                            <img src={isEditMode ? (formData.avatarUrl as string) : agent.avatarUrl} alt={agent.nom} className="w-full h-full object-cover" />
-                        ) : (
-                            <div className="w-full h-full bg-slate-100 flex items-center justify-center text-slate-300">
-                                <User className="w-16 h-16" />
-                            </div>
-                        )}
-                        {isEditMode && (
+                    {/* <button> plutôt que <div onClick> uniquement en mode
+                        édition (lecture seule = pas de zone interactive) —
+                        cette zone n'était atteignable ni au clavier ni par
+                        lecteur d'écran. Audit P3. */}
+                    {isEditMode ? (
+                        <button
+                            type="button"
+                            aria-label="Changer la photo de l'agent"
+                            className="w-32 h-32 rounded-full border-4 border-slate-50 shadow-xl overflow-hidden mb-4 relative group cursor-pointer"
+                            onClick={() => fileInputRef.current?.click()}
+                        >
+                            {formData.avatarUrl ? (
+                                <img src={formData.avatarUrl as string} alt={agent.nom} className="w-full h-full object-cover" />
+                            ) : (
+                                <div className="w-full h-full bg-slate-100 flex items-center justify-center text-slate-300">
+                                    <User className="w-16 h-16" />
+                                </div>
+                            )}
                             <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                                 <p className="text-[8px] text-white font-black uppercase">Changer</p>
                             </div>
-                        )}
-                    </div>
+                        </button>
+                    ) : (
+                        <div className="w-32 h-32 rounded-full border-4 border-slate-50 shadow-xl overflow-hidden mb-4 relative">
+                            {agent.avatarUrl ? (
+                                <img src={agent.avatarUrl} alt={agent.nom} className="w-full h-full object-cover" />
+                            ) : (
+                                <div className="w-full h-full bg-slate-100 flex items-center justify-center text-slate-300">
+                                    <User className="w-16 h-16" />
+                                </div>
+                            )}
+                        </div>
+                    )}
                     {isEditMode && (
                         <input
                             ref={fileInputRef}
