@@ -1,5 +1,6 @@
 import type { Sql } from 'postgres';
 import type { SecretCipher } from '../security/crypto.js';
+import type { HumanGateNotifier } from '../synapse/producer.js';
 import { PgGraphStore } from '../state/pgGraphStore.js';
 import { OrchestrationEngine } from '../orchestration/engine.js';
 import { McpClient } from './mcpClient.js';
@@ -137,6 +138,13 @@ export interface McpDispatchContext {
     sql: Sql;
     workspaceId: string;
     apiKeyId?: string;
+    /**
+     * Id de l'utilisateur authentifié (session JWT), si la requête /mcp est
+     * portée par une session humaine plutôt qu'une clé API. Sans lui, le
+     * journal d'audit (`node_transitions.actor_*`) attribuait TOUTE action
+     * MCP à une clé API — y compris les approbations humaines. Audit P2.
+     */
+    userId?: string;
     scopes?: string[];
     mcpClient?: McpClient;
     /**
@@ -146,6 +154,13 @@ export interface McpDispatchContext {
      * (mcpConfig.serverUrl indisponible, systemPrompt envoyé chiffré).
      */
     cipher?: SecretCipher | null;
+    /**
+     * Notifier de bus (APPS-2026) — le MÊME que celui câblé sur /api/*. Sans
+     * lui, un `run_flow` déclenché via /mcp n'émettait jamais
+     * `validation.requested` quand il atteignait un nœud HUMAN, contrairement
+     * au même flux exécuté via REST. Audit P2.
+     */
+    synapseProducer?: HumanGateNotifier;
 }
 
 export async function dispatchMcpRequest(
@@ -214,17 +229,14 @@ async function callTool(
     args: Record<string, unknown>,
     ctx: McpDispatchContext,
 ): Promise<unknown> {
-    const store = new PgGraphStore(
-        ctx.sql,
-        ctx.workspaceId,
-        {
-            kind: 'api_key',
-            id: ctx.apiKeyId,
-        },
-        ctx.cipher ?? null,
-    );
+    // Acteur RÉEL pour le journal des transitions — même règle que storeFor()
+    // côté REST (pgServer.ts) : session utilisateur si présente, sinon clé API.
+    const actor = ctx.userId
+        ? ({ kind: 'user', id: ctx.userId } as const)
+        : ({ kind: 'api_key', id: ctx.apiKeyId } as const);
+    const store = new PgGraphStore(ctx.sql, ctx.workspaceId, actor, ctx.cipher ?? null);
     const mcp = ctx.mcpClient ?? new McpClient({ timeoutMs: 30_000 });
-    const engine = new OrchestrationEngine(store, mcp);
+    const engine = new OrchestrationEngine(store, mcp, ctx.synapseProducer);
 
     switch (name) {
         case 'list_nodes': {

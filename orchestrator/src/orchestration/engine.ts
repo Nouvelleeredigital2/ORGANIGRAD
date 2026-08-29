@@ -92,7 +92,12 @@ export class OrchestrationEngine {
 
             if (!next) {
                 // Plus rien en aval → retour à IDLE (fin de flux)
-                await this.store.applyTransition(current.id, 'WAITING_HUMAN_APPROVAL');
+                // `internal: true` : ce passage par WAITING_HUMAN_APPROVAL n'est
+                // PAS une vraie porte HITL (aucun humain n'est réellement en
+                // attente, le nœud repart en IDLE dans la foulée) — sans ce
+                // marqueur, le Notifier envoyait un ping « Validation requise »
+                // erroné à chaque fin de nœud IA/MCP. Audit P2.
+                await this.store.applyTransition(current.id, 'WAITING_HUMAN_APPROVAL', { internal: true });
                 // Auto-approve serait illégitime — un flux sans humain final passe par IDLE
                 // mais WAITING_HUMAN_APPROVAL → IDLE est légal seulement via approve().
                 // On modélise : pas d'humain en aval → on remet en IDLE directement.
@@ -101,8 +106,9 @@ export class OrchestrationEngine {
             }
 
             // Le nœud courant a terminé son rôle : il repasse en IDLE puis on
-            // chaîne vers l'aval (qu'il soit humain ou agent/logiciel).
-            await this.store.applyTransition(current.id, 'WAITING_HUMAN_APPROVAL');
+            // chaîne vers l'aval (qu'il soit humain ou agent/logiciel). Même
+            // hop interne que ci-dessus — pas une vraie attente humaine.
+            await this.store.applyTransition(current.id, 'WAITING_HUMAN_APPROVAL', { internal: true });
             await this.store.applyTransition(current.id, 'IDLE');
 
             current = next;
@@ -131,7 +137,8 @@ export class OrchestrationEngine {
         if (!result.ok) {
             await this.store.applyTransition(nodeId, 'ERROR', { error: result.error });
         } else {
-            await this.store.applyTransition(nodeId, 'WAITING_HUMAN_APPROVAL');
+            // Même hop interne que dans runFlow() : pas une vraie porte HITL.
+            await this.store.applyTransition(nodeId, 'WAITING_HUMAN_APPROVAL', { internal: true });
             await this.store.applyTransition(nodeId, 'IDLE');
         }
         return result;

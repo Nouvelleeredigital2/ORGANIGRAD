@@ -47,4 +47,12 @@ describe('verifySupabaseJwt', () => {
         expect(verifySupabaseJwt('pas.un.jwt.valide', SECRET)).toBeNull();
         expect(verifySupabaseJwt('xxx', SECRET)).toBeNull();
     });
+
+    it('rejette un token SANS exp (accepté indéfiniment sinon) — audit P2', () => {
+        expect(verifySupabaseJwt(sign({ sub: 'u' }), SECRET)).toBeNull();
+    });
+
+    it('rejette un token avec exp non numérique', () => {
+        expect(verifySupabaseJwt(sign({ sub: 'u', exp: 'jamais' }), SECRET)).toBeNull();
+    });
 });

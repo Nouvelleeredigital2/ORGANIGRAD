@@ -1,4 +1,4 @@
-import postgres, { type Sql } from 'postgres';
+import postgres, { type Sql, type TransactionSql } from 'postgres';
 import { transition, type NodeStatus } from '../domain/stateMachine.js';
 import type { HybridNode, JsonObject, McpConfig, NotificationChannels, NodeType } from '../domain/types.js';
 import { type GraphStore, type TransitionEvent } from './graphStore.js';
@@ -51,7 +51,9 @@ export class PgGraphStore implements GraphStore {
     private listeners = new Set<TransitionListener>();
 
     constructor(
-        private readonly sql: Sql,
+        // Accepte aussi un handle de transaction (`TransactionSql`) — utilisé
+        // par l'import LINK pour que tout le lot s'écrive atomiquement.
+        private readonly sql: Sql | TransactionSql,
         private readonly workspaceId: string,
         private readonly actor: { kind: 'user' | 'api_key' | 'orchestrator'; id?: string } = {
             kind: 'orchestrator',
@@ -160,6 +162,23 @@ export class PgGraphStore implements GraphStore {
     }
 
     /**
+     * Démarre une transaction, ou un savepoint si `this.sql` est déjà un
+     * handle de transaction (import LINK) — `TransactionSql` n'a pas de
+     * `.begin()`, seulement `.savepoint()`, qui a la sémantique correcte
+     * pour une transaction imbriquée.
+     */
+    private beginTx<T>(cb: (tx: TransactionSql) => Promise<T>): Promise<T> {
+        // `postgres` type ses helpers de transaction via `UnwrapPromiseArray<T>`
+        // (pensé pour un tableau de requêtes) : sans rapport avec notre usage
+        // (un seul callback renvoyant T). Le cast est local et sans risque —
+        // T n'est jamais lui-même un tableau de promesses ici.
+        if ('begin' in this.sql) {
+            return (this.sql as Sql).begin(cb) as Promise<T>;
+        }
+        return (this.sql as TransactionSql).savepoint(cb) as Promise<T>;
+    }
+
+    /**
      * Mute le statut d'un nœud après validation par la machine à états.
      * Transaction : UPDATE + INSERT transition en un coup.
      */
@@ -168,7 +187,7 @@ export class PgGraphStore implements GraphStore {
         to: NodeStatus,
         payload?: JsonObject,
     ): Promise<HybridNode> {
-        return this.sql.begin(async (tx) => {
+        return this.beginTx(async (tx) => {
             const before = await tx<DbRow[]>`
                 select * from public.hybrid_nodes
                  where workspace_id = ${this.workspaceId} and id = ${nodeId}
