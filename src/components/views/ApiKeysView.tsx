@@ -8,6 +8,7 @@ import { usePermissions } from '../../auth/usePermissions';
 import { useFeedback } from '../../feedback/FeedbackContext';
 import { useCopyToClipboard } from '../../hooks/useCopyToClipboard';
 import { canLoadApiKeys, mayReplaceUncopiedKey } from './adminGuards';
+import { describeWorkspaceRpcError } from '../../utils/describeAuthError';
 
 /**
  * ApiKeysView — gestion des clés API par workspace.
@@ -69,7 +70,7 @@ export function ApiKeysView() {
             .select('id, name, key_prefix, created_at, last_used_at, revoked_at')
             .eq('workspace_id', activeId)
             .order('created_at', { ascending: false });
-        if (err) setError(err.message);
+        if (err) setError(describeWorkspaceRpcError(err.message));
         else setKeys(data ?? []);
         setLoading(false);
     }, [activeId, isAdmin]);
@@ -107,7 +108,7 @@ export function ApiKeysView() {
         });
         setCreating(false);
         if (err) {
-            setError(err.message);
+            setError(describeWorkspaceRpcError(err.message));
             return;
         }
         const row = Array.isArray(data) ? data[0] : data;
@@ -135,8 +136,9 @@ export function ApiKeysView() {
             .update({ revoked_at: new Date().toISOString() })
             .eq('id', id);
         if (err) {
-            setError(err.message);
-            feedback.error(`Révocation échouée : ${err.message}`);
+            const msg = describeWorkspaceRpcError(err.message);
+            setError(msg);
+            feedback.error(`Révocation échouée : ${msg}`);
         } else {
             feedback.success('Clé révoquée.');
         }

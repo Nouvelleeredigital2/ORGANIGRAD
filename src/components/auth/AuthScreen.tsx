@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { Button, FormField, Input, Surface } from '../../design/ui';
+import { describeSupabaseAuthError } from '../../utils/describeAuthError';
 
 /**
  * Écran d'authentification — email + mot de passe + magic link.
@@ -40,7 +41,9 @@ export function AuthScreen() {
                 setInfo('Lien de connexion envoyé. Ouvre le mail pour finaliser.');
             }
         } catch (err) {
-            setError(err instanceof Error ? err.message : String(err));
+            // Audit — amélioration #7 : les messages Supabase Auth arrivaient
+            // en anglais brut, incompréhensibles pour un non-technique.
+            setError(describeSupabaseAuthError(err instanceof Error ? err.message : String(err)));
         } finally {
             setLoading(false);
         }
