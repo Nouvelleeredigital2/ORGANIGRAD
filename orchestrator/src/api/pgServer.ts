@@ -205,6 +205,7 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
                         apiKeyId: req.apiKeyId,
                         scopes: req.scopes,
                         mcpClient: mcp,
+                        cipher: getCipher(),
                     },
                 ),
             ),

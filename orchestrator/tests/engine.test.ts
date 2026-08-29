@@ -163,4 +163,70 @@ describe('OrchestrationEngine', () => {
         const { engine } = makeEngine();
         expect(await engine.resumeFromChildOf('human')).toBeNull();
     });
+
+    it('runFlow() détecte un cycle et interrompt le flux au lieu de boucler', async () => {
+        // Cycle A→B→A : rien ne l'empêche à l'écriture (dto/migrations ne
+        // contrôlent que le workspace du parent), le moteur doit donc se
+        // protéger lui-même — audit 2026-08-29, P1.
+        const store = new InMemoryGraphStore();
+        store.load([
+            {
+                id: 'a',
+                type: 'AGENT_IA',
+                nom: 'A',
+                roleTitre: 'a',
+                parentID: 'b',
+                gradeId: 'Expert',
+                mcpConfig: { serverUrl: 'mcp://a.local', connectedTo: [] },
+                status: 'IDLE',
+            },
+            {
+                id: 'b',
+                type: 'SOFTWARE_MCP',
+                nom: 'B',
+                roleTitre: 'b',
+                parentID: 'a',
+                gradeId: 'Support',
+                mcpConfig: { serverUrl: 'mcp://b.local', connectedTo: [] },
+                status: 'IDLE',
+            },
+        ]);
+        const mcpClient = {
+            runNode: vi.fn().mockResolvedValue({ ok: true, output: null }),
+        };
+        const engine = new OrchestrationEngine(store, mcpClient);
+
+        const r = await engine.runFlow('a');
+
+        expect(r.ok).toBe(false);
+        expect(r.error).toMatch(/cycle/i);
+        // Chaque nœud n'a été exécuté qu'une seule fois — pas de boucle.
+        expect(mcpClient.runNode).toHaveBeenCalledTimes(2);
+    });
+
+    it("runFlow() détecte l'auto-parent (nœud son propre amont)", async () => {
+        const store = new InMemoryGraphStore();
+        store.load([
+            {
+                id: 'self',
+                type: 'AGENT_IA',
+                nom: 'Self',
+                roleTitre: 's',
+                parentID: 'self',
+                gradeId: 'Expert',
+                mcpConfig: { serverUrl: 'mcp://self.local', connectedTo: [] },
+                status: 'IDLE',
+            },
+        ]);
+        const mcpClient = {
+            runNode: vi.fn().mockResolvedValue({ ok: true, output: null }),
+        };
+        const engine = new OrchestrationEngine(store, mcpClient);
+
+        const r = await engine.runFlow('self');
+
+        expect(r.ok).toBe(false);
+        expect(r.error).toMatch(/cycle/i);
+        expect(mcpClient.runNode).toHaveBeenCalledTimes(1);
+    });
 });

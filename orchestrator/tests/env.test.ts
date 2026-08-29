@@ -2,10 +2,16 @@ import { describe, it, expect } from 'vitest';
 import { loadEnv, EnvValidationError } from '../src/config/env.js';
 
 describe('loadEnv (validation des variables d\'environnement)', () => {
-    it('mode memory sans SUPABASE_DB_URL', () => {
-        const env = loadEnv({});
+    it('mode memory sans SUPABASE_DB_URL — uniquement sur opt-in explicite', () => {
+        const env = loadEnv({ ORCHESTRATOR_ALLOW_MEMORY: '1' });
         expect(env.mode).toBe('memory');
         expect(env.port).toBe(3001);
+    });
+
+    it('refuse le mode memory implicite (SUPABASE_DB_URL absente sans opt-in)', () => {
+        // Le mode in-memory n'a aucune auth : il ne doit jamais être atteint
+        // par l'absence accidentelle d'une variable en production.
+        expect(() => loadEnv({})).toThrow(/ORCHESTRATOR_ALLOW_MEMORY/);
     });
 
     it('mode pg avec une connection string postgres valide', () => {
@@ -36,6 +42,7 @@ describe('loadEnv (validation des variables d\'environnement)', () => {
         ).toThrow(/SERVICE_ROLE/);
         expect(
             loadEnv({
+                ORCHESTRATOR_ALLOW_MEMORY: '1',
                 EMAIL_EDGE_FUNCTION_URL: 'https://x.functions.supabase.co/notify-email',
                 SUPABASE_SERVICE_ROLE_KEY: 'k',
             }).emailEdgeFunctionUrl,
@@ -43,12 +50,15 @@ describe('loadEnv (validation des variables d\'environnement)', () => {
     });
 
     it('parse CORS_ALLOWED_ORIGINS en liste', () => {
-        const env = loadEnv({ CORS_ALLOWED_ORIGINS: 'https://a.com, https://b.com ,' });
+        const env = loadEnv({
+            ORCHESTRATOR_ALLOW_MEMORY: '1',
+            CORS_ALLOWED_ORIGINS: 'https://a.com, https://b.com ,',
+        });
         expect(env.corsAllowedOrigins).toEqual(['https://a.com', 'https://b.com']);
     });
 
     it('LINK_BASE_URL/TOKEN absents : pont désactivé, pas d\'erreur', () => {
-        const env = loadEnv({});
+        const env = loadEnv({ ORCHESTRATOR_ALLOW_MEMORY: '1' });
         expect(env.linkBaseUrl).toBeUndefined();
         expect(env.linkBridgeToken).toBeUndefined();
     });
@@ -63,6 +73,7 @@ describe('loadEnv (validation des variables d\'environnement)', () => {
 
     it('accepte LINK_BASE_URL + LINK_BRIDGE_TOKEN valides', () => {
         const env = loadEnv({
+            ORCHESTRATOR_ALLOW_MEMORY: '1',
             LINK_BASE_URL: 'https://link.nouvelleeredigital.fr',
             LINK_BRIDGE_TOKEN: 't',
         });
