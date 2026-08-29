@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { Button, Surface } from '../../design/ui';
 import { clearPendingInviteToken } from './inviteToken';
+import { describeWorkspaceRpcError } from '../../utils/describeAuthError';
 
 /**
  * AcceptInvitation — écran intercepteur quand l'URL contient `?invite=token`.
@@ -41,7 +42,7 @@ export function AcceptInvitation({ token, onAccepted, onSkip }: AcceptInvitation
             .then(({ data, error: err }) => {
                 if (!active) return;
                 if (err) {
-                    setError(err.message);
+                    setError(describeWorkspaceRpcError(err.message));
                     return;
                 }
                 const ws = (data as { workspaces?: { name?: string } } | null)?.workspaces;
@@ -61,7 +62,9 @@ export function AcceptInvitation({ token, onAccepted, onSkip }: AcceptInvitation
         });
         setLoading(false);
         if (err) {
-            setError(err.message);
+            // Audit — amélioration #7 : la RPC renvoyait des codes bruts
+            // (« email_mismatch », « invitation_not_found_or_expired »…).
+            setError(describeWorkspaceRpcError(err.message));
             return;
         }
         const row = Array.isArray(data) ? data[0] : data;

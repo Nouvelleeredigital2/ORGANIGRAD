@@ -10,6 +10,7 @@ import { usePermissions } from '../../auth/usePermissions';
 import { useFeedback } from '../../feedback/FeedbackContext';
 import { useCopyToClipboard } from '../../hooks/useCopyToClipboard';
 import { canAdminManageMember } from './adminGuards';
+import { describeWorkspaceRpcError } from '../../utils/describeAuthError';
 
 /**
  * MembersView — gestion des membres et invitations d'un workspace.
@@ -149,7 +150,10 @@ export function MembersView() {
         });
         setCreating(false);
         if (err) {
-            setError(err.message);
+            // Audit — amélioration #7 : messages RPC bruts (ex.
+            // « invitation_already_pending ») incompréhensibles pour un
+            // administrateur non technique.
+            setError(describeWorkspaceRpcError(err.message));
             return;
         }
         const row = Array.isArray(data) ? data[0] : data;
@@ -178,8 +182,9 @@ export function MembersView() {
             .update({ revoked_at: new Date().toISOString() })
             .eq('id', id);
         if (err) {
-            setError(err.message);
-            feedback.error(`Révocation échouée : ${err.message}`);
+            const msg = describeWorkspaceRpcError(err.message);
+            setError(msg);
+            feedback.error(`Révocation échouée : ${msg}`);
         } else {
             feedback.success('Invitation révoquée.');
         }
@@ -205,8 +210,9 @@ export function MembersView() {
                 .eq('workspace_id', activeId)
                 .eq('user_id', memberId);
             if (err) {
-                setError(err.message);
-                feedback.error(`Rôle non modifié : ${err.message}`);
+                const msg = describeWorkspaceRpcError(err.message);
+                setError(msg);
+                feedback.error(`Rôle non modifié : ${msg}`);
             } else {
                 feedback.success(`Rôle mis à jour : ${next}.`);
             }
@@ -237,10 +243,9 @@ export function MembersView() {
             .eq('user_id', memberId);
 
         if (err) {
-            setError(err.message);
-            feedback.error(
-                self ? `Départ impossible : ${err.message}` : `Retrait impossible : ${err.message}`,
-            );
+            const msg = describeWorkspaceRpcError(err.message);
+            setError(msg);
+            feedback.error(self ? `Départ impossible : ${msg}` : `Retrait impossible : ${msg}`);
             return;
         }
 
