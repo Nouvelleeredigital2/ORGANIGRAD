@@ -58,6 +58,15 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): OrchestratorEn
     const dbUrl = source.SUPABASE_DB_URL?.trim() || undefined;
     const mode: OrchestratorMode = dbUrl ? 'pg' : 'memory';
 
+    // Le mode in-memory n'a AUCUNE authentification et écoute 0.0.0.0 : il ne
+    // doit jamais être sélectionné par l'absence accidentelle d'une variable
+    // (déploiement où SUPABASE_DB_URL a sauté). Opt-in explicite obligatoire.
+    if (mode === 'memory' && source.ORCHESTRATOR_ALLOW_MEMORY?.trim() !== '1') {
+        issues.push(
+            'SUPABASE_DB_URL est absente. Pour démarrer VOLONTAIREMENT le mode in-memory (dev/test, SANS authentification), poser ORCHESTRATOR_ALLOW_MEMORY=1',
+        );
+    }
+
     // PORT
     const portRaw = source.PORT?.trim();
     const port = portRaw ? Number(portRaw) : 3001;

@@ -1,4 +1,5 @@
 import type { Sql } from 'postgres';
+import type { SecretCipher } from '../security/crypto.js';
 import { PgGraphStore } from '../state/pgGraphStore.js';
 import { OrchestrationEngine } from '../orchestration/engine.js';
 import { McpClient } from './mcpClient.js';
@@ -138,6 +139,13 @@ export interface McpDispatchContext {
     apiKeyId?: string;
     scopes?: string[];
     mcpClient?: McpClient;
+    /**
+     * Cipher de chiffrement au repos — le MÊME que celui des routes REST.
+     * Sans lui, un déploiement avec INTEGRATION_ENCRYPTION_KEY rendait tout le
+     * chemin /mcp inopérant : les secrets restaient chiffrés à la lecture
+     * (mcpConfig.serverUrl indisponible, systemPrompt envoyé chiffré).
+     */
+    cipher?: SecretCipher | null;
 }
 
 export async function dispatchMcpRequest(
@@ -206,10 +214,15 @@ async function callTool(
     args: Record<string, unknown>,
     ctx: McpDispatchContext,
 ): Promise<unknown> {
-    const store = new PgGraphStore(ctx.sql, ctx.workspaceId, {
-        kind: 'api_key',
-        id: ctx.apiKeyId,
-    });
+    const store = new PgGraphStore(
+        ctx.sql,
+        ctx.workspaceId,
+        {
+            kind: 'api_key',
+            id: ctx.apiKeyId,
+        },
+        ctx.cipher ?? null,
+    );
     const mcp = ctx.mcpClient ?? new McpClient({ timeoutMs: 30_000 });
     const engine = new OrchestrationEngine(store, mcp);
 

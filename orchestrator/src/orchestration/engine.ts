@@ -51,8 +51,21 @@ export class OrchestrationEngine {
      */
     async runFlow(rootId: string): Promise<RunFlowResult> {
         let current: HybridNode | null = await this.store.get(rootId);
+        // Garde anti-cycle : `findDownstream` suit `parentID` sans autre
+        // contrainte, et rien n'empêche un graphe A→B→A ni un auto-parent.
+        // Comme chaque nœud repasse en IDLE après son tour, un cycle ferait
+        // boucler le flux sans fin (requête bloquée + écritures SQL en rafale).
+        const visited = new Set<string>();
 
         while (current) {
+            if (visited.has(current.id)) {
+                return {
+                    ok: false,
+                    stoppedAt: current.id,
+                    error: `Cycle détecté dans le graphe (nœud ${current.id} déjà parcouru) — flux interrompu`,
+                };
+            }
+            visited.add(current.id);
             if (current.type === 'HUMAN') {
                 // Atteint le garant humain — passage par EXECUTING (state machine)
                 // puis fige en WAITING_HUMAN_APPROVAL en attendant l'action HITL.

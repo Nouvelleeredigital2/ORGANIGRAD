@@ -87,7 +87,7 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
     // Proxy vocal (SDK @apps2026/voice-client) : dérivé de l'URL de l'orchestrateur
     // (ex. http://localhost:3001/api → http://localhost:3001/api/voice/gateway).
     // Sans orchestrateur configuré, pas de bouton micro.
-    const { config: orchestratorConfig } = useOrchestratorConfig();
+    const { config: orchestratorConfig, isConfigured: orchestratorConfigured } = useOrchestratorConfig();
     const voiceProxyBasePath = orchestratorConfig.baseUrl
         ? `${orchestratorConfig.baseUrl.replace(/\/+$/, '')}/voice/gateway`
         : undefined;
@@ -463,6 +463,19 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
     const handleSaveNode = async (node: HybridNode) => {
         if (!peutEcrire) {
             setSaveError('Votre rôle ne permet pas de modifier les nœuds.');
+            return;
+        }
+        // Orchestrateur configuré mais client absent (sonde en cours ou
+        // échouée) : on REFUSE d'écrire au lieu de retomber en silence sur
+        // l'écriture Supabase directe — celle-ci stockerait systemPrompt,
+        // mcpConfig et webhooks EN CLAIR, précisément ce que le routage via
+        // l'orchestrateur ferme. Même règle que runChain pour la simulation.
+        if (orchestratorConfigured && !bridge.client) {
+            setSaveError(
+                bridge.connectionState === 'failed' || bridge.connectionState === 'degraded'
+                    ? "Orchestrateur injoignable : enregistrement refusé pour ne pas stocker les secrets en clair. Vérifiez la connexion dans Paramètres, ou déconnectez l'orchestrateur pour travailler en local."
+                    : "Connexion à l'orchestrateur en cours : réessayez dans un instant.",
+            );
             return;
         }
         const exists = hybridSource.some((n) => n.id === node.id);
