@@ -9,16 +9,20 @@ const supabaseMock = vi.hoisted(() => {
         select: vi.fn(),
         single: vi.fn(),
         maybeSingle: vi.fn(),
+        order: vi.fn(),
+        limit: vi.fn(),
     };
 
     query.update.mockReturnValue(query);
     query.upsert.mockReturnValue(query);
     query.eq.mockReturnValue(query);
     query.select.mockReturnValue(query);
+    query.order.mockReturnValue(query);
+    query.limit.mockReturnValue(query);
 
     return {
         query,
-        client: { from: vi.fn(() => query) },
+        client: { from: vi.fn(() => query), rpc: vi.fn() },
     };
 });
 
@@ -87,5 +91,24 @@ describe('agentRepo — concurrence legacy org_agents', () => {
         expect(supabaseMock.query.eq).toHaveBeenNthCalledWith(1, 'id', baseAgent.id);
         expect(supabaseMock.query.eq).toHaveBeenNthCalledWith(2, 'workspace_id', 'workspace-1');
         expect(supabaseMock.query.eq).toHaveBeenNthCalledWith(3, 'updated_at', version);
+    });
+
+    it('transmet la version de la source à la RPC d import de masse', async () => {
+        supabaseMock.query.maybeSingle.mockResolvedValueOnce({ data: { updated_at: version }, error: null });
+        supabaseMock.client.rpc.mockResolvedValueOnce({
+            data: [{ inserted: 0, updated: 1, deleted: 0 }],
+            error: null,
+        });
+
+        await agentRepo.bulkUpsert([baseAgent], { workspaceId: 'workspace-1' }, {
+            sourceKind: 'manual',
+            sourceRef: '',
+            mode: 'merge',
+        });
+
+        expect(supabaseMock.client.rpc).toHaveBeenCalledWith(
+            'import_org_agents',
+            expect.objectContaining({ p_expected_updated_at: version }),
+        );
     });
 });

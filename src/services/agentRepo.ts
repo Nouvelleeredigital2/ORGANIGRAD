@@ -205,6 +205,17 @@ export const agentRepo = {
             };
         }
 
+        const { data: latest, error: latestError } = await supabase!
+            .from('org_agents')
+            .select('updated_at')
+            .eq('workspace_id', ctx.workspaceId!)
+            .eq('source_kind', opts.sourceKind)
+            .eq('source_ref', opts.sourceRef)
+            .order('updated_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+        if (latestError) throw latestError;
+
         const charge = agents.map((a) => ({
             external_key: a.externalKey ?? a.id,
             nom: a.nom,
@@ -230,6 +241,7 @@ export const agentRepo = {
             p_source_ref: opts.sourceRef,
             p_agents: charge,
             p_mode: opts.mode,
+            p_expected_updated_at: latest?.updated_at ?? null,
         });
         if (error) throw error;
 

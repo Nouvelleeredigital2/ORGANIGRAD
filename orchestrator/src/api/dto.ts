@@ -84,9 +84,7 @@ export function validateNodeMutation(raw: unknown): NodeMutationBody {
             : undefined,
         skills: Array.isArray(b['skills']) ? (b['skills'] as string[]).filter((s) => typeof s === 'string') : [],
         mcpConfig: 'mcpConfig' in b ? (isMcpConfig(b['mcpConfig']) ? b['mcpConfig'] : null) : undefined,
-        notificationChannels: 'notificationChannels' in b
-            ? (isNotifChannels(b['notificationChannels']) ? b['notificationChannels'] : null)
-            : undefined,
+        notificationChannels: 'notificationChannels' in b ? sanitizeNotifChannels(b['notificationChannels']) : undefined,
         avatarUrl: typeof b['avatarUrl'] === 'string' ? b['avatarUrl'] : null,
     };
 }
@@ -100,16 +98,14 @@ function isMcpConfig(v: unknown): v is McpConfig {
     );
 }
 
-function isNotifChannels(v: unknown): v is NotificationChannels {
-    if (typeof v !== 'object' || v === null) return false;
+function sanitizeNotifChannels(v: unknown): NotificationChannels | null {
+    if (typeof v !== 'object' || v === null) return null;
     const r = v as Record<string, unknown>;
-    const supportedKeys = new Set(['slackWebhook', 'email', 'telegram']);
-    return (
-        Object.keys(r).every((key) => supportedKeys.has(key)) &&
-        (r['slackWebhook'] == null || typeof r['slackWebhook'] === 'string') &&
-        (r['email'] == null || typeof r['email'] === 'string') &&
-        (r['telegram'] == null || typeof r['telegram'] === 'string')
-    );
+    const normalized: NotificationChannels = {};
+    if (typeof r['slackWebhook'] === 'string') normalized.slackWebhook = r['slackWebhook'];
+    if (typeof r['email'] === 'string') normalized.email = r['email'];
+    if (typeof r['telegram'] === 'string') normalized.telegram = r['telegram'];
+    return Object.keys(normalized).length > 0 ? normalized : null;
 }
 
 /**

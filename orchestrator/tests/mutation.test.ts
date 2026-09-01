@@ -111,6 +111,15 @@ describe('validateNodeMutation — validation des corps de mutation de nœud', (
         expect(result.notificationChannels).toBeNull();
     });
 
+    it('conserve les canaux supportés quand un ancien WhatsApp est présent', () => {
+        const result = validateNodeMutation({
+            ...valid,
+            notificationChannels: { email: 'humain@example.com', whatsappId: '+33123456789' },
+        });
+
+        expect(result.notificationChannels).toEqual({ email: 'humain@example.com' });
+    });
+
     it("n'expose pas d'indicateur public WhatsApp", () => {
         const dto = toPublicNodeDTO({
             ...valid,

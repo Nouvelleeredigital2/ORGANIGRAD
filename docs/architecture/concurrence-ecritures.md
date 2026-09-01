@@ -2,11 +2,11 @@
 
 **Constat établi le 2026-08-14** (P2-14 du plan de correction).
 
-> **Statut : politique NON CHOISIE.** Le comportement décrit ci-dessous n'est
-> pas le résultat d'une décision produit — il découle de la forme des requêtes
-> d'écriture. Ce document existe pour que le choix soit fait consciemment.
+> **Statut : option 2 retenue et implémentée.** Les écritures de nœuds et de
+> fiches RH vérifient désormais `updated_at` avant modification. Un conflit
+> renvoie une erreur explicite au lieu d'écraser silencieusement la donnée.
 
-## Comportement actuel : « dernier écrivain gagne », silencieux
+## Ancien comportement : « dernier écrivain gagne », silencieux
 
 Les deux chemins d'écriture d'un nœud font le même `on conflict do update set`
 sur **toutes** les colonnes, sans prédicat de version :
@@ -52,8 +52,10 @@ Ce cas mérite d'être tranché en même temps.
 automatiquement** (trigger `touch_updated_at`, côté SPA comme côté
 orchestrateur, où il est aussi posé explicitement).
 
-Conséquence pratique : **un verrou optimiste est implémentable sans migration.**
-Le jeton de version existe déjà, il n'est simplement pas utilisé.
+Conséquence pratique : **le verrou optimiste est désormais utilisé** pour les
+modifications unitaires de `hybrid_nodes` et `org_agents`. Les imports groupés
+utilisent une migration SQL dédiée qui sérialise une source et vérifie sa
+version avant l'opération atomique.
 
 ## Options
 
@@ -92,19 +94,18 @@ Bob sur deux champs distincts ne se gênent plus.
 Historique par nœud, comparaison, restauration. Répond aussi au besoin d'audit
 métier absent aujourd'hui — mais c'est un chantier, pas un correctif.
 
-## Recommandation
+## Décision et état d'implémentation
 
 **Option 2**, éventuellement complétée plus tard par l'option 3.
 
 Raison : c'est la seule qui supprime le caractère *silencieux* du problème pour
-un coût contenu, sans migration. Les options 3 et 4 améliorent le confort et
-l'auditabilité, mais on peut les décider plus tard ; laisser une écriture
-disparaître sans que personne ne l'apprenne est ce qui pose problème
-aujourd'hui.
+un coût contenu. La migration est nécessaire uniquement pour sécuriser les
+imports groupés. Les options 3 et 4 améliorent le confort et l'auditabilité,
+mais peuvent être décidées plus tard.
 
 ## Suite
 
-Le test `concurrentWrites.integration.test.ts` est un **test de
-caractérisation** : il verrouille le comportement actuel. Le jour où une
-politique est retenue, il échouera — c'est voulu. Il faudra alors le réécrire en
-test de conformité, pas le supprimer.
+Le test `concurrentWrites.integration.test.ts` doit être exécuté avec
+`TEST_DATABASE_URL` après application des migrations. Il doit alors être
+réécrit en test de conformité : la seconde écriture doit recevoir un conflit,
+et non plus reproduire l'ancien écrasement silencieux.

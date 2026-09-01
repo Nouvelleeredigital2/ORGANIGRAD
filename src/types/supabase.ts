@@ -314,6 +314,7 @@ export type Database = {
                     p_source_ref: string;
                     p_agents: Json;
                     p_mode?: string;
+                    p_expected_updated_at?: string | null;
                 };
                 Returns: Array<{ inserted: number; updated: number; deleted: number }>;
             };
