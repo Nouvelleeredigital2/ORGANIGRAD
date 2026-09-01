@@ -53,7 +53,7 @@ leur propre conteneur, y compris si Vitest échoue :
     npm run test:pg:concurrency
 
 Elles couvrent respectivement PgGraphStore, l'isolation multi-workspace des RPC
-et la caractérisation des écritures concurrentes. Docker doit être disponible;
+et la conformité du verrouillage optimiste des écritures concurrentes. Docker doit être disponible;
 aucune variable TEST_DATABASE_URL n'est à fournir manuellement.
 
 La CI conserve le même principe d'isolation : les suites sécurité et concurrence

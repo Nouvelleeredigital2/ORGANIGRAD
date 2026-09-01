@@ -84,6 +84,7 @@ const baseRow: Row = {
     mcp_config: null,
     notification_channels: null,
     avatar_url: null,
+    external_app: null,
     status: 'IDLE',
     created_at: '2026-01-01T00:00:00.000Z',
     updated_at: '2026-01-01T00:00:00.000Z',

@@ -29,7 +29,9 @@ patch dans la plage `^7.3.1` déjà déclarée).
 version corrigée. `vite@7.3.6` accepte `^0.27.0 || ^0.28.0` — c'est un patch,
 donc la correction reste non cassante.
 
-Résultat : orchestrateur **0 vulnérabilité**, frontend **1** (ci-dessous).
+Résultat au 2026-09-01 : orchestrateur **0 vulnérabilité**, frontend **0
+vulnérabilité high/critical**. Les versions transitives vulnérables de
+`browserslist` et `postcss-selector-parser` ont été mises à jour dans le lockfile.
 
 ## Correctifs livrés
 

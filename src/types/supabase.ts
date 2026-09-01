@@ -22,6 +22,7 @@ export type Database = {
                 Row: {
                     avatar_url: string | null;
                     created_at: string;
+                    external_app: string | null;
                     grade_id: string;
                     id: string;
                     mcp_config: Json | null;
@@ -39,6 +40,7 @@ export type Database = {
                 Insert: {
                     avatar_url?: string | null;
                     created_at?: string;
+                    external_app?: string | null;
                     grade_id?: string;
                     id?: string;
                     mcp_config?: Json | null;
@@ -176,6 +178,8 @@ export type Database = {
                     last_used_at: string | null;
                     name: string;
                     revoked_at: string | null;
+                    scopes: string[];
+                    expires_at: string | null;
                     workspace_id: string;
                 };
                 Insert: {
@@ -187,6 +191,8 @@ export type Database = {
                     last_used_at?: string | null;
                     name: string;
                     revoked_at?: string | null;
+                    scopes?: string[];
+                    expires_at?: string | null;
                     workspace_id: string;
                 };
                 Update: Partial<Database['public']['Tables']['workspace_api_keys']['Insert']>;
@@ -261,6 +267,7 @@ export type Database = {
                     error: string | null;
                     created_at: string;
                     sent_at: string | null;
+                    idempotency_key: string | null;
                 };
                 Insert: {
                     id?: string;
@@ -274,6 +281,7 @@ export type Database = {
                     error?: string | null;
                     created_at?: string;
                     sent_at?: string | null;
+                    idempotency_key?: string | null;
                 };
                 Update: Partial<Database['public']['Tables']['notifications']['Insert']>;
                 Relationships: [];
