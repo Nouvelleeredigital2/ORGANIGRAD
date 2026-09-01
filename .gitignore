@@ -18,6 +18,9 @@ dist-ssr
 .env.*
 !.env.example
 !.env.test
+# Gabarit de l'E2E connectée : sans valeurs. `.env.connected`, lui, reste ignoré
+# par la règle ci-dessus — il porte les identifiants d'un projet Supabase réel.
+!.env.connected.example
 
 # Editor directories and files
 .vscode/*

@@ -238,4 +238,62 @@ describe('subscribe — deux abonnés sur le même workspace', () => {
         expect(handlerWs2).toHaveBeenCalledTimes(1);
         expect(handlerWs1).not.toHaveBeenCalled();
     });
+
+    /**
+     * Mutualiser le channel a créé une dépendance entre abonnés : ils partagent
+     * désormais une boucle de dispatch. Ces trois cas vérifient que le partage
+     * n'a pas remplacé le crash d'origine par un couplage plus discret.
+     */
+    it("un abonné qui lève ne prive pas les autres, et ne remonte pas dans le callback Realtime", () => {
+        const qulLeve = vi.fn(() => {
+            throw new Error('rendu impossible');
+        });
+        const sain = vi.fn();
+        const erreurs = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+        trackedSubscribe({ workspaceId: 'ws1' }, qulLeve);
+        trackedSubscribe({ workspaceId: 'ws1' }, sain);
+
+        const channel = mockRegistry.get('hybrid_nodes:ws1')!;
+        // L'exception ne doit pas franchir la frontière du callback : côté
+        // supabase-js elle finirait en erreur non gérée dans la console, ce que
+        // le critère d'acceptation P0-5 interdit explicitement.
+        expect(() => {
+            channel.emit({ eventType: 'INSERT', new: { ...baseRow, id: 'n4' } });
+        }).not.toThrow();
+
+        expect(qulLeve).toHaveBeenCalledTimes(1);
+        expect(sain).toHaveBeenCalledWith('INSERT', expect.objectContaining({ id: 'n4' }));
+        expect(erreurs).toHaveBeenCalled();
+        erreurs.mockRestore();
+    });
+
+    it('deux abonnés partageant LA MÊME fonction comptent pour deux', () => {
+        // Piège d'un comptage par identité de fonction : un `Set` de handlers
+        // n'en garderait qu'un, et le premier désabonnement fermerait le channel
+        // alors que le second abonné écoute encore.
+        const partage = vi.fn();
+        const offA = trackedSubscribe({ workspaceId: 'ws1' }, partage);
+        trackedSubscribe({ workspaceId: 'ws1' }, partage);
+
+        offA();
+        expect(mockRegistry.has('hybrid_nodes:ws1')).toBe(true);
+
+        mockRegistry
+            .get('hybrid_nodes:ws1')!
+            .emit({ eventType: 'INSERT', new: { ...baseRow, id: 'n5' } });
+        expect(partage).toHaveBeenCalledTimes(1);
+    });
+
+    it("un cleanup appelé deux fois ne ferme pas le channel d'un autre abonné", () => {
+        // React StrictMode et les effets rejoués appellent volontiers le cleanup
+        // plus d'une fois.
+        const offA = trackedSubscribe({ workspaceId: 'ws1' }, vi.fn());
+        trackedSubscribe({ workspaceId: 'ws1' }, vi.fn());
+
+        offA();
+        offA();
+
+        expect(mockRegistry.has('hybrid_nodes:ws1')).toBe(true);
+    });
 });

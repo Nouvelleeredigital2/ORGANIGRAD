@@ -582,3 +582,109 @@ describe('Notifier — rate limiting', () => {
         expect(fluxCalls).toHaveLength(1);
     });
 });
+
+/**
+ * P1-8 — clé d'idempotence des e-mails.
+ *
+ * Elle doit satisfaire DEUX exigences opposées :
+ *   - un même événement rejoué (retry réseau) ne doit produire qu'un e-mail ;
+ *   - deux occurrences successives de la même transition doivent en produire
+ *     DEUX — sinon la seconde demande de validation ne prévient personne.
+ *
+ * La clé valait `workspace:nœud:type:de->vers`, sans marqueur d'occurrence :
+ * la seconde exigence était violée en silence, l'Edge Function dédupliquant le
+ * second envoi contre la ligne d'audit du premier.
+ */
+describe('Notifier — clé d\'idempotence des e-mails', () => {
+    const EMAIL_URL = 'https://abc.supabase.co/functions/v1/notify-email';
+    const SERVICE_KEY = 'service_role_key_xxx';
+
+    /**
+     * Mock ciblé. Deux précautions par rapport au helper partagé :
+     *   - une Response NEUVE à chaque appel (une même instance a un corps déjà
+     *     consommé au second usage, ce qui provoque un retry parasite) ;
+     *   - les échecs ne visent QUE l'Edge Function, sinon le 500 tombe sur
+     *     l'appel Slack du nœud et l'e-mail part du premier coup.
+     */
+    function fetchCible(echecsEmail = 0) {
+        let restants = echecsEmail;
+        return vi.fn(async (url: string) => {
+            if (url === EMAIL_URL && restants > 0) {
+                restants -= 1;
+                return new Response('', { status: 500 });
+            }
+            return new Response('', { status: 200 });
+        });
+    }
+
+    function clesEnvoyees(fetchMock: ReturnType<typeof fetchCible>): string[] {
+        // Le mock ne déclare que `url` (déclarer un `init` inutilisé fâche
+        // eslint) ; les arguments réels comportent bien le second, d'où la
+        // relecture via un tuple.
+        return (fetchMock.mock.calls as unknown as Array<[string, RequestInit]>)
+            .filter(([url]) => url === EMAIL_URL)
+            .map(([, init]) => JSON.parse(init.body as string).idempotencyKey as string);
+    }
+
+    function notifierAvec(fetchMock: ReturnType<typeof fetchCible>) {
+        const store = makeStore();
+        const notifier = new Notifier({
+            store,
+            workspaceId: 'ws-1',
+            fetchImpl: fetchMock as unknown as typeof fetch,
+            emailEdgeFunctionUrl: EMAIL_URL,
+            supabaseServiceRoleKey: SERVICE_KEY,
+        });
+        notifier.attach();
+        return store;
+    }
+
+    it('deux passages successifs par la même transition produisent DEUX clés distinctes', async () => {
+        // L'horloge est avancée entre les deux passages. Ce n'est pas un
+        // artifice de confort : le discriminant est l'horodatage de la
+        // transition, et enchaîner cinq transitions dans la même milliseconde
+        // ne correspond à aucun scénario réel — un refus puis une relance
+        // supposent une action humaine entre les deux.
+        const vraiNow = Date.now.bind(Date);
+        let decalage = 0;
+        vi.spyOn(Date, 'now').mockImplementation(() => vraiNow() + decalage);
+
+        try {
+            const fetchMock = fetchCible();
+            const store = notifierAvec(fetchMock);
+
+            // 1er passage : le nœud demande une validation humaine.
+            store.applyTransition('hum', 'EXECUTING');
+            store.applyTransition('hum', 'WAITING_HUMAN_APPROVAL');
+            await new Promise((r) => setImmediate(r));
+
+            // Refus, puis nouvelle exécution → la MÊME transition se reproduit.
+            decalage += 60_000;
+            store.applyTransition('hum', 'IDLE');
+            store.applyTransition('hum', 'EXECUTING');
+            store.applyTransition('hum', 'WAITING_HUMAN_APPROVAL');
+            await new Promise((r) => setImmediate(r));
+
+            const cles = clesEnvoyees(fetchMock);
+            expect(cles).toHaveLength(2);
+            expect(new Set(cles).size).toBe(2);
+        } finally {
+            vi.mocked(Date.now).mockRestore();
+        }
+    });
+
+    it('la clé reste stable sur le retry d\'un même événement', async () => {
+        // Contre-épreuve : si la clé variait à chaque appel, l'idempotence
+        // disparaîtrait et un retry réseau enverrait un second e-mail.
+        const fetchMock = fetchCible(1); // premier appel e-mail en 500 → retry
+        const store = notifierAvec(fetchMock);
+
+        store.applyTransition('hum', 'EXECUTING');
+        store.applyTransition('hum', 'WAITING_HUMAN_APPROVAL');
+        await new Promise((r) => setTimeout(r, 400));
+
+        const cles = clesEnvoyees(fetchMock);
+        expect(cles.length).toBeGreaterThanOrEqual(2); // appel initial + retry
+        expect(new Set(cles).size).toBe(1); // … mais UNE seule clé
+    });
+});

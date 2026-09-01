@@ -22,7 +22,7 @@ import { useOrchestratorBridge } from '../../hooks/useOrchestratorBridge';
 import { useOrchestratorConfig } from '../../hooks/useOrchestratorConfig';
 import { useFeedback } from '../../feedback/FeedbackContext';
 import { usePermissions } from '../../auth/usePermissions';
-import { describeError } from '../../utils/asyncGuard';
+import { messageErreurUtilisateur } from '../../utils/asyncGuard';
 
 interface OrchestrationViewProps {
     rawAgents: Agent[];
@@ -278,7 +278,7 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
             setIsRunning(false);
 
             const failed = results.flatMap((r, i) =>
-                r.status === 'rejected' ? [{ nom: roots[i]!.nom, error: describeError(r.reason) }] : [],
+                r.status === 'rejected' ? [{ nom: roots[i]!.nom, error: messageErreurUtilisateur(r.reason) }] : [],
             );
 
             if (failed.length === 0) {
@@ -355,7 +355,7 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
                     return true;
                 } catch (err) {
                     console.error('[OrchestrationView] approve failed', err);
-                    feedback.error(`Validation non enregistrée · ${n.nom} : ${describeError(err)}`);
+                    feedback.error(`Validation non enregistrée · ${n.nom} : ${messageErreurUtilisateur(err)}`);
                     return false;
                 }
             }
@@ -375,7 +375,7 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
                 } catch (err) {
                     console.error('[OrchestrationView] reject failed', err);
                     // Le motif saisi est conservé : le panneau reste ouvert.
-                    feedback.error(`Rejet non enregistré · ${n.nom} : ${describeError(err)}`);
+                    feedback.error(`Rejet non enregistré · ${n.nom} : ${messageErreurUtilisateur(err)}`);
                     return false;
                 }
             }
@@ -397,7 +397,7 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
                     feedback.success(`Exécution lancée · ${n.nom}.`);
                 } catch (err) {
                     console.error('[OrchestrationView] runNode failed', err);
-                    feedback.error(`Exécution non lancée · ${n.nom} : ${describeError(err)}`);
+                    feedback.error(`Exécution non lancée · ${n.nom} : ${messageErreurUtilisateur(err)}`);
                 }
                 return;
             }
@@ -456,7 +456,7 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
             feedback.success(`Nœud supprimé · ${node.nom}.`);
         } catch (err) {
             setHybridSource(avant);
-            feedback.error(`Suppression non enregistrée · ${node.nom} : ${describeError(err)}`);
+            feedback.error(`Suppression non enregistrée · ${node.nom} : ${messageErreurUtilisateur(err)}`);
         }
     };
 
@@ -532,7 +532,9 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
                                     ? 'var(--system-red)'
                                     : bridge.connectionState === 'degraded'
                                       ? 'var(--system-orange)'
-                                      : bridge.connected
+                                      : bridge.connectionState === 'connecting'
+                                        ? 'var(--system-blue)'
+                                        : bridge.connected
                                     ? 'var(--system-green)'
                                     : 'var(--ink-5)',
                             }}
@@ -541,8 +543,10 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
                             {bridge.connectionState === 'failed'
                                 ? 'Orchestrateur indisponible · aucune simulation ne sera lancée'
                                 : bridge.connectionState === 'degraded'
-                                  ? 'Orchestrateur dégradé · reconnexion du flux en cours'
-                                  : bridge.connected
+                                  ? 'Orchestrateur dégradé · flux interrompu, données possiblement obsolètes'
+                                  : bridge.connectionState === 'connecting'
+                                    ? 'Connexion à l\'orchestrateur…'
+                                    : bridge.connected
                                 ? 'Orchestrateur connecté · transitions distribuées'
                                 : 'Mode local · transitions simulées (configurer l\'orchestrateur dans Paramètres)'}
                         </span>

@@ -10,6 +10,9 @@ export interface WorkspaceWithRole extends WorkspaceRow {
 
 const ACTIVE_KEY = 'organigrad_active_workspace_id';
 
+/** Fenêtre pendant laquelle un retour sur l'onglet ne redéclenche pas la requête. */
+const DELAI_REVALIDATION_MS = 5_000;
+
 /**
  * Hook workspace — liste les workspaces accessibles par le user courant,
  * et expose le workspace actif (persisté en localStorage).
@@ -67,6 +70,42 @@ export function useWorkspace(userId: string | undefined): {
     useEffect(() => {
         void refresh();
     }, [refresh]);
+
+    /**
+     * Revalide les adhésions quand l'onglet redevient actif.
+     *
+     * `refresh()` ne tournait qu'au montage : un onglet laissé en arrière-plan
+     * gardait indéfiniment le rôle qu'il avait au chargement. Un utilisateur
+     * rétrogradé en `viewer`, ou retiré du workspace, continuait d'y voir les
+     * commandes d'administration — la RLS refusait bien l'écriture, mais
+     * l'interface proposait des actions vouées à un 403 muet.
+     *
+     * La revalidation au retour sur l'onglet borne la péremption à « tant que
+     * personne ne regarde ». Elle ne la supprime pas : deux onglets côte à côte,
+     * tous deux visibles, ne se rafraîchissent pas mutuellement — d'où l'écoute
+     * de `focus` en plus de `visibilitychange`.
+     */
+    useEffect(() => {
+        if (!supabase || !userId) return;
+        // Initialisé au montage, PAS à 0 : sinon le premier retour sur l'onglet
+        // passe toujours le garde-fou et double la requête de chargement.
+        let dernierAppel = Date.now();
+        const revalider = () => {
+            if (document.visibilityState !== 'visible') return;
+            // Garde-fou anti-rafale : alt-tab répété ne doit pas déclencher une
+            // requête par bascule.
+            const maintenant = Date.now();
+            if (maintenant - dernierAppel < DELAI_REVALIDATION_MS) return;
+            dernierAppel = maintenant;
+            void refresh();
+        };
+        document.addEventListener('visibilitychange', revalider);
+        window.addEventListener('focus', revalider);
+        return () => {
+            document.removeEventListener('visibilitychange', revalider);
+            window.removeEventListener('focus', revalider);
+        };
+    }, [refresh, userId]);
 
     const setActive = useCallback((id: string) => {
         setActiveId(id);

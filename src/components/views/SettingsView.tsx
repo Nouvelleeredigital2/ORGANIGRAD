@@ -8,7 +8,7 @@ import { useWorkspaceContext } from '../../contexts/WorkspaceContext';
 import { useFeedback } from '../../feedback/FeedbackContext';
 import { usePermissions } from '../../auth/usePermissions';
 import { supabase } from '../../lib/supabase';
-import { describeError } from '../../utils/asyncGuard';
+import { messageErreurUtilisateur } from '../../utils/asyncGuard';
 import { OrchestratorClient } from '../../services/orchestratorService';
 
 interface SettingsViewProps {
@@ -120,7 +120,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     '.',
             );
         } catch (err) {
-            feedback.error(`Import LINK échoué : ${describeError(err)}`);
+            feedback.error(`Import LINK échoué : ${messageErreurUtilisateur(err)}`);
         } finally {
             setLinkImporting(false);
         }

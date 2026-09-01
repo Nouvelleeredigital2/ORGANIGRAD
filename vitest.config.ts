@@ -10,7 +10,18 @@ export default defineConfig({
     // Les worktrees locaux peuvent contenir une seconde copie des suites
     // frontend, e2e et orchestrateur ; Vitest ne doit tester que le checkout
     // courant (chaque worktree exécute ses propres commandes).
-    exclude: ['node_modules/**', 'e2e/**', 'dist/**', 'orchestrator/**', '.worktrees/**'],
+    // `e2e-connected/**` : suites Playwright, comme `e2e/**`. Ramassées par
+    // Vitest elles échouent sur « Playwright Test did not expect
+    // test.describe() to be called here » — un échec sans rapport avec leur
+    // contenu, et qui masque le reste de la suite.
+    exclude: [
+      'node_modules/**',
+      'e2e/**',
+      'e2e-connected/**',
+      'dist/**',
+      'orchestrator/**',
+      '.worktrees/**',
+    ],
     // Hermétisme (Priorité 8) : neutralise toute config réelle qui pourrait fuiter
     // de .env.local dans les tests — Supabase/orchestrateur restent NON configurés,
     // donc aucun client réseau réel n'est instancié.
