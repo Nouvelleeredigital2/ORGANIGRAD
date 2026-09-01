@@ -76,24 +76,22 @@ describe.runIf(Boolean(TEST_DB_URL))('Écritures concurrentes — politique effe
         await sessionA.upsertNode({ ...vueA, nom: 'Nom corrigé par Alice' });
         expect((await sessionA.get(nodeId)).nom).toBe('Nom corrigé par Alice');
 
-        // 3. B modifie le RÔLE et enregistre. Sa charge porte encore le nom
-        //    qu'il avait chargé — il n'a pas touché à ce champ, mais il le
-        //    réécrit quand même.
+        // 3. B modifie le RÔLE avec une version périmée.
         const ecritureB = sessionB.upsertNode({ ...vueB, roleTitre: 'Rôle corrigé par Bob' });
 
         // 4. Le verrou optimiste signale le conflit à B.
         await expect(ecritureB).rejects.toMatchObject({ nodeId, expectedUpdatedAt: vueB.updated_at });
 
-        // 5. Et la correction d'Alice a disparu.
+        // 5. La correction d'Alice est conservée.
         const finale = await sessionA.get(nodeId);
         expect(finale.nom).toBe('Nom corrigé par Alice');
         expect(finale.roleTitre).toBe('Rôle initial');
     });
 
     it("ne crée pas de journal de transition pour un conflit métier", async () => {
-        // Conséquence pratique : ni Alice ni un auditeur ne peuvent savoir
-        // après coup qu'une modification a été écrasée. `node_transitions` ne
-        // couvre que les changements de STATUT, pas les champs métier.
+        // Un conflit de version est refusé avant toute mutation métier.
+        // `node_transitions` reste réservé aux changements de statut ; aucune
+        // ligne ne doit donc être créée pour cet échec de concurrence.
         const lignes = await sql`
             select count(*)::int as n from public.node_transitions
              where workspace_id = ${workspaceId} and node_id = ${nodeId}`;
@@ -101,10 +99,8 @@ describe.runIf(Boolean(TEST_DB_URL))('Écritures concurrentes — politique effe
     });
 
     it("refuse une vue périmée même si elle tente d'écrire plus tard", async () => {
-        // Précision utile : la politique n'est pas « la modification la plus
-        // récente gagne » mais « le dernier ENREGISTREMENT gagne ». Un onglet
-        // ouvert depuis une heure écrase une modification faite il y a dix
-        // secondes.
+        // Une vue ancienne reste refusée, même si elle tente d'écrire plus
+        // tard avec une charge complète.
         const session = new PgGraphStore(sql, workspaceId, { kind: 'user', id: 'carol' });
         const ancienneVue = await session.get(nodeId); // chargée maintenant
 

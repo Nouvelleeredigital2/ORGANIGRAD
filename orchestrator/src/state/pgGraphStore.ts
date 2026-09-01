@@ -56,6 +56,7 @@ interface DbRow {
     avatar_url: string | null;
     status: NodeStatus;
     updated_at: string;
+    updated_at_text?: string;
 }
 
 export class PgGraphStore implements GraphStore {
@@ -74,7 +75,10 @@ export class PgGraphStore implements GraphStore {
     private rowToNode(r: DbRow): HybridNode & { updated_at: string } {
         return {
             id: r.id,
-            updated_at: r.updated_at,
+            // Le driver `postgres` convertit timestamptz en Date et perd les
+            // microsecondes. Le prédicat de verrouillage doit réutiliser la
+            // valeur exacte renvoyée par PostgreSQL.
+            updated_at: r.updated_at_text ?? r.updated_at,
             type: r.type,
             nom: r.nom,
             roleTitre: r.role_titre,
@@ -92,7 +96,7 @@ export class PgGraphStore implements GraphStore {
     /** Charge tous les nœuds du workspace. */
     async list(): Promise<readonly HybridNode[]> {
         const rows = await this.sql<DbRow[]>`
-            select * from public.hybrid_nodes
+            select *, updated_at::text as updated_at_text from public.hybrid_nodes
              where workspace_id = ${this.workspaceId}
              order by created_at asc
         `;
@@ -101,7 +105,7 @@ export class PgGraphStore implements GraphStore {
 
     async get(id: string): Promise<HybridNode & { updated_at: string }> {
         const rows = await this.sql<DbRow[]>`
-            select * from public.hybrid_nodes
+            select *, updated_at::text as updated_at_text from public.hybrid_nodes
              where workspace_id = ${this.workspaceId} and id = ${id}
              limit 1
         `;
@@ -131,7 +135,10 @@ export class PgGraphStore implements GraphStore {
         const encNotif = encryptJson(this.cipher, node.notificationChannels ?? null) as JsonObject | null;
 
         const versionPredicate = node.updated_at
-            ? this.sql` and public.hybrid_nodes.updated_at = ${node.updated_at}::timestamptz`
+            // Compare la représentation texte exacte renvoyée par PostgreSQL.
+            // Le driver peut convertir un paramètre string en type date et
+            // perdre la précision sub-microseconde lors du cast inverse.
+            ? this.sql` and public.hybrid_nodes.updated_at::text = ${node.updated_at}`
             : this.sql``;
         const rows = await this.sql<DbRow[]>`
             insert into public.hybrid_nodes
@@ -159,7 +166,7 @@ export class PgGraphStore implements GraphStore {
                 avatar_url            = excluded.avatar_url,
                 updated_at            = now()
             where public.hybrid_nodes.workspace_id = ${this.workspaceId}${versionPredicate}
-            returning *
+            returning *, updated_at::text as updated_at_text
         `;
         const row = rows[0];
         if (!row) {
