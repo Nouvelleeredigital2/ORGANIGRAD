@@ -71,6 +71,62 @@ describe('OrchestratorClient', () => {
         );
     });
 
+    it('envoie updated_at sur une mise à jour et typifie le conflit concurrent', async () => {
+        fetchMock
+            .mockResolvedValueOnce(new Response(JSON.stringify(GRAPH), { status: 200 }))
+            .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'CONCURRENT_WRITE' }), { status: 409 }));
+
+        await expect(client.upsertNode({
+            id: 'a', type: 'AGENT_IA', nom: 'A', roleTitre: 'a', parentID: null,
+            gradeId: 'E', updated_at: '2026-09-01T12:00:00.000Z',
+        }, 'workspace-1')).rejects.toMatchObject({
+            name: 'OrchestratorConflictError', code: 'CONCURRENT_WRITE', status: 409,
+        });
+        const init = fetchMock.mock.calls[1]![1] as RequestInit;
+        expect(JSON.parse(init.body as string).updated_at).toBe('2026-09-01T12:00:00.000Z');
+    });
+
+    it('expose la nouvelle version updated_at renvoyée après une écriture', async () => {
+        const updatedAt = '2026-09-01T12:01:00.000Z';
+        fetchMock
+            .mockResolvedValueOnce(new Response(JSON.stringify({ exists: true }), { status: 200 }))
+            .mockResolvedValueOnce(
+                new Response(
+                    JSON.stringify({
+                        node: {
+                            id: 'n1',
+                            type: 'AGENT_IA',
+                            nom: 'Rédacteur',
+                            roleTitre: 'Expert',
+                            parentID: null,
+                            gradeId: 'E',
+                            status: 'IDLE',
+                            updated_at: updatedAt,
+                            hasSystemPrompt: false,
+                            mcp: { configured: false, connectedTo: [] },
+                            notifications: { slack: false, email: false },
+                        },
+                    }),
+                    { status: 200 },
+                ),
+            );
+
+        const result = await client.upsertNode(
+            {
+                id: 'n1',
+                type: 'AGENT_IA',
+                nom: 'Rédacteur',
+                roleTitre: 'Expert',
+                parentID: null,
+                gradeId: 'E',
+                updated_at: '2026-09-01T12:00:00.000Z',
+            },
+            'ws1',
+        );
+
+        expect(result.updated_at).toBe(updatedAt);
+    });
+
     it('404 → NODE_NOT_FOUND', async () => {
         fetchMock.mockResolvedValue(new Response('', { status: 404 }));
         await expect(client.runNode('nope')).rejects.toMatchObject({ code: 'NODE_NOT_FOUND' });

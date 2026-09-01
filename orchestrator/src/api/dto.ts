@@ -17,6 +17,7 @@ import type { HybridNode, McpConfig, NotificationChannels, NodeType } from '../d
  */
 export interface NodeMutationBody {
     id: string;
+    updated_at?: string;
     type: NodeType;
     nom: string;
     roleTitre: string;
@@ -30,6 +31,7 @@ export interface NodeMutationBody {
 }
 
 const NODE_TYPES = new Set<string>(['HUMAN', 'AGENT_IA', 'SOFTWARE_MCP']);
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export class NodeMutationValidationError extends Error {
     constructor(public readonly field: string, message: string) {
@@ -45,8 +47,11 @@ export function validateNodeMutation(raw: unknown): NodeMutationBody {
     }
     const b = raw as Record<string, unknown>;
 
-    if (typeof b['id'] !== 'string' || b['id'].length === 0 || b['id'].length > 256) {
-        throw new NodeMutationValidationError('id', 'id invalide (string 1-256)');
+    if (typeof b['id'] !== 'string' || b['id'].length === 0 || b['id'].length > 256 || !UUID_PATTERN.test(b['id'])) {
+        throw new NodeMutationValidationError('id', 'id invalide (UUID)');
+    }
+    if ('updated_at' in b && (typeof b['updated_at'] !== 'string' || Number.isNaN(Date.parse(b['updated_at'])))) {
+        throw new NodeMutationValidationError('updated_at', 'updated_at invalide (date ISO)');
     }
     if (typeof b['type'] !== 'string' || !NODE_TYPES.has(b['type'])) {
         throw new NodeMutationValidationError('type', 'type invalide (HUMAN|AGENT_IA|SOFTWARE_MCP)');
@@ -66,6 +71,7 @@ export function validateNodeMutation(raw: unknown): NodeMutationBody {
 
     return {
         id: b['id'] as string,
+        ...(typeof b['updated_at'] === 'string' ? { updated_at: b['updated_at'] } : {}),
         type: b['type'] as NodeType,
         nom: b['nom'] as string,
         roleTitre: b['roleTitre'] as string,
@@ -97,10 +103,12 @@ function isMcpConfig(v: unknown): v is McpConfig {
 function isNotifChannels(v: unknown): v is NotificationChannels {
     if (typeof v !== 'object' || v === null) return false;
     const r = v as Record<string, unknown>;
+    const supportedKeys = new Set(['slackWebhook', 'email', 'telegram']);
     return (
+        Object.keys(r).every((key) => supportedKeys.has(key)) &&
         (r['slackWebhook'] == null || typeof r['slackWebhook'] === 'string') &&
         (r['email'] == null || typeof r['email'] === 'string') &&
-        (r['whatsappId'] == null || typeof r['whatsappId'] === 'string')
+        (r['telegram'] == null || typeof r['telegram'] === 'string')
     );
 }
 
@@ -118,6 +126,7 @@ function isNotifChannels(v: unknown): v is NotificationChannels {
  */
 export interface PublicNodeDTO {
     id: string;
+    updated_at?: string;
     type: HybridNode['type'];
     nom: string;
     roleTitre: string;
@@ -129,13 +138,14 @@ export interface PublicNodeDTO {
     /** Indicateurs non sensibles. */
     hasSystemPrompt: boolean;
     mcp: { configured: boolean; connectedTo: string[] };
-    notifications: { slack: boolean; email: boolean; whatsapp: boolean };
+    notifications: { slack: boolean; email: boolean };
 }
 
 export function toPublicNodeDTO(node: HybridNode): PublicNodeDTO {
     const nc = node.notificationChannels;
     return {
         id: node.id,
+        updated_at: node.updated_at,
         type: node.type,
         nom: node.nom,
         roleTitre: node.roleTitre,
@@ -153,7 +163,6 @@ export function toPublicNodeDTO(node: HybridNode): PublicNodeDTO {
         notifications: {
             slack: Boolean(nc?.slackWebhook),
             email: Boolean(nc?.email),
-            whatsapp: Boolean(nc?.whatsappId),
         },
     };
 }

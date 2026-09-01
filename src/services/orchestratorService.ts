@@ -22,6 +22,7 @@ import type { HybridNode, NodeStatus, McpConfig, NotificationChannels } from '..
  */
 export interface OrchestratorGraphNode {
     id: string;
+    updated_at?: string;
     type: HybridNode['type'];
     nom: string;
     roleTitre: string;
@@ -32,7 +33,7 @@ export interface OrchestratorGraphNode {
     status: NodeStatus;
     hasSystemPrompt: boolean;
     mcp: { configured: boolean; connectedTo: string[] };
-    notifications: { slack: boolean; email: boolean; whatsapp: boolean };
+    notifications: { slack: boolean; email: boolean };
 }
 
 /** Réponse de POST /api/integrations/link/import. */
@@ -56,6 +57,7 @@ export interface SseStatusEvent {
 /** Corps envoyé à POST /api/nodes ou PUT /api/nodes/:id. */
 export interface NodeMutationPayload {
     id: string;
+    updated_at?: string;
     type: HybridNode['type'];
     nom: string;
     roleTitre: string;
@@ -204,6 +206,9 @@ export class OrchestratorClient {
         });
         if (!res.ok) {
             const detail = await res.json().catch(() => ({}));
+            if (res.status === 409 && (detail as { error?: unknown }).error === 'CONCURRENT_WRITE') {
+                throw new OrchestratorConflictError(node.id, node.updated_at, detail);
+            }
             throw new OrchestratorClientError(`HTTP_${res.status}`, res.status, detail);
         }
         const body = (await res.json()) as { node: OrchestratorGraphNode };
@@ -391,5 +396,17 @@ export class OrchestratorClientError extends Error {
         this.code = code;
         this.status = status;
         this.detail = detail;
+    }
+}
+
+export class OrchestratorConflictError extends OrchestratorClientError {
+    readonly nodeId: string;
+    readonly expectedUpdatedAt?: string;
+
+    constructor(nodeId: string, expectedUpdatedAt: string | undefined, detail?: unknown) {
+        super('CONCURRENT_WRITE', 409, detail);
+        this.name = 'OrchestratorConflictError';
+        this.nodeId = nodeId;
+        this.expectedUpdatedAt = expectedUpdatedAt;
     }
 }

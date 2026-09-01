@@ -40,6 +40,10 @@ test-results/
 playwright-report/
 coverage/
 
+# Supabase CLI local state and generated Edge runtime
+supabase/.temp/
+supabase/.branches/
+
 # Misc
 lint-out.txt
 lint-results.json

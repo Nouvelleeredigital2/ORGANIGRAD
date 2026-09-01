@@ -34,6 +34,21 @@ const isEncrypted = (v: unknown): boolean => typeof v === 'string' && v.startsWi
 type Row = Database['public']['Tables']['hybrid_nodes']['Row'];
 type Insert = Database['public']['Tables']['hybrid_nodes']['Insert'];
 
+export class HybridNodeConflictError extends Error {
+    readonly nodeId: string;
+    readonly expectedUpdatedAt: string;
+
+    constructor(
+        nodeId: string,
+        expectedUpdatedAt: string,
+    ) {
+        super(`Le nœud ${nodeId} a été modifié depuis son chargement`);
+        this.name = 'HybridNodeConflictError';
+        this.nodeId = nodeId;
+        this.expectedUpdatedAt = expectedUpdatedAt;
+    }
+}
+
 /**
  * Repository HybridNode — backend Supabase si configuré + workspace fourni,
  * sinon fallback `hybridNodeStore` (localStorage, mode offline / non-authed).
@@ -61,6 +76,7 @@ export function rowToNode(row: Row): HybridNode {
 
     return {
         id: row.id,
+        updated_at: row.updated_at,
         type: row.type as NodeType,
         nom: row.nom,
         roleTitre: row.role_titre,
@@ -169,6 +185,7 @@ export const hybridNodeRepo = {
             // par le serveur (cf. validateNodeMutation), un `null` efface.
             const payload: NodeMutationPayload = {
                 id: node.id,
+                updated_at: node.updated_at,
                 type: node.type,
                 nom: node.nom,
                 roleTitre: node.roleTitre,
@@ -192,6 +209,7 @@ export const hybridNodeRepo = {
             // reconstitue un HybridNode minimal pour la mise à jour du cache local.
             const merged: HybridNode = {
                 ...node,
+                ...(dto.updated_at ? { updated_at: dto.updated_at } : {}),
                 status: dto.status,
             };
             hybridNodeStore.save(ctx.workspaceId, [
@@ -209,6 +227,19 @@ export const hybridNodeRepo = {
             return node;
         }
         const payload = nodeToInsert(node, ctx.workspaceId);
+        if (node.updated_at) {
+            const { data, error } = await supabase
+                .from('hybrid_nodes')
+                .update(payload)
+                .eq('id', node.id)
+                .eq('workspace_id', ctx.workspaceId)
+                .eq('updated_at', node.updated_at)
+                .select('*')
+                .maybeSingle();
+            if (error) throw error;
+            if (!data) throw new HybridNodeConflictError(node.id, node.updated_at);
+            return rowToNode(data);
+        }
         const { data, error } = await supabase
             .from('hybrid_nodes')
             .upsert(payload, { onConflict: 'id' })

@@ -23,9 +23,22 @@ const toGradeStyle = (value: string): GradeStyle =>
 const toSourceKind = (value: string): AgentSourceKind =>
     value === 'import' || value === 'remote_csv' ? value : 'manual';
 
+export class AgentConflictError extends Error {
+    readonly agentId: string;
+    readonly expectedUpdatedAt: string;
+
+    constructor(agentId: string, expectedUpdatedAt: string) {
+        super(`La fiche ${agentId} a été modifiée depuis son chargement`);
+        this.name = 'AgentConflictError';
+        this.agentId = agentId;
+        this.expectedUpdatedAt = expectedUpdatedAt;
+    }
+}
+
 export function rowToAgent(row: Row): Agent {
     return {
         id: row.id,
+        updated_at: row.updated_at,
         nom: row.nom,
         prenom: row.prenom,
         fonction: row.fonction,
@@ -133,9 +146,24 @@ export const agentRepo = {
             return agent;
         }
 
+        const payload = agentToInsert(agent, ctx.workspaceId!);
+        if (agent.updated_at) {
+            const { data, error } = await supabase!
+                .from('org_agents')
+                .update(payload)
+                .eq('id', agent.id)
+                .eq('workspace_id', ctx.workspaceId!)
+                .eq('updated_at', agent.updated_at)
+                .select('*')
+                .maybeSingle();
+            if (error) throw error;
+            if (!data) throw new AgentConflictError(agent.id, agent.updated_at);
+            return rowToAgent(data);
+        }
+
         const { data, error } = await supabase!
             .from('org_agents')
-            .upsert(agentToInsert(agent, ctx.workspaceId!), { onConflict: 'id' })
+            .upsert(payload, { onConflict: 'id' })
             .select('*')
             .single();
         if (error) throw error;

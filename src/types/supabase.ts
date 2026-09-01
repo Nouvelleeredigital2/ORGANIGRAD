@@ -253,7 +253,7 @@ export type Database = {
                     id: string;
                     workspace_id: string;
                     node_id: string | null;
-                    channel: 'slack_webhook' | 'email' | 'whatsapp';
+                    channel: 'slack_webhook' | 'email';
                     target: string;
                     subject: string | null;
                     message: string;
@@ -266,7 +266,7 @@ export type Database = {
                     id?: string;
                     workspace_id: string;
                     node_id?: string | null;
-                    channel: 'slack_webhook' | 'email' | 'whatsapp';
+                    channel: 'slack_webhook' | 'email';
                     target: string;
                     subject?: string | null;
                     message: string;

@@ -6,7 +6,7 @@ import { PgGraphStore } from '../state/pgGraphStore.js';
 import { OrchestrationEngine } from '../orchestration/engine.js';
 import { createSynapseProducer } from '../synapse/producer.js';
 import { IllegalTransitionError } from '../domain/stateMachine.js';
-import { NodeNotFoundError } from '../state/pgGraphStore.js';
+import { NodeNotFoundError, OptimisticConcurrencyError } from '../state/pgGraphStore.js';
 import { buildAuthHook } from './auth.js';
 import type { UserTokenVerifier } from './userAuth.js';
 import { assertScope, MissingScopeError, SCOPES } from './scopes.js';
@@ -652,6 +652,14 @@ function handleError(reply: import('fastify').FastifyReply, err: unknown) {
     }
     if (err instanceof NodeNotFoundError) {
         return reply.code(404).send({ error: 'NODE_NOT_FOUND', nodeId: err.nodeId });
+    }
+    if (err instanceof OptimisticConcurrencyError) {
+        return reply.code(409).send({
+            error: 'CONCURRENT_WRITE',
+            nodeId: err.nodeId,
+            expectedUpdatedAt: err.expectedUpdatedAt,
+            message: 'Le nœud a été modifié depuis son chargement. Rechargez-le avant de réessayer.',
+        });
     }
     if (err instanceof IllegalTransitionError) {
         return reply.code(409).send({ error: 'ILLEGAL_TRANSITION', from: err.from, to: err.to });

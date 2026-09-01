@@ -176,11 +176,12 @@ Deux identités distinctes :
 
 ## 13. Limites connues
 
-- **`xlsx`** : CVE (prototype pollution / ReDoS) sans correctif npm — atténué côté
-  app (limites d'import + import dynamique). À terme : épingler le build SheetJS CDN
-  ou remplacer la bibliothèque.
-- **Validation humaine via orchestrateur** : protégée par scopes ; la vérification
-  forte par **session utilisateur (JWT Supabase)** côté orchestrateur reste à câbler.
+- **`xlsx`** : la version corrigée est vendorisée localement ; les imports restent
+  bornés et chargés dynamiquement.
+- **Écritures concurrentes** : verrou optimiste sur `updated_at` ; une modification
+  périmée est refusée avec un conflit explicite au lieu d'être écrasée.
+- **Validation humaine via orchestrateur** : protégée par scopes et par vérification
+  de session utilisateur (**JWT Supabase**, HS256/JWKS ES256 selon la configuration).
 - Caches CSV legacy (`storageService`) globaux (organigramme RH mono-source).
 - Bundle : libs lourdes (recharts/xlsx/jspdf) chargées à la demande ; le grand
   organigramme peut encore bénéficier de virtualisation.

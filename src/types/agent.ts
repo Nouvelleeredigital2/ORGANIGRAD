@@ -15,6 +15,8 @@ export type AgentSourceKind = 'import' | 'remote_csv' | 'manual';
 
 export interface Agent {
     id: string;
+    /** Version de la ligne Supabase chargée, utilisée pour les écritures optimistes. */
+    updated_at?: string;
     nom: string;
     prenom: string;
     fonction: string;

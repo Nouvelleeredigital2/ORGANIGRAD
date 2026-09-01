@@ -60,4 +60,20 @@ describe('notificationService', () => {
         const detail = await notifyHuman({ node: { ...human, notificationChannels: undefined }, message: 'X' });
         expect(detail.channels).toEqual([]);
     });
+
+    it("ne classe pas un ancien canal WhatsApp comme différé ou disponible", async () => {
+        const detail = await notifyHuman({
+            node: {
+                ...human,
+                notificationChannels: {
+                    ['whatsappId']: '+33123456789',
+                } as never,
+            },
+            message: 'X',
+        });
+
+        expect(detail.channels).toEqual([]);
+        expect(detail.failed).toEqual([]);
+        expect(detail.deferred).toEqual([]);
+    });
 });

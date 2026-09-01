@@ -28,7 +28,7 @@ export interface ObservableStore {
 
 export interface NotificationAuditEntry {
     node_id: string | null;
-    channel: 'slack_webhook' | 'email' | 'whatsapp';
+    channel: 'slack_webhook' | 'email';
     target: string;
     message: string;
     status: 'sent' | 'failed';

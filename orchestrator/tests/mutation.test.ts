@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { validateNodeMutation, NodeMutationValidationError } from '../src/api/dto.js';
+import { toPublicNodeDTO, validateNodeMutation, NodeMutationValidationError } from '../src/api/dto.js';
 
 describe('validateNodeMutation — validation des corps de mutation de nœud', () => {
     const valid = {
-        id: 'n1',
-        type: 'AGENT_IA',
+        id: '00000000-0000-4000-8000-000000000001',
+        type: 'AGENT_IA' as const,
         nom: 'Agent IA',
         roleTitre: 'Superviseur',
         gradeId: 'E',
@@ -12,7 +12,7 @@ describe('validateNodeMutation — validation des corps de mutation de nœud', (
 
     it('accepte un corps minimal valide', () => {
         const result = validateNodeMutation(valid);
-        expect(result.id).toBe('n1');
+        expect(result.id).toBe(valid.id);
         expect(result.type).toBe('AGENT_IA');
         expect(result.skills).toEqual([]);
         // Champ sensible absent ⇒ undefined (conserver), pas null (effacer).
@@ -56,6 +56,21 @@ describe('validateNodeMutation — validation des corps de mutation de nœud', (
             .toThrow(NodeMutationValidationError);
     });
 
+    it('conserve updated_at pour verrouiller une mise à jour', () => {
+        const result = validateNodeMutation({ ...valid, updated_at: '2026-09-01T12:00:00.000Z' });
+        expect(result.updated_at).toBe('2026-09-01T12:00:00.000Z');
+    });
+
+    it('refuse un id qui n’est pas un UUID', () => {
+        try {
+            validateNodeMutation({ ...valid, id: 'n1' });
+            throw new Error('La validation aurait dû échouer');
+        } catch (error) {
+            expect(error).toBeInstanceOf(NodeMutationValidationError);
+            expect((error as NodeMutationValidationError).field).toBe('id');
+        }
+    });
+
     it('refuse type inconnu', () => {
         expect(() => validateNodeMutation({ ...valid, type: 'UNKNOWN' }))
             .toThrow(NodeMutationValidationError);
@@ -85,6 +100,27 @@ describe('validateNodeMutation — validation des corps de mutation de nœud', (
             notificationChannels: { email: 'test@example.com' },
         });
         expect(result.notificationChannels?.email).toBe('test@example.com');
+    });
+
+    it("ignore un ancien canal WhatsApp non supporté", () => {
+        const result = validateNodeMutation({
+            ...valid,
+            notificationChannels: { whatsappId: '+33123456789' },
+        });
+
+        expect(result.notificationChannels).toBeNull();
+    });
+
+    it("n'expose pas d'indicateur public WhatsApp", () => {
+        const dto = toPublicNodeDTO({
+            ...valid,
+            parentID: null,
+            status: 'IDLE',
+            notificationChannels: { slackWebhook: 'https://hooks.slack.com/x' },
+        });
+
+        expect(dto.notifications).toEqual({ slack: true, email: false });
+        expect(dto.notifications).not.toHaveProperty('whatsapp');
     });
 
     it('lève sur corps non-objet', () => {

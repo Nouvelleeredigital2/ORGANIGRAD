@@ -6,22 +6,6 @@ import { PgGraphStore } from '../src/state/pgGraphStore.js';
 /**
  * P2-14 — écriture concurrente sur la même fiche.
  *
- * ⚠️ TEST DE CARACTÉRISATION, pas un test de conformité. Il documente le
- * comportement ACTUEL, qui est un « dernier écrivain gagne » SILENCIEUX : la
- * seconde écriture écrase la première sans erreur, sans avertissement, et sans
- * que l'auteur de la première l'apprenne jamais.
- *
- * Ce comportement n'est pas nécessairement faux — c'est une politique
- * défendable pour un organigramme. Mais il n'a jamais été CHOISI : il découle du
- * `on conflict do update set <toutes les colonnes> = excluded.*` des deux
- * chemins d'écriture (orchestrateur ici, upsert PostgREST côté SPA), sans
- * prédicat de version.
- *
- * Ce test existe pour que ce point devienne une décision consciente : le jour
- * où une politique (verrou optimiste, détection de conflit, versionnage) sera
- * retenue, il ÉCHOUERA — et c'est exactement ce qu'on veut. Il faudra alors le
- * réécrire en test de conformité, pas le supprimer.
- *
  * Hermétique par défaut : ne tourne QUE si `TEST_DATABASE_URL` est défini.
  *
  * Lancer :
@@ -65,7 +49,7 @@ describe.runIf(Boolean(TEST_DB_URL))('Écritures concurrentes — politique effe
         await sql.end({ timeout: 5 });
     });
 
-    it('la seconde écriture écrase la première, sans erreur ni trace', async () => {
+    it('rejette la seconde écriture avec un conflit et conserve la première', async () => {
         // Deux sessions distinctes sur le même workspace, comme deux onglets ou
         // deux personnes.
         const sessionA = new PgGraphStore(sql, workspaceId, { kind: 'user', id: 'alice' });
@@ -97,17 +81,16 @@ describe.runIf(Boolean(TEST_DB_URL))('Écritures concurrentes — politique effe
         //    réécrit quand même.
         const ecritureB = sessionB.upsertNode({ ...vueB, roleTitre: 'Rôle corrigé par Bob' });
 
-        // 4. Aucune erreur : rien ne signale le conflit à B.
-        await expect(ecritureB).resolves.toBeDefined();
+        // 4. Le verrou optimiste signale le conflit à B.
+        await expect(ecritureB).rejects.toMatchObject({ nodeId, expectedUpdatedAt: vueB.updated_at });
 
         // 5. Et la correction d'Alice a disparu.
         const finale = await sessionA.get(nodeId);
-        expect(finale.roleTitre).toBe('Rôle corrigé par Bob');
-        expect(finale.nom).toBe('Nom initial'); // ← modification d'Alice perdue
-        expect(finale.nom).not.toBe('Nom corrigé par Alice');
+        expect(finale.nom).toBe('Nom corrigé par Alice');
+        expect(finale.roleTitre).toBe('Rôle initial');
     });
 
-    it("le journal des transitions ne garde aucune trace de l'écrasement", async () => {
+    it("ne crée pas de journal de transition pour un conflit métier", async () => {
         // Conséquence pratique : ni Alice ni un auditeur ne peuvent savoir
         // après coup qu'une modification a été écrasée. `node_transitions` ne
         // couvre que les changements de STATUT, pas les champs métier.
@@ -117,7 +100,7 @@ describe.runIf(Boolean(TEST_DB_URL))('Écritures concurrentes — politique effe
         expect(lignes[0]!.n).toBe(0);
     });
 
-    it('la dernière écriture est bien celle qui gagne, pas la plus récente en date de chargement', async () => {
+    it("refuse une vue périmée même si elle tente d'écrire plus tard", async () => {
         // Précision utile : la politique n'est pas « la modification la plus
         // récente gagne » mais « le dernier ENREGISTREMENT gagne ». Un onglet
         // ouvert depuis une heure écrase une modification faite il y a dix
@@ -126,10 +109,11 @@ describe.runIf(Boolean(TEST_DB_URL))('Écritures concurrentes — politique effe
         const ancienneVue = await session.get(nodeId); // chargée maintenant
 
         await session.upsertNode({ ...ancienneVue, nom: 'Modification récente' });
-        // `ancienneVue` est désormais périmée — l'enregistrer la réimpose.
-        await session.upsertNode({ ...ancienneVue, roleTitre: 'Rôle depuis un onglet périmé' });
+        // `ancienneVue` est désormais périmée — l'enregistrer est refusé.
+        await expect(session.upsertNode({ ...ancienneVue, roleTitre: 'Rôle depuis un onglet périmé' }))
+            .rejects.toMatchObject({ nodeId, expectedUpdatedAt: ancienneVue.updated_at });
 
         const finale = await session.get(nodeId);
-        expect(finale.nom).not.toBe('Modification récente');
+        expect(finale.nom).toBe('Modification récente');
     });
 });

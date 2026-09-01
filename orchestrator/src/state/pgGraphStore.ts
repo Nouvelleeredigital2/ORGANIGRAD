@@ -29,6 +29,16 @@ export class NodeNotFoundError extends Error {
     }
 }
 
+export class OptimisticConcurrencyError extends Error {
+    constructor(
+        public readonly nodeId: string,
+        public readonly expectedUpdatedAt?: string,
+    ) {
+        super(`Conflit de version pour le nœud : ${nodeId}`);
+        this.name = 'OptimisticConcurrencyError';
+    }
+}
+
 type TransitionListener = (evt: TransitionEvent) => void;
 
 interface DbRow {
@@ -45,6 +55,7 @@ interface DbRow {
     notification_channels: unknown;
     avatar_url: string | null;
     status: NodeStatus;
+    updated_at: string;
 }
 
 export class PgGraphStore implements GraphStore {
@@ -60,9 +71,10 @@ export class PgGraphStore implements GraphStore {
     ) {}
 
     /** Déchiffre les champs sensibles d'une ligne DB vers HybridNode. */
-    private rowToNode(r: DbRow): HybridNode {
+    private rowToNode(r: DbRow): HybridNode & { updated_at: string } {
         return {
             id: r.id,
+            updated_at: r.updated_at,
             type: r.type,
             nom: r.nom,
             roleTitre: r.role_titre,
@@ -87,7 +99,7 @@ export class PgGraphStore implements GraphStore {
         return rows.map((r) => this.rowToNode(r));
     }
 
-    async get(id: string): Promise<HybridNode> {
+    async get(id: string): Promise<HybridNode & { updated_at: string }> {
         const rows = await this.sql<DbRow[]>`
             select * from public.hybrid_nodes
              where workspace_id = ${this.workspaceId} and id = ${id}
@@ -113,11 +125,14 @@ export class PgGraphStore implements GraphStore {
      * Le `status` est TOUJOURS forcé à IDLE à la création ; la machine à états
      * interdit de créer un nœud dans un état autre que IDLE.
      */
-    async upsertNode(node: HybridNode): Promise<HybridNode> {
+    async upsertNode(node: HybridNode & { updated_at?: string }): Promise<HybridNode> {
         const encPrompt = encryptText(this.cipher, node.systemPrompt ?? null);
         const encMcp = encryptJson(this.cipher, node.mcpConfig ?? null) as JsonObject | null;
         const encNotif = encryptJson(this.cipher, node.notificationChannels ?? null) as JsonObject | null;
 
+        const versionPredicate = node.updated_at
+            ? this.sql` and public.hybrid_nodes.updated_at = ${node.updated_at}::timestamptz`
+            : this.sql``;
         const rows = await this.sql<DbRow[]>`
             insert into public.hybrid_nodes
                 (id, workspace_id, type, nom, role_titre, parent_id, grade_id,
@@ -143,11 +158,14 @@ export class PgGraphStore implements GraphStore {
                 notification_channels = excluded.notification_channels,
                 avatar_url            = excluded.avatar_url,
                 updated_at            = now()
-            where public.hybrid_nodes.workspace_id = ${this.workspaceId}
+            where public.hybrid_nodes.workspace_id = ${this.workspaceId}${versionPredicate}
             returning *
         `;
         const row = rows[0];
-        if (!row) throw new NodeNotFoundError(node.id);
+        if (!row) {
+            if (node.updated_at) throw new OptimisticConcurrencyError(node.id, node.updated_at);
+            throw new NodeNotFoundError(node.id);
+        }
         return this.rowToNode(row);
     }
 

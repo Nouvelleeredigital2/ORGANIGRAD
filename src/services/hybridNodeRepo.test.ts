@@ -12,7 +12,7 @@ type Row = Database['public']['Tables']['hybrid_nodes']['Row'];
  * `vi.hoisted` : `vi.mock` ci-dessous est hissé au-dessus des imports, la
  * factory ne peut référencer que des variables déclarées de la même façon.
  */
-const { mockSupabase, mockRegistry } = vi.hoisted(() => {
+const { mockSupabase, mockRegistry, mockFrom } = vi.hoisted(() => {
     class FakeChannel {
         topic: string;
         handler: ((payload: unknown) => void) | null = null;
@@ -43,6 +43,7 @@ const { mockSupabase, mockRegistry } = vi.hoisted(() => {
         registry.delete(channel.topic);
     };
     const client = {
+        from: vi.fn(),
         channel(topic: string) {
             const existing = registry.get(topic);
             if (existing) return existing;
@@ -53,7 +54,7 @@ const { mockSupabase, mockRegistry } = vi.hoisted(() => {
         removeChannel,
     };
 
-    return { mockSupabase: client, mockRegistry: registry, mockRemoveChannel: removeChannel };
+    return { mockSupabase: client, mockRegistry: registry, mockFrom: client.from, mockRemoveChannel: removeChannel };
 });
 
 vi.mock('../lib/supabase', () => ({ supabase: mockSupabase, isSupabaseConfigured: true }));
@@ -89,6 +90,9 @@ const baseRow: Row = {
 };
 
 describe('rowToNode — champs chiffrés', () => {
+    it('préserve updated_at pour les mutations concurrentes', () => {
+        expect(rowToNode(baseRow).updated_at).toBe(baseRow.updated_at);
+    });
     it('signale un champ chiffré sans jamais en matérialiser la valeur', () => {
         const node = rowToNode({
             ...baseRow,
@@ -161,6 +165,31 @@ describe('nodeToInsert — omission = conservation', () => {
         expect(payload.system_prompt).toBe('Clair.');
         expect('mcp_config' in payload).toBe(true);
         expect('notification_channels' in payload).toBe(true);
+    });
+});
+
+describe('upsert Supabase direct — verrou optimiste', () => {
+    it('utilise update avec id, workspace_id et updated_at et signale un conflit vide', async () => {
+        const maybeSingle = vi.fn().mockResolvedValue({ data: null, error: null });
+        const query = {
+            update: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            select: vi.fn().mockReturnThis(),
+            maybeSingle,
+        };
+        mockFrom.mockReturnValueOnce(query);
+
+        const node: HybridNode = {
+            id: 'n1', updated_at: baseRow.updated_at, type: 'AGENT_IA', nom: 'Rédacteur',
+            roleTitre: 'Génère des textes', parentID: null, gradeId: 'Expert', status: 'IDLE',
+        };
+
+        await expect(hybridNodeRepo.upsert(node, { workspaceId: 'ws1' }))
+            .rejects.toMatchObject({ name: 'HybridNodeConflictError', nodeId: 'n1' });
+        expect(query.update).toHaveBeenCalledOnce();
+        expect(query.eq).toHaveBeenNthCalledWith(1, 'id', 'n1');
+        expect(query.eq).toHaveBeenNthCalledWith(2, 'workspace_id', 'ws1');
+        expect(query.eq).toHaveBeenNthCalledWith(3, 'updated_at', baseRow.updated_at);
     });
 });
 

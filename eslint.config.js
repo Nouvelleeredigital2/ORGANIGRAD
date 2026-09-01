@@ -7,7 +7,16 @@ import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
   // Ne jamais linter les sorties de build ni les dépendances.
-  globalIgnores(['dist', '**/dist/**', 'coverage', 'node_modules']),
+  globalIgnores([
+    'dist',
+    '**/dist/**',
+    'coverage',
+    'test-results',
+    'playwright-report',
+    'node_modules',
+    'supabase/.temp/**',
+    'supabase/.branches/**',
+  ]),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [

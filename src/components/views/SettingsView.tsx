@@ -61,7 +61,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         setSyncedConfig(orchestrator.config);
         setOrchUrl(orchestrator.config.baseUrl);
         setOrchKey(orchestrator.config.apiKey);
-        setOrchSaved(false);
     }
 
     /**

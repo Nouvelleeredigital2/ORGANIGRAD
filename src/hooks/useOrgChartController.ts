@@ -172,7 +172,8 @@ export const useOrgChartController = () => {
         setServerAgents(suivant);
 
         try {
-            await agentRepo.upsert(fusionne, repoCtx);
+            const persisted = await agentRepo.upsert(fusionne, repoCtx);
+            setServerAgents((current) => current.map((agent) => (agent.id === id ? persisted : agent)));
             return { ok: true };
         } catch (err) {
             setServerAgents(base);

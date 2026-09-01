@@ -25,7 +25,6 @@ export interface McpConfig {
 export interface NotificationChannels {
     slackWebhook?: string;
     email?: string;
-    whatsappId?: string;
     /** Canal Telegram d'un bot importé (ex. 'telegram-hermes' — informatif). */
     telegram?: string;
 }
@@ -47,6 +46,8 @@ export interface EncryptedFields {
 
 export interface HybridNode {
     id: string;
+    /** Version de lecture utilisée par le verrou optimiste côté serveur. */
+    updated_at?: string;
     type: NodeType;
     nom: string;
     roleTitre: string;
