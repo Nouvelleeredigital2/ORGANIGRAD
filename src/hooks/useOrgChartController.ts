@@ -141,10 +141,31 @@ export const useOrgChartController = () => {
             sourceRef,
             mode: 'replace',
         });
+        // La RPC `import_org_agents` génère des UUID côté serveur : le snapshot
+        // local porte encore les ids clients (id CSV arbitraire ou `import:slug`).
+        // Les garder dans `serverAgents` ferait échouer la première édition ou
+        // suppression (id non-uuid envoyé dans une colonne uuid). On recharge
+        // donc depuis la base — la correspondance se fait par `externalKey`,
+        // que la RPC conserve.
         agentsVersionRef.current += 1;
-        setServerAgents(snapshot);
-        return snapshot;
+        const version = agentsVersionRef.current;
+        const res = await agentRepo.list(repoCtx);
+        if (version === agentsVersionRef.current) {
+            setServerAgents(res.agents);
+            setAgentsMeta({ stale: res.stale, ...(res.error ? { error: res.error } : {}) });
+        }
+        return res.agents;
     };
+
+    /**
+     * Retrouve dans un snapshot serveur la fiche désignée par un id « vue »,
+     * qui peut être un id serveur (uuid) OU un id client d'avant promotion —
+     * dans ce cas la correspondance passe par `externalKey` (préservé par la
+     * RPC d'import, cf. preparePersistentSnapshot).
+     */
+    const resolveInSnapshot = (base: Agent[], id: string): Agent | undefined =>
+        base.find((a) => a.id === id) ??
+        base.find((a) => a.externalKey != null && a.externalKey === id);
 
     // ── Écritures ───────────────────────────────────────────────────────────
     // Optimiste puis rollback : l'utilisateur voit son geste immédiatement, et
@@ -164,11 +185,12 @@ export const useOrgChartController = () => {
             return { ok: false, message: `Préparation de la sauvegarde impossible : ${messageErreurUtilisateur(err)}` };
         }
 
-        const cible = base.find((a) => a.id === id);
+        const cible = resolveInSnapshot(base, id);
         if (!cible) return { ok: false, message: 'Cette fiche est introuvable.' };
 
-        const fusionne: Agent = { ...cible, ...updates };
-        const suivant = base.map((a) => (a.id === id ? fusionne : a));
+        // `updates` ne doit jamais écraser l'id serveur par un id client.
+        const fusionne: Agent = { ...cible, ...updates, id: cible.id };
+        const suivant = base.map((a) => (a.id === cible.id ? fusionne : a));
         setServerAgents(suivant);
 
         try {
@@ -203,13 +225,24 @@ export const useOrgChartController = () => {
             feedback.error(`Suppression non effectuée : ${messageErreurUtilisateur(err)}`);
             return;
         }
+        // L'id « vue » peut être un id client d'avant promotion : on résout la
+        // fiche réellement persistée (id serveur) avant de supprimer.
+        const cibleBase = resolveInSnapshot(base, id);
+        if (!cibleBase) {
+            feedback.error('Cette fiche est introuvable.');
+            return;
+        }
         const suivant = base
-            .filter((a) => a.id !== id)
-            .map((a) => (a.rattachementId === id ? { ...a, rattachementId: cible.rattachementId } : a));
+            .filter((a) => a.id !== cibleBase.id)
+            .map((a) =>
+                a.rattachementId === cibleBase.id
+                    ? { ...a, rattachementId: cibleBase.rattachementId }
+                    : a,
+            );
         setServerAgents(suivant);
 
         try {
-            await agentRepo.remove(id, repoCtx);
+            await agentRepo.remove(cibleBase.id, repoCtx);
             feedback.success(`${cible.prenom} ${cible.nom} retiré de l'organigramme.`);
         } catch (err) {
             setServerAgents(base);
@@ -397,12 +430,19 @@ export const useOrgChartController = () => {
      * mettre en évidence. Ajustement d'état pendant le rendu, une seule fois par
      * changement d'identifiant.
      */
-    const [syncedAgentId, setSyncedAgentId] = useState<string | null>(route.agentId);
-    if (syncedAgentId !== route.agentId) {
-        setSyncedAgentId(route.agentId);
-        if (route.agentId && viewTree.length > 0) {
-            const path = findAgentPath(viewTree, route.agentId);
-            setHighlightedSearch({ id: route.agentId, path: new Set(path ?? [route.agentId]) });
+    // La cible n'est « applicable » que quand l'arbre est chargé : dans un
+    // onglet neuf, viewTree est vide au premier rendu, et c'est l'ARRIVÉE de
+    // l'arbre (target passe de null à l'id) qui doit déclencher le surlignage.
+    // Initialiser l'état avec route.agentId rendait la condition fausse au
+    // premier rendu puis toujours vraie ensuite — le lien profond ne
+    // surlignait jamais rien à froid.
+    const [syncedAgentId, setSyncedAgentId] = useState<string | null>(null);
+    const targetAgentId = viewTree.length > 0 ? route.agentId : null;
+    if (syncedAgentId !== targetAgentId) {
+        setSyncedAgentId(targetAgentId);
+        if (targetAgentId) {
+            const path = findAgentPath(viewTree, targetAgentId);
+            setHighlightedSearch({ id: targetAgentId, path: new Set(path ?? [targetAgentId]) });
         }
     }
 

@@ -140,6 +140,7 @@ export default function HybridNodeCard({
 }: HybridNodeCardProps) {
     const archetype = ARCHETYPE[node.type];
     const isLocked = node.status === 'WAITING_HUMAN_APPROVAL';
+    const isExecuting = node.status === 'EXECUTING';
 
     const skills = useMemo(() => node.skills?.slice(0, 4) ?? [], [node.skills]);
     const extraSkills = (node.skills?.length ?? 0) - skills.length;
@@ -162,6 +163,24 @@ export default function HybridNodeCard({
         <article
             data-node-id={node.id}
             onClick={() => onOpen?.(node)}
+            // La carte entière est cliquable mais n'était atteignable ni au
+            // clavier ni par lecteur d'écran (aucun rôle, aucun ordre de
+            // tabulation) — les boutons imbriqués (Run, Contact…) le sont via
+            // leur propre <button>, `e.stopPropagation()` évite le conflit.
+            // Audit P3.
+            role={onOpen ? 'button' : undefined}
+            tabIndex={onOpen ? 0 : undefined}
+            aria-label={onOpen ? `Ouvrir la fiche de ${node.nom}` : undefined}
+            onKeyDown={
+                onOpen
+                    ? (e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              onOpen(node);
+                          }
+                      }
+                    : undefined
+            }
             className={cx(
                 'group relative w-full max-w-xs sm:w-72 cursor-pointer select-none p-5 transition-all duration-300',
                 'bg-white rounded-[28px]',
@@ -354,12 +373,18 @@ export default function HybridNodeCard({
                         <Button
                             tone="blue"
                             size="sm"
+                            // Anti double-clic : `onRun` déclenche un POST asynchrone
+                            // et le statut EXECUTING ne revient qu'après un aller-retour
+                            // réseau (Realtime/SSE) — sans cette garde, chaque clic
+                            // pendant cette fenêtre relançait le même nœud. Audit P2.
+                            disabled={isExecuting}
                             onClick={(e) => {
                                 e.stopPropagation();
+                                if (isExecuting) return;
                                 onRun(node);
                             }}
                         >
-                            <Play size={11} strokeWidth={1.8} /> Run
+                            <Play size={11} strokeWidth={1.8} /> {isExecuting ? 'En cours…' : 'Run'}
                         </Button>
                     )}
 

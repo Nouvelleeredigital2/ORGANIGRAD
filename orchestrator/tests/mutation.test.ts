@@ -14,9 +14,27 @@ describe('validateNodeMutation — validation des corps de mutation de nœud', (
         const result = validateNodeMutation(valid);
         expect(result.id).toBe(valid.id);
         expect(result.type).toBe('AGENT_IA');
-        expect(result.skills).toEqual([]);
+        // Absent ⇒ conserver (undefined), même règle que les champs sensibles
+        // ci-dessous — corrigé le 2026-08-29 (audit P2 : un `skills` toujours
+        // `[]` par défaut effaçait les compétences sur tout PUT partiel).
+        expect(result.skills).toBeUndefined();
         // Champ sensible absent ⇒ undefined (conserver), pas null (effacer).
         expect(result.systemPrompt).toBeUndefined();
+        expect(result.avatarUrl).toBeUndefined();
+    });
+
+    it('skills : présent et valide ⇒ tableau filtré ; présent mais invalide ⇒ vidé', () => {
+        const withSkills = validateNodeMutation({ ...valid, skills: ['a', 2, 'b', null] });
+        expect(withSkills.skills).toEqual(['a', 'b']);
+        const malformed = validateNodeMutation({ ...valid, skills: 'pas-un-tableau' });
+        expect(malformed.skills).toEqual([]);
+    });
+
+    it('avatarUrl : présent et null ⇒ effacement explicite, distinct de absent', () => {
+        const cleared = validateNodeMutation({ ...valid, avatarUrl: null });
+        expect(cleared.avatarUrl).toBeNull();
+        const set = validateNodeMutation({ ...valid, avatarUrl: 'https://x/y.png' });
+        expect(set.avatarUrl).toBe('https://x/y.png');
     });
 
     /**

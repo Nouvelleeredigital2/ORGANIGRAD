@@ -128,7 +128,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     const handleSaveUrl = () => {
         if (tempUrl.trim()) {
             try { new URL(tempUrl.trim()); } catch {
-                alert('URL invalide. Veuillez saisir une URL complète (ex. https://…).');
+                // `alert()` natif remplacé par le canal feedback commun — audit P3.
+                feedback.error('URL invalide. Veuillez saisir une URL complète (ex. https://…).');
                 return;
             }
         }

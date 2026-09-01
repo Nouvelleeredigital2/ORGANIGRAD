@@ -246,25 +246,22 @@ export class OrchestratorClient {
         return (await res.json()) as LinkImportResult;
     }
 
-    /**
-     * Récupère la configuration complète d'un nœud avec secrets déchiffrés
-     * (pour l'édition seulement). Exige graph:write.
-     */
-    async getNodeConfig(id: string): Promise<HybridNode | null> {
-        const headers = await this.humanHeaders();
-        const res = await this.fetchImpl(`${this.baseUrl}/nodes/${id}`, {
-            headers: { ...headers },
-        });
-        if (res.status === 404) return null;
-        if (!res.ok) throw new OrchestratorClientError(`HTTP_${res.status}`, res.status);
-        const body = (await res.json()) as { node: HybridNode };
-        return body.node;
-    }
 
+    /**
+     * `res.status !== 404` traitait TOUTE réponse non-404 comme « existe » —
+     * y compris un 401/403/500, poussant `upsertNode` à choisir PUT pour un
+     * nœud dont l'existence réelle est inconnue. On ne conclut désormais
+     * « existe » / « n'existe pas » que sur une réponse sans ambiguïté ;
+     * tout le reste échoue explicitement, comme le ferait la requête
+     * PUT/POST suivante de toute façon. Audit P3.
+     */
     private async nodeExists(id: string): Promise<boolean> {
         const headers = await this.humanHeaders();
         const res = await this.fetchImpl(`${this.baseUrl}/nodes/${id}`, { headers });
-        return res.status !== 404;
+        if (res.status === 404) return false;
+        if (res.ok) return true;
+        const detail = await res.json().catch(() => ({}));
+        throw new OrchestratorClientError(`HTTP_${res.status}`, res.status, detail);
     }
 
     private async postAction(

@@ -71,6 +71,27 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
     // Miroir synchrone de `statuses` : permet de lire le statut courant sans
     // effet de bord dans un updater setState (cf. setStatusFor).
     const statusesRef = useRef<Record<string, NodeStatus>>({});
+    // Minuteurs de la simulation locale (mode hors-orchestrateur) et du
+    // surlignage Spotlight — AUCUN n'était jamais annulé avant ce correctif.
+    // Conséquences observées : « Réinitialiser » pendant une simulation vidait
+    // les statuts PUIS les timers restants les remuaient quand même (cartes
+    // repassant EXECUTING après le reset) ; changer de workspace pendant une
+    // simulation appliquait les statuts de l'ANCIEN workspace au nouveau ;
+    // setState après démontage. Audit P2.
+    const pendingTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+    const scheduleTimeout = useCallback((fn: () => void, delay: number) => {
+        const id = setTimeout(() => {
+            pendingTimersRef.current.delete(id);
+            fn();
+        }, delay);
+        pendingTimersRef.current.add(id);
+        return id;
+    }, []);
+    const clearScheduledTimers = useCallback(() => {
+        pendingTimersRef.current.forEach((id) => clearTimeout(id));
+        pendingTimersRef.current.clear();
+    }, []);
+    useEffect(() => clearScheduledTimers, [clearScheduledTimers]);
     const feedback = useFeedback();
     // Les commandes mutantes sont filtrées par rôle : proposer une action qui
     // finira en 403 muet est pire que ne pas la proposer.
@@ -87,10 +108,16 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
     // Proxy vocal (SDK @apps2026/voice-client) : dérivé de l'URL de l'orchestrateur
     // (ex. http://localhost:3001/api → http://localhost:3001/api/voice/gateway).
     // Sans orchestrateur configuré, pas de bouton micro.
-    const { config: orchestratorConfig } = useOrchestratorConfig();
+    const { config: orchestratorConfig, isConfigured: orchestratorConfigured } = useOrchestratorConfig();
     const voiceProxyBasePath = orchestratorConfig.baseUrl
         ? `${orchestratorConfig.baseUrl.replace(/\/+$/, '')}/voice/gateway`
         : undefined;
+
+    // Déclaré ici (avant le bloc de synchronisation workspace ci-dessous, qui
+    // le référence) plutôt qu'avec les autres états d'UI plus bas.
+    const [isRunning, setIsRunning] = useState(false);
+    /** Appel distant `bridge.reset(...)` en vol — anti double-clic (audit P2). */
+    const [isResetting, setIsResetting] = useState(false);
 
     // Cloisonnement : au changement de workspace, on repart IMMÉDIATEMENT du
     // cache namespacé de CE workspace (jamais celui du précédent). Ajustement
@@ -103,6 +130,10 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
         setStatuses({});
         setStatusTimestamps({});
         setDataState(workspaceId ? 'loading' : 'ready');
+        // Une simulation locale en vol pour l'ANCIEN workspace ne doit pas
+        // continuer à muter des statuts après le changement — audit P2.
+        clearScheduledTimers();
+        setIsRunning(false);
     }
 
     // Miroir du state, resynchronisé après chaque commit (y compris les remises
@@ -132,7 +163,6 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
             off();
         };
     }, [workspaceId]);
-    const [isRunning, setIsRunning] = useState(false);
     const [validationOpen, setValidationOpen] = useState(false);
     const [editorOpen, setEditorOpen] = useState(false);
     const [editorNode, setEditorNode] = useState<HybridNode | null>(null);
@@ -189,12 +219,20 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
 
     // Notifications toast
     useEffect(() => {
+        // Sans ce ref, un timer jamais annulé pouvait effacer un toast plus
+        // récent que lui (deux notifications rapprochées) et exécutait
+        // `setToast(null)` même après démontage du composant. Audit P2.
+        let hideTimer: ReturnType<typeof setTimeout> | undefined;
         const handler = (e: Event) => {
+            if (hideTimer) clearTimeout(hideTimer);
             setToast((e as CustomEvent<NotificationEventDetail>).detail);
-            setTimeout(() => setToast(null), 4500);
+            hideTimer = setTimeout(() => setToast(null), 4500);
         };
         window.addEventListener(NOTIFICATION_EVENT, handler);
-        return () => window.removeEventListener(NOTIFICATION_EVENT, handler);
+        return () => {
+            window.removeEventListener(NOTIFICATION_EVENT, handler);
+            if (hideTimer) clearTimeout(hideTimer);
+        };
     }, []);
 
     // Ping humain quand un nœud HUMAN passe en attente d'approbation.
@@ -302,6 +340,7 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
         }
 
         // --- Simulation locale (sans orchestrateur) ---
+        clearScheduledTimers(); // purge une simulation précédente encore en vol
         resetStatuses();
         roots.forEach((root) =>
             emitActivity({
@@ -327,19 +366,19 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
         let delay = 0;
         order.forEach((n) => {
             if (n.type === 'HUMAN') {
-                setTimeout(() => setStatusFor(n, 'WAITING_HUMAN_APPROVAL'), delay);
+                scheduleTimeout(() => setStatusFor(n, 'WAITING_HUMAN_APPROVAL'), delay);
                 delay += 200;
                 return;
             }
             const isVerifier = n.type === 'SOFTWARE_MCP';
             const exec = isVerifier ? 'CONTROL_PENDING_IA' : 'EXECUTING';
-            setTimeout(() => setStatusFor(n, exec), delay);
+            scheduleTimeout(() => setStatusFor(n, exec), delay);
             delay += 900;
-            setTimeout(() => setStatusFor(n, 'IDLE'), delay);
+            scheduleTimeout(() => setStatusFor(n, 'IDLE'), delay);
             delay += 200;
         });
         // Fin de simulation : réactive le bouton après le dernier timeout
-        setTimeout(() => setIsRunning(false), delay + 100);
+        scheduleTimeout(() => setIsRunning(false), delay + 100);
     };
 
     /**
@@ -402,13 +441,18 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
                 return;
             }
             setStatusFor(n, 'EXECUTING');
-            setTimeout(() => setStatusFor(n, 'IDLE'), 900);
+            scheduleTimeout(() => setStatusFor(n, 'IDLE'), 900);
         },
-        [bridge, setStatusFor, feedback],
+        [bridge, setStatusFor, feedback, scheduleTimeout],
     );
 
     /** Remet les statuts à zéro — côté orchestrateur aussi quand il est branché. */
     const resetChain = useCallback(async (): Promise<void> => {
+        if (isResetting) return; // anti double-clic pendant l'appel distant — audit P2
+        // Purge toute simulation locale en vol : sinon ses timers restants
+        // remuaient les statuts APRÈS la remise à zéro (cartes repassant
+        // EXECUTING juste après « Réinitialiser »). Audit P2.
+        clearScheduledTimers();
         setIsRunning(false);
 
         if (!bridge.connected) {
@@ -418,19 +462,24 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
 
         // En mode connecté, vider l'état local n'a aucun effet visible : les
         // statuts affichés viennent du bridge. Il faut réinitialiser les nœuds.
-        const roots = allNodes.filter((n) => !n.parentID);
-        const results = await Promise.allSettled(roots.map((root) => bridge.reset(root.id)));
-        resetStatuses();
+        setIsResetting(true);
+        try {
+            const roots = allNodes.filter((n) => !n.parentID);
+            const results = await Promise.allSettled(roots.map((root) => bridge.reset(root.id)));
+            resetStatuses();
 
-        const failed = results.filter((r) => r.status === 'rejected').length;
-        if (failed === 0) {
-            feedback.success('Chaîne réinitialisée.');
-        } else {
-            feedback.error(
-                `Réinitialisation incomplète : ${failed}/${roots.length} racines n'ont pas répondu.`,
-            );
+            const failed = results.filter((r) => r.status === 'rejected').length;
+            if (failed === 0) {
+                feedback.success('Chaîne réinitialisée.');
+            } else {
+                feedback.error(
+                    `Réinitialisation incomplète : ${failed}/${roots.length} racines n'ont pas répondu.`,
+                );
+            }
+        } finally {
+            setIsResetting(false);
         }
-    }, [bridge, allNodes, resetStatuses, feedback]);
+    }, [isResetting, bridge, allNodes, resetStatuses, feedback, clearScheduledTimers]);
 
     /**
      * Supprime un nœud. `hybridNodeRepo.remove` existait sans aucun appelant :
@@ -463,6 +512,19 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
     const handleSaveNode = async (node: HybridNode) => {
         if (!peutEcrire) {
             setSaveError('Votre rôle ne permet pas de modifier les nœuds.');
+            return;
+        }
+        // Orchestrateur configuré mais client absent (sonde en cours ou
+        // échouée) : on REFUSE d'écrire au lieu de retomber en silence sur
+        // l'écriture Supabase directe — celle-ci stockerait systemPrompt,
+        // mcpConfig et webhooks EN CLAIR, précisément ce que le routage via
+        // l'orchestrateur ferme. Même règle que runChain pour la simulation.
+        if (orchestratorConfigured && !bridge.client) {
+            setSaveError(
+                bridge.connectionState === 'failed' || bridge.connectionState === 'degraded'
+                    ? "Orchestrateur injoignable : enregistrement refusé pour ne pas stocker les secrets en clair. Vérifiez la connexion dans Paramètres, ou déconnectez l'orchestrateur pour travailler en local."
+                    : "Connexion à l'orchestrateur en cours : réessayez dans un instant.",
+            );
             return;
         }
         const exists = hybridSource.some((n) => n.id === node.id);
@@ -573,9 +635,9 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
                             tone="slate"
                             variant="soft"
                             onClick={() => void resetChain()}
-                            disabled={!hasAnyNode || !peutReinitialiser}
+                            disabled={!hasAnyNode || !peutReinitialiser || isResetting}
                         >
-                            Réinitialiser
+                            {isResetting ? 'Réinitialisation…' : 'Réinitialiser'}
                         </Button>
                         <Button
                             tone="slate"
@@ -610,7 +672,7 @@ export const OrchestrationView: React.FC<OrchestrationViewProps> = ({ rawAgents 
                             );
                             el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
                             el?.classList.add('ring-2', 'ring-sky-400');
-                            setTimeout(
+                            scheduleTimeout(
                                 () => el?.classList.remove('ring-2', 'ring-sky-400'),
                                 1800,
                             );

@@ -561,10 +561,34 @@ create policy "ws delete owners" on public.workspaces for delete using (public.w
 -- workspace_members
 drop policy if exists "wm read members" on public.workspace_members;
 create policy "wm read members" on public.workspace_members for select using (public.is_workspace_member(workspace_id));
+-- (2026-08-29) "wm write admin" (FOR ALL) remplacée par des policies par
+-- commande protégeant la ligne du owner — cf. migration
+-- 20260829120000_wm_write_admin_owner_guard.sql.
 drop policy if exists "wm write admin" on public.workspace_members;
-create policy "wm write admin" on public.workspace_members for all
-    using (public.workspace_role_of(workspace_id) = any (array['owner'::workspace_role, 'admin'::workspace_role]))
-    with check (public.workspace_role_of(workspace_id) = any (array['owner'::workspace_role, 'admin'::workspace_role]));
+drop policy if exists "wm insert admin" on public.workspace_members;
+create policy "wm insert admin" on public.workspace_members for insert with check (
+    public.workspace_role_of(workspace_id) = any (array['owner'::workspace_role, 'admin'::workspace_role])
+    and role <> 'owner'::workspace_role
+);
+drop policy if exists "wm update admin" on public.workspace_members;
+create policy "wm update admin" on public.workspace_members for update
+    using (
+        public.workspace_role_of(workspace_id) = any (array['owner'::workspace_role, 'admin'::workspace_role])
+        and not exists (
+            select 1 from public.workspaces w
+             where w.id = workspace_members.workspace_id
+               and w.owner_id = workspace_members.user_id
+        )
+    )
+    with check (
+        public.workspace_role_of(workspace_id) = any (array['owner'::workspace_role, 'admin'::workspace_role])
+        and role <> 'owner'::workspace_role
+        and not exists (
+            select 1 from public.workspaces w
+             where w.id = workspace_members.workspace_id
+               and w.owner_id = workspace_members.user_id
+        )
+    );
 drop policy if exists "wm delete admin" on public.workspace_members;
 create policy "wm delete admin" on public.workspace_members for delete using (
     public.workspace_role_of(workspace_id) = any (array['owner'::workspace_role, 'admin'::workspace_role])

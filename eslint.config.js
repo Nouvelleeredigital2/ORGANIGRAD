@@ -6,7 +6,10 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  // Ne jamais linter les sorties de build ni les dépendances.
+  // Ne jamais linter les sorties de build, les dépendances, ni les artefacts
+  // générés localement par le CLI Supabase (`supabase start`) — non versionnés,
+  // ils ne suivent aucune convention du dépôt et faussaient les rapports de
+  // lint (208 erreurs fantômes constatées lors de l'audit du 2026-08-29).
   globalIgnores([
     'dist',
     '**/dist/**',

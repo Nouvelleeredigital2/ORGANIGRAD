@@ -164,6 +164,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             >
                                 Workspaces
                             </p>
+                            {ws.error && (
+                                <p
+                                    className="mx-3 mb-2 rounded bg-[rgba(255,59,48,0.08)] px-2 py-1.5 text-[11px] leading-snug text-[var(--system-red)]"
+                                    role="alert"
+                                >
+                                    {ws.error}
+                                </p>
+                            )}
                             {ws.workspaces.map((w) => (
                                 <button
                                     key={w.id}

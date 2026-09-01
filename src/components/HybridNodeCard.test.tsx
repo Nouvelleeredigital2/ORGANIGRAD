@@ -48,6 +48,35 @@ describe('HybridNodeCard', () => {
         expect(screen.getByText('rag')).toBeInTheDocument();
     });
 
+    // Audit P2 : `onRun` n'était jamais désactivé pendant l'exécution — un
+    // second clic pendant la fenêtre EXECUTING relançait le même nœud.
+    it('désactive Run tant que le nœud est EXECUTING (anti double-clic)', () => {
+        const onRun = vi.fn();
+        const node: HybridNode = {
+            ...baseNode,
+            id: 'ia-2',
+            type: 'AGENT_IA',
+            status: 'EXECUTING',
+        };
+        render(<HybridNodeCard node={node} onRun={onRun} />);
+        const btn = screen.getByRole('button', { name: /En cours/i }) as HTMLButtonElement;
+        expect(btn.disabled).toBe(true);
+        fireEvent.click(btn);
+        expect(onRun).not.toHaveBeenCalled();
+    });
+
+    // Audit P3 : la carte entière est cliquable (onOpen) mais n'était
+    // atteignable ni au clavier ni par lecteur d'écran (aucun rôle, aucun
+    // ordre de tabulation).
+    it('ouvre la fiche au clavier (Entrée) — accessibilité', () => {
+        const onOpen = vi.fn();
+        render(<HybridNodeCard node={baseNode} onOpen={onOpen} />);
+        const card = screen.getByRole('button', { name: /Ouvrir la fiche de Alice Martin/i });
+        expect(card).toHaveAttribute('tabIndex', '0');
+        fireEvent.keyDown(card, { key: 'Enter' });
+        expect(onOpen).toHaveBeenCalledWith(baseNode);
+    });
+
     it("verrouille la carte en attente d'approbation humaine", () => {
         const node: HybridNode = {
             ...baseNode,

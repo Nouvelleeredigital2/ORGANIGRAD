@@ -10,6 +10,7 @@ import { usePermissions } from '../../auth/usePermissions';
 import { useFeedback } from '../../feedback/FeedbackContext';
 import { useCopyToClipboard } from '../../hooks/useCopyToClipboard';
 import { canAdminManageMember } from './adminGuards';
+import { describeWorkspaceRpcError } from '../../utils/describeAuthError';
 
 /**
  * MembersView — gestion des membres et invitations d'un workspace.
@@ -61,6 +62,9 @@ export function MembersView() {
     const [inviteRole, setInviteRole] = useState<WorkspaceRole>('member');
     const [creating, setCreating] = useState(false);
     const [revealed, setRevealed] = useState<{ url: string; email: string } | null>(null);
+    /** `user_id` du membre dont le rôle est en cours de modification — anti
+     * double-clic et retour visuel pendant l'appel. Audit P2/P3. */
+    const [changingRoleFor, setChangingRoleFor] = useState<string | null>(null);
 
     const refresh = useCallback(async () => {
         // Sortie muette auparavant : la vue affichait « Aucun membre » alors
@@ -146,7 +150,10 @@ export function MembersView() {
         });
         setCreating(false);
         if (err) {
-            setError(err.message);
+            // Audit — amélioration #7 : messages RPC bruts (ex.
+            // « invitation_already_pending ») incompréhensibles pour un
+            // administrateur non technique.
+            setError(describeWorkspaceRpcError(err.message));
             return;
         }
         const row = Array.isArray(data) ? data[0] : data;
@@ -175,8 +182,9 @@ export function MembersView() {
             .update({ revoked_at: new Date().toISOString() })
             .eq('id', id);
         if (err) {
-            setError(err.message);
-            feedback.error(`Révocation échouée : ${err.message}`);
+            const msg = describeWorkspaceRpcError(err.message);
+            setError(msg);
+            feedback.error(`Révocation échouée : ${msg}`);
         } else {
             feedback.success('Invitation révoquée.');
         }
@@ -184,20 +192,34 @@ export function MembersView() {
     };
 
     const handleChangeRole = async (memberId: string, next: WorkspaceRole) => {
-        if (!supabase || !activeId) return;
+        if (!supabase || !activeId || changingRoleFor) return; // anti double-clic — audit P2
+        const cible = members.find((m) => m.user_id === memberId);
+        const nom = cible?.email ?? 'ce membre';
+        // Un changement de rôle est une action de permission, pas un simple
+        // champ de formulaire : elle s'appliquait jusqu'ici instantanément au
+        // `onChange`, sans confirmation ni retour visuel pendant l'appel.
+        // Audit P2.
+        if (!confirm(`Changer le rôle de ${nom} en « ${next} » ?`)) return;
+
+        setChangingRoleFor(memberId);
         setError(null);
-        const { error: err } = await supabase
-            .from('workspace_members')
-            .update({ role: next })
-            .eq('workspace_id', activeId)
-            .eq('user_id', memberId);
-        if (err) {
-            setError(err.message);
-            feedback.error(`Rôle non modifié : ${err.message}`);
-        } else {
-            feedback.success(`Rôle mis à jour : ${next}.`);
+        try {
+            const { error: err } = await supabase
+                .from('workspace_members')
+                .update({ role: next })
+                .eq('workspace_id', activeId)
+                .eq('user_id', memberId);
+            if (err) {
+                const msg = describeWorkspaceRpcError(err.message);
+                setError(msg);
+                feedback.error(`Rôle non modifié : ${msg}`);
+            } else {
+                feedback.success(`Rôle mis à jour : ${next}.`);
+            }
+            await refresh();
+        } finally {
+            setChangingRoleFor(null);
         }
-        await refresh();
     };
 
     /**
@@ -221,10 +243,9 @@ export function MembersView() {
             .eq('user_id', memberId);
 
         if (err) {
-            setError(err.message);
-            feedback.error(
-                self ? `Départ impossible : ${err.message}` : `Retrait impossible : ${err.message}`,
-            );
+            const msg = describeWorkspaceRpcError(err.message);
+            setError(msg);
+            feedback.error(self ? `Départ impossible : ${msg}` : `Retrait impossible : ${msg}`);
             return;
         }
 
@@ -420,6 +441,7 @@ export function MembersView() {
                                         {canModify ? (
                                             <Select
                                                 value={m.role}
+                                                disabled={changingRoleFor === m.user_id}
                                                 onChange={(e) =>
                                                     void handleChangeRole(
                                                         m.user_id,

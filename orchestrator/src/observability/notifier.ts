@@ -333,7 +333,13 @@ export class Notifier {
     }
 
     private async emit(evt: TransitionEvent): Promise<void> {
-        if (evt.to === 'WAITING_HUMAN_APPROVAL') {
+        // `internal: true` : hop technique du moteur (fin de nœud IA/MCP sans
+        // aval humain), pas une vraie attente de validation — aucun humain
+        // n'est réellement en attente. Sans cette distinction, CHAQUE fin
+        // d'exécution d'agent envoyait un ping « Validation requise » erroné
+        // sur #validations. Audit P2.
+        const isGenuineHumanGate = evt.to === 'WAITING_HUMAN_APPROVAL' && evt.payload?.['internal'] !== true;
+        if (isGenuineHumanGate) {
             await this.notifyValidation(evt);
         } else {
             await this.notifyFluxJournal(evt);

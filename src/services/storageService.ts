@@ -36,8 +36,4 @@ export const storageService = {
     setCsvUrl: (url: string): void => {
         localStorage.setItem(STORAGE_KEYS.CSV_URL, url);
     },
-
-    clearAll: (): void => {
-        Object.values(STORAGE_KEYS).forEach((key) => localStorage.removeItem(key));
-    },
 };

@@ -16,6 +16,7 @@ import { SseTicketStore } from './sseTickets.js';
 import { PgAuditTrail } from '../observability/auditLog.js';
 import { dispatchMcpRequest } from '../mcp/mcpServer.js';
 import { Notifier, PgAuditLogger } from '../observability/notifier.js';
+import { FixedWindowRateLimiter } from '../observability/rateLimiter.js';
 import { safeFetch } from '../net/ssrfGuard.js';
 import type { HybridNode } from '../domain/types.js';
 
@@ -78,6 +79,12 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
     const synapseProducer = createSynapseProducer({ appUrl: deps.notifierOptions?.appUrl });
     const sseTickets = new SseTicketStore();
     const audit = new PgAuditTrail(deps.sql);
+    // Partagé entre TOUTES les requêtes : storeFor() instancie un Notifier par
+    // requête (le store, lui, doit être scoped par requête), mais le limiteur
+    // de débit doit survivre entre les requêtes pour compter réellement 60/min
+    // par workspace — un limiteur neuf à chaque appel repartait de zéro et ne
+    // limitait jamais rien. Audit P2.
+    const outboundRateLimiter = new FixedWindowRateLimiter({ max: 60, windowMs: 60_000 });
 
     // Chiffrement au repos — optionnel (si la clé n'est pas configurée, les
     // nœuds sont stockés en clair et restent lisibles, rétro-compatible).
@@ -86,8 +93,19 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
         if (_cipher !== undefined) return _cipher;
         try {
             _cipher = SecretCipher.fromEnv();
-        } catch {
+        } catch (err) {
             _cipher = null;
+            // Absence de la variable = choix rétro-compatible normal, silencieux.
+            // Une variable PRÉSENTE mais invalide (mauvaise longueur, base64
+            // corrompu) est presque toujours une faute de frappe qui désactive
+            // le chiffrement sans que personne ne s'en aperçoive — audit P2.
+            if (process.env.INTEGRATION_ENCRYPTION_KEY?.trim()) {
+                console.error(
+                    '[orchestrator] INTEGRATION_ENCRYPTION_KEY est définie mais invalide — ' +
+                        'le chiffrement au repos est DÉSACTIVÉ, les secrets seront stockés en clair.',
+                    { error: err instanceof Error ? err.message : String(err) },
+                );
+            }
         }
         return _cipher;
     };
@@ -203,8 +221,11 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
                         sql: deps.sql,
                         workspaceId: req.workspaceId!,
                         apiKeyId: req.apiKeyId,
+                        userId: req.userId,
                         scopes: req.scopes,
                         mcpClient: mcp,
+                        cipher: getCipher(),
+                        synapseProducer,
                     },
                 ),
             ),
@@ -246,6 +267,7 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
                 auditLogger,
                 emailEdgeFunctionUrl: nc.emailEdgeFunctionUrl,
                 supabaseServiceRoleKey: nc.supabaseServiceRoleKey,
+                rateLimiter: outboundRateLimiter,
             });
             notifier.attach();
         }
@@ -293,33 +315,45 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
             const body = (await res.json()) as { agents?: LinkBridgeAgent[] };
             const agents = Array.isArray(body.agents) ? body.agents : [];
 
-            const store = storeFor(req.workspaceId!, req.apiKeyId, req.userId);
-            let created = 0;
-            let updated = 0;
-            for (const agent of agents) {
-                if (!agent.enabled) continue;
-                const existed = await store.has(agent.id);
-                const node: HybridNode = {
-                    id: agent.id,
-                    type: 'AGENT_IA',
-                    nom: agent.name,
-                    roleTitre: agent.title ?? agent.role,
-                    parentID: null,
-                    gradeId: 'Agent',
-                    skills: [agent.network, agent.role].filter((s): s is string => Boolean(s)),
-                    notificationChannels: agent.channel?.startsWith('telegram')
-                        ? { telegram: agent.channel }
-                        : undefined,
-                    status: 'IDLE',
-                };
-                await store.upsertNode(node);
-                await deps.sql`
-                    update public.hybrid_nodes set external_app = 'link'
-                     where id = ${agent.id} and workspace_id = ${req.workspaceId!}
-                `;
-                if (existed) updated += 1;
-                else created += 1;
-            }
+            // Un seul agent Hermes/LINK en échec (id dupliqué, contrainte SQL)
+            // ne doit pas laisser un import partiel : tout le lot est ATOMIQUE.
+            // `has()` est lu DANS la même transaction que l'upsert qui suit,
+            // pour que le compte créés/mis à jour reste correct même face à un
+            // import concurrent du même workspace. Audit P2.
+            const actor = req.userId
+                ? ({ kind: 'user', id: req.userId } as const)
+                : ({ kind: 'api_key', id: req.apiKeyId } as const);
+            const workspaceId = req.workspaceId!;
+            const { created, updated } = await deps.sql.begin(async (tx) => {
+                const txStore = new PgGraphStore(tx, workspaceId, actor, getCipher());
+                let created = 0;
+                let updated = 0;
+                for (const agent of agents) {
+                    if (!agent.enabled) continue;
+                    const existed = await txStore.has(agent.id);
+                    const node: HybridNode = {
+                        id: agent.id,
+                        type: 'AGENT_IA',
+                        nom: agent.name,
+                        roleTitre: agent.title ?? agent.role,
+                        parentID: null,
+                        gradeId: 'Agent',
+                        skills: [agent.network, agent.role].filter((s): s is string => Boolean(s)),
+                        notificationChannels: agent.channel?.startsWith('telegram')
+                            ? { telegram: agent.channel }
+                            : undefined,
+                        status: 'IDLE',
+                    };
+                    await txStore.upsertNode(node);
+                    await tx`
+                        update public.hybrid_nodes set external_app = 'link'
+                         where id = ${agent.id} and workspace_id = ${workspaceId}
+                    `;
+                    if (existed) updated += 1;
+                    else created += 1;
+                }
+                return { created, updated };
+            });
 
             recordAudit(req, 'link:import_agents', null, 'success');
             return { ok: true, created, updated, skipped: agents.length - created - updated, total: agents.length };
@@ -364,6 +398,7 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
                 ...body,
                 parentID: body.parentID ?? null,
                 systemPrompt: body.systemPrompt ?? undefined,
+                skills: body.skills ?? [],
                 mcpConfig: body.mcpConfig ?? undefined,
                 notificationChannels: body.notificationChannels ?? undefined,
                 avatarUrl: body.avatarUrl ?? undefined,
@@ -399,12 +434,16 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
                 parentID: body.parentID ?? null,
                 systemPrompt:
                     body.systemPrompt === undefined ? existing.systemPrompt : (body.systemPrompt ?? undefined),
+                // `skills`/`avatarUrl` absents ⇒ on reprend l'existant, même
+                // règle que les champs sensibles ci-dessus (audit P2 : un PUT
+                // partiel ne doit jamais effacer ce qu'il n'a pas mentionné).
+                skills: body.skills === undefined ? existing.skills : body.skills,
                 mcpConfig: body.mcpConfig === undefined ? existing.mcpConfig : (body.mcpConfig ?? undefined),
                 notificationChannels:
                     body.notificationChannels === undefined
                         ? existing.notificationChannels
                         : (body.notificationChannels ?? undefined),
-                avatarUrl: body.avatarUrl ?? undefined,
+                avatarUrl: body.avatarUrl === undefined ? existing.avatarUrl : (body.avatarUrl ?? undefined),
                 status: existing.status,
             };
             const node = await store.upsertNode(updatePayload);
@@ -664,5 +703,15 @@ function handleError(reply: import('fastify').FastifyReply, err: unknown) {
     if (err instanceof IllegalTransitionError) {
         return reply.code(409).send({ error: 'ILLEGAL_TRANSITION', from: err.from, to: err.to });
     }
-    return reply.code(500).send({ error: err instanceof Error ? err.message : String(err) });
+    // Un 500 = `err.message` brut peut divulguer des détails internes (erreurs
+    // SQL du driver `postgres`, chemins de fichiers, etc.) à l'appelant. Le
+    // détail va dans les LOGS serveur, jamais dans la réponse — seul un id de
+    // requête est renvoyé pour permettre de corréler côté support. Audit P3.
+    const requestId = reply.request?.id;
+    console.error('[api] erreur interne', {
+        requestId,
+        error: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined,
+    });
+    return reply.code(500).send({ error: 'INTERNAL_ERROR', requestId });
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { NodeEditor } from './NodeEditor';
 import type { HybridNode } from '../types/hybridNode';
 
@@ -29,6 +29,35 @@ describe('NodeEditor', () => {
         render(<NodeEditor isOpen node={null} onClose={() => {}} onSave={onSave} />);
         const create = screen.getByRole('button', { name: 'Créer' }) as HTMLButtonElement;
         expect(create.disabled).toBe(true);
+    });
+
+    // Audit P2 : le bouton n'était pas désactivé pendant l'appel async
+    // d'onSave — un double-clic déclenchait deux upserts.
+    it("désactive le bouton pendant l'enregistrement (anti double-clic)", async () => {
+        let resolveSave!: () => void;
+        const onSave = vi.fn(() => new Promise<void>((resolve) => { resolveSave = resolve; }));
+        render(<NodeEditor isOpen node={null} onClose={() => {}} onSave={onSave} />);
+        fireEvent.change(screen.getByPlaceholderText('Rédacteur Campagne'), {
+            target: { value: 'Rédacteur Test' },
+        });
+        fireEvent.change(screen.getByPlaceholderText('Génère textes & visuels'), {
+            target: { value: 'Génère du contenu' },
+        });
+
+        fireEvent.click(screen.getByRole('button', { name: 'Créer' }));
+        expect(onSave).toHaveBeenCalledTimes(1);
+
+        const button = await screen.findByRole('button', { name: 'Enregistrement…' });
+        expect((button as HTMLButtonElement).disabled).toBe(true);
+
+        // Un second clic pendant l'enregistrement ne déclenche pas un second appel.
+        fireEvent.click(button);
+        expect(onSave).toHaveBeenCalledTimes(1);
+
+        await act(async () => resolveSave());
+        await waitFor(() =>
+            expect(screen.getByRole('button', { name: 'Créer' })).not.toBeDisabled(),
+        );
     });
 
     /**

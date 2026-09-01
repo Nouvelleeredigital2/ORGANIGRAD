@@ -29,6 +29,9 @@ const WORKSPACE = {
 const reponse = vi.hoisted(() => ({
     lignes: [] as Array<{ role: string; workspace: unknown }>,
 }));
+const erreurLecture = vi.hoisted(() => ({
+    value: null as Error | null,
+}));
 
 vi.mock('../lib/supabase', () => {
     const builder = {
@@ -39,7 +42,7 @@ vi.mock('../lib/supabase', () => {
         }),
         order: vi.fn((...args: unknown[]) => {
             orderSpy(...args);
-            return Promise.resolve({ data: reponse.lignes, error: null });
+            return Promise.resolve({ data: erreurLecture.value ? null : reponse.lignes, error: erreurLecture.value });
         }),
     };
     return {
@@ -56,6 +59,7 @@ describe('useWorkspace', () => {
         orderSpy.mockClear();
         localStorage.clear();
         reponse.lignes = [{ role: 'viewer', workspace: WORKSPACE }];
+        erreurLecture.value = null;
     });
 
     it("filtre les adhésions sur l'utilisateur courant (user_id)", async () => {
@@ -76,6 +80,30 @@ describe('useWorkspace', () => {
         await waitFor(() => expect(result.current.loading).toBe(false));
         expect(result.current.workspaces).toEqual([]);
         expect(eqSpy).not.toHaveBeenCalled();
+        expect(result.current.error).toBeNull();
+    });
+});
+
+// Audit P2 : un échec de lecture (RLS, réseau) rendait la liste vide sans
+// AUCUN signal — indiscernable d'un compte sans workspace.
+describe('useWorkspace — échec de chargement', () => {
+    beforeEach(() => {
+        localStorage.clear();
+        eqSpy.mockClear();
+        orderSpy.mockClear();
+        reponse.lignes = [{ role: 'viewer', workspace: WORKSPACE }];
+        erreurLecture.value = null;
+    });
+
+    it('expose error au lieu de se taire quand la requête échoue', async () => {
+        // Un PostgrestError réel (supabase-js) EST une instance d'Error. Le
+        // mock mutable évite de réinitialiser le registre de modules Vitest et
+        // de contaminer les scénarios de revalidation suivants.
+        erreurLecture.value = new Error('permission denied');
+        const { result } = renderHook(() => useWorkspace('user-viewer'));
+        await waitFor(() => expect(result.current.loading).toBe(false));
+        expect(result.current.error).toContain('permission denied');
+        expect(result.current.workspaces).toEqual([]);
     });
 
     /**

@@ -11,6 +11,7 @@ const GLYPH_ICON: Record<'disc' | 'aperture' | 'chiclet', string> = {
 };
 import { useEscapeClose } from '../hooks/useEscapeClose';
 import { randomUuid } from '../utils/randomId';
+import { useFeedback } from '../feedback/FeedbackContext';
 
 /**
  * Éditeur de HybridNode — création ou édition. Construit sur les primitives
@@ -23,7 +24,9 @@ interface NodeEditorProps {
     /** Liste des nœuds disponibles comme parents. */
     availableNodes?: HybridNode[];
     onClose: () => void;
-    onSave: (node: HybridNode) => void;
+    /** Peut renvoyer une Promise : NodeEditor désactive alors le bouton
+     * jusqu'à sa résolution (voir `isSaving` ci-dessous). */
+    onSave: (node: HybridNode) => void | Promise<void>;
 }
 
 function emptyNode(type: NodeType = 'AGENT_IA'): HybridNode {
@@ -69,12 +72,16 @@ function EncryptedFieldNotice({ label, onReplace }: { label: string; onReplace: 
 type SecretField = 'systemPrompt' | 'mcpConfig' | 'notificationChannels';
 
 export function NodeEditor({ isOpen, node, availableNodes = [], onClose, onSave }: NodeEditorProps) {
+    const feedback = useFeedback();
     const parentOptions: HybridNode[] = useMemo(() => availableNodes, [availableNodes]);
     const [draft, setDraft] = useState<HybridNode>(() => node ?? emptyNode());
     const [skillsInput, setSkillsInput] = useState<string>((node?.skills ?? []).join(', '));
     // Champs chiffrés que l'utilisateur a choisi de remplacer. Tant qu'un champ
     // n'y figure pas, sa valeur n'est pas envoyée et le serveur la conserve.
     const [replacing, setReplacing] = useState<Partial<Record<SecretField, boolean>>>({});
+    // Anti double-soumission : le bouton n'était pas désactivé pendant l'appel
+    // async d'`onSave` — un double-clic déclenchait deux upserts. Audit P2.
+    const [isSaving, setIsSaving] = useState(false);
 
     // Réinitialise le brouillon quand la modale s'ouvre sur un nœud différent —
     // ajustement d'état PENDANT le rendu (pattern React recommandé) plutôt qu'un
@@ -87,6 +94,7 @@ export function NodeEditor({ isOpen, node, availableNodes = [], onClose, onSave 
             setDraft(node ?? emptyNode());
             setSkillsInput((node?.skills ?? []).join(', '));
             setReplacing({});
+            setIsSaving(false);
         }
     }
 
@@ -116,7 +124,8 @@ export function NodeEditor({ isOpen, node, availableNodes = [], onClose, onSave 
         try { new URL(url); return true; } catch { return false; }
     };
 
-    const handleSave = () => {
+    const handleSave = async () => {
+        if (isSaving) return; // re-entrance : un clic déjà en vol
         // Un champ remplacé cesse d'être « chiffré non lisible » : on retire son
         // drapeau pour que la nouvelle valeur soit bien transmise. Les autres
         // gardent le leur, donc restent omis de la charge — et conservés.
@@ -132,18 +141,28 @@ export function NodeEditor({ isOpen, node, availableNodes = [], onClose, onSave 
             ...(stillEncrypted ? { encrypted } : { encrypted: undefined }),
         };
         if (!finalNode.nom.trim() || !finalNode.roleTitre.trim()) return;
-        // Validation URLs
+        // Validation URLs — `alert()` natif remplacé par le canal feedback
+        // commun à tout le reste de l'application (bloquant le thread et hors
+        // du design system, contrairement au reste des erreurs). Audit P3.
         const mcpUrl = finalNode.mcpConfig?.serverUrl;
         if (mcpUrl && !isValidUrl(mcpUrl)) {
-            alert('URL du serveur MCP invalide.');
+            feedback.error('URL du serveur MCP invalide.');
             return;
         }
         const slackUrl = finalNode.notificationChannels?.slackWebhook;
         if (slackUrl && !isValidUrl(slackUrl)) {
-            alert('URL du webhook Slack invalide.');
+            feedback.error('URL du webhook Slack invalide.');
             return;
         }
-        onSave(finalNode);
+        setIsSaving(true);
+        try {
+            await onSave(finalNode);
+        } finally {
+            // Si `onSave` a fermé la modale (succès), `isOpen` est déjà false
+            // au prochain rendu et ce setState n'a plus d'effet visible ; s'il
+            // a échoué, l'éditeur reste ouvert et redevient utilisable.
+            setIsSaving(false);
+        }
     };
 
     return (
@@ -352,10 +371,10 @@ export function NodeEditor({ isOpen, node, availableNodes = [], onClose, onSave 
                     </Button>
                     <Button
                         tone={archetype.tone}
-                        onClick={handleSave}
-                        disabled={!draft.nom.trim() || !draft.roleTitre.trim()}
+                        onClick={() => void handleSave()}
+                        disabled={isSaving || !draft.nom.trim() || !draft.roleTitre.trim()}
                     >
-                        {node ? 'Enregistrer' : 'Créer'}
+                        {isSaving ? 'Enregistrement…' : node ? 'Enregistrer' : 'Créer'}
                     </Button>
                 </footer>
             </Surface>
