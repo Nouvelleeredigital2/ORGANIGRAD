@@ -1,6 +1,13 @@
 # Organigrad — reste à faire avant la validation production
 
-**État au 2026-09-01**
+**État au 2026-09-01** — ⚠️ **partiellement périmé, lire d'abord**
+[`etat-production-2026-09-02.md`](etat-production-2026-09-02.md).
+
+Son P0 « publier la SPA » repose sur une prémisse fausse : Vercel a été supprimé
+de l'infrastructure les 21-22/08, et la SPA est en ligne sur le VPS à
+`https://organigrad.nouvelleeredigital.fr`. Le 404 relevé au §3 sur
+`organigrad.vercel.app` mesure une URL morte, pas un défaut de publication.
+Le P0 « migrations » est traité et détaillé dans le document du 02/09.
 
 Ce document distingue les corrections réalisées dans le dépôt, les contrôles
 réussis localement et les actions qui nécessitent encore un accès à Supabase,
