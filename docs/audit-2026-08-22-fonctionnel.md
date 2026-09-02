@@ -248,14 +248,24 @@ utilisateur non membre et se fait refuser.
 > **Confirmer par `get_project_url` avant tout `execute_sql`** — un connecteur
 > voisin viserait une autre application.
 
-### 🟠 B-4 · Écrasement silencieux en écriture concurrente
+### 🟠 B-4 · Écrasement silencieux en écriture concurrente — ✅ **corrigé sur `master`**
 
-Deux personnes sur la même fiche : la seconde écrase la première, **sans erreur,
-sans trace, sans que personne l'apprenne**. Prouvé sur PostgreSQL réel.
+Deux personnes sur la même fiche : la seconde écrasait la première, **sans
+erreur, sans trace, sans que personne l'apprenne**. Prouvé sur PostgreSQL réel.
 
-Ce n'est pas un bug au sens strict — c'est une politique qui n'a jamais été
-choisie. Quatre options sont posées dans
-`architecture/concurrence-ecritures.md` ; la décision t'appartient.
+Ce n'était pas un bug au sens strict, mais une politique jamais choisie. Celle
+retenue est le **verrou optimiste** sur `updated_at` (option 2 de
+`architecture/concurrence-ecritures.md`), appliquée à `hybrid_nodes` et
+`org_agents` ; un conflit remonte en **HTTP 409** au lieu d'écraser. Les imports
+groupés sont en plus sérialisés par un verrou consultatif.
+
+Le verrou détecte, il ne fusionne pas : le second auteur doit recharger. Mais il
+n'écrase plus personne à son insu.
+
+> ⚠️ Une pièce manque encore **en production** : la migration
+> `20260901090000_import_org_agents_optimistic_lock.sql` n'est pas appliquée, et
+> `import_org_agents` y est toujours en 5 paramètres. L'ordre d'application est
+> contraint — voir [`etat-production-2026-09-02.md`](etat-production-2026-09-02.md) §3.
 
 ### 🟡 B-5 · Double envoi d'e-mail en concurrence — ✅ **corrigé le 2026-08-22**
 
@@ -297,10 +307,15 @@ sur ces fichiers (motif `eyJ…`).
 
 ### 🟢 B-7 · Points mineurs
 
-- `whatsappId` est déclaré dans le schéma sans aucune implémentation. Non exposé
-  dans l'interface — dormant, pas cassé. À retirer ou à implémenter.
-- Dérive de l'historique `supabase_migrations` (O-04) : comptabilité seulement,
-  objets conformes.
+- ~~`whatsappId` déclaré sans implémentation~~ — ✅ **retiré sur `master`**. Le
+  canal ne promet plus rien. Il subsiste une seule mention, dans
+  `notificationService.test.ts` : un test de **rétrocompatibilité** qui vérifie
+  qu'un ancien payload portant encore `whatsapp` conserve bien e-mail, Slack et
+  Telegram. C'est voulu, pas un résidu d'oubli.
+- Dérive de l'historique `supabase_migrations` (O-04) : ✅ **expliquée le
+  2026-09-02**. Les quatre migrations du 03/08 manquent au journal, mais
+  `org_agents` existe en production avec ses 4 policies. C'est un écart de
+  comptabilité, pas de schéma.
 
 ## 3. Ce qui est inconnu — jamais exécuté
 
