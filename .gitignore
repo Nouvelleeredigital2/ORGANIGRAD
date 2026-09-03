@@ -68,3 +68,5 @@ vite-dev.log
 # poste sans jamais avoir été commité.
 !vendor/*.tgz
 
+_e2e/captures/
+_e2e/fixtures/
