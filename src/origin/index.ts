@@ -2,6 +2,7 @@ export * from './types';
 export * from './OriginTokens';
 export * from './OriginContext';
 export * from './OriginProvider';
+export * from './components/OriginButton';
 export * from './components/OriginGlass';
 export * from './components/OriginFilament';
 export * from './components/OriginModule';

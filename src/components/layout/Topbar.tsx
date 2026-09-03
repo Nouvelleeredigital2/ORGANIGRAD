@@ -1,6 +1,6 @@
 import React from 'react';
 import { CloudDownload, FileText, Upload, Loader2, AlertCircle } from 'lucide-react';
-import { OriginGlass, useOrigin } from '../../origin';
+import { OriginButton, OriginGlass, useOrigin } from '../../origin';
 import { useFileImport } from '../../hooks/useFileImport';
 
 interface TopbarProps {
@@ -68,33 +68,40 @@ export const Topbar: React.FC<TopbarProps> = ({
                     ref={fileInputRef}
                     onChange={onFileChange}
                 />
-                <button
-                    className="origin-button flex items-center gap-2 text-xs font-extrabold uppercase tracking-widest"
+                <OriginButton
+                    variant="secondary"
+                    className="text-xs font-extrabold uppercase tracking-widest"
                     onClick={triggerPick}
                     disabled={loading || isImporting}
                     title="Importer un fichier (CSV, XLS, XLSX)"
                 >
                     {isImporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
                     Importer
-                </button>
+                </OriginButton>
                 <div className="w-px h-8 bg-slate-200/60 mx-1"></div>
-                <button
-                    className="origin-button flex items-center gap-2 text-xs font-extrabold uppercase tracking-widest"
+                <OriginButton
+                    variant="secondary"
+                    className="text-xs font-extrabold uppercase tracking-widest"
                     onClick={handleExportCSV}
                     disabled={loading || isImporting || !canExport}
                     title="Exporter les donnees modifiees au format CSV"
                 >
                     <CloudDownload className="w-4 h-4" />
                     Export CSV
-                </button>
-                <button
-                    className="origin-button-primary flex items-center gap-2 text-xs font-extrabold uppercase tracking-widest"
+                </OriginButton>
+                {/* Action principale : `origin-button-primary` n'existait dans
+                    aucune feuille de style — ce bouton n'avait donc ni la forme
+                    de la marque ni l'accent. La variante le lui rend. */}
+                <OriginButton
+                    variant="primary"
+                    className="text-xs font-extrabold uppercase tracking-widest"
                     onClick={handleExportPDF}
                     disabled={isExporting || loading || isImporting || !canExport}
+                    title="Exporter l'organigramme au format PDF A3"
                 >
                     <FileText className="w-4 h-4" />
                     Export PDF
-                </button>
+                </OriginButton>
                 {!canExport && !loading && (
                     <p className="absolute right-8 top-[100%] mt-2 text-xs font-medium text-slate-500" role="status">
                         Importez des fiches avant d&apos;exporter.
