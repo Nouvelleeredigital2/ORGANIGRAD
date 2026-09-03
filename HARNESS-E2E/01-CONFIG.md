@@ -40,6 +40,33 @@ de toute façon. Ce qui en découle, et qui n'est pas négociable en cours de ro
 - Le périmètre réel de la campagne est donc : organigramme, tableau de bord, membres,
   clés API (lecture), réglages, exports — plus le comportement dégradé de l'orchestration.
 
+**La base locale EST la base de production. L'écriture y est autorisée (§4).**
+
+`[CODE]` `.env.local` → `https://xucmfdggetwxmpquqjvj.supabase.co`.
+`[KB]` `docs/etat-production-2026-09-02.md` : ce projet **est** la production, identité
+confirmée par `get_project_url`. Il n'existe pas de projet Supabase de test.
+Laurent a arbitré le 2026-09-03 : **la campagne écrit**. Ce n'est donc pas une découverte à
+signaler, c'est le cadre. Les six règles qui l'encadrent :
+
+1. **Créer plutôt que modifier.** Devant le choix entre tester sur un objet existant et créer
+   le sien, l'agent crée le sien. Toujours.
+2. **Tout objet créé porte le préfixe `[TEST]`** (§6), sans exception et dès le premier champ
+   saisi. Un objet créé sans préfixe est introuvable ensuite : c'est le seul vrai risque.
+3. **La ligne `À NETTOYER` s'écrit AVANT de valider le formulaire**, pas après. Si la création
+   réussit et que la session meurt dans la seconde, l'objet doit déjà être répertorié.
+4. **Aucune donnée préexistante n'est modifiée, déplacée, renommée ni supprimée** (§5). Une
+   fiche sans préfixe `[TEST]` ne se touche pas, même pour « juste vérifier que ça enregistre ».
+5. **Les suppressions définitives ne portent que sur les objets `[TEST]` de la session.**
+   `[KB]` audit du 29/08 : membres, agents et nœuds sont supprimés **définitivement**, sans
+   corbeille. Il n'y a pas de retour en arrière.
+6. **Au moindre doute sur l'appartenance d'un objet à la session**, ne pas y toucher et écrire
+   `NON TESTÉ — DONNÉE PRÉEXISTANTE`.
+
+⚠️ **Deux écritures restent interdites malgré cet arbitrage**, parce qu'elles touchent des
+tiers ou des intégrations en service : l'**invitation d'un membre** (elle envoie un e-mail à
+une adresse réelle) et toute **opération sur une clé API** (création, régénération,
+révocation). Cf. §5.
+
 **Le routage se fait par paramètre d'URL, pas par chemin.**
 `[CODE]` `src/routing/appUrl.ts:16-23` : six vues — `orgchart` (défaut), `dashboard`,
 `orchestration`, `members`, `api-keys`, `settings` — atteintes par `?v=…`. Il n'existe
@@ -158,6 +185,7 @@ dans l'interface.
 ```
 MODE                   : CONSTAT             # diagnostic seul — aucun correctif appliqué, aucun commit de code
 ORCHESTRATEUR          : LOCAL               # SPA seule : orchestrateur non lancé, aucune clé posée
+ÉCRITURE               : AUTORISÉE           # création et modification de données [TEST] — EN BASE DE PRODUCTION
 ESPACE ADMIN           : OUI                 # pas d'espace séparé : vues `members` et `api-keys`, réservées aux rôles admin
 RÔLES À COUVRIR        : le rôle réel du compte de Laurent dans son workspace, tel quel
 ROUTES EXCLUES         : aucune
@@ -220,9 +248,15 @@ Non négociables, quelle que soit la configuration ci-dessus :
   révocation. Aucune valeur de clé recopiée où que ce soit, capture comprise.
 - **Membres** (`?v=members`) : aucune invitation, aucun changement de rôle, aucun retrait.
   `canAdminManageMember` `[CODE]` `adminGuards.ts:1-12` autorise l'interface à le faire —
-  l'agent, non.
+  l'agent, non. **L'invitation reste interdite même sous l'arbitrage « écriture »** : elle
+  expédie un e-mail à une adresse réelle, ce que §5 proscrit. L'agent ouvre le formulaire,
+  décrit ce qu'il voit, et marque `NON TESTÉ — ACTION INTERDITE` sans soumettre.
 - **Nœuds et agents préexistants de l'organigramme** : consultables, jamais modifiés,
   jamais déplacés. L'agent travaille sur **ses propres** nœuds `[TEST]`.
+- **Import CSV/XLSX** : autorisé, sur un fichier généré dans `_e2e/fixtures/` dont **toutes**
+  les fiches portent le préfixe `[TEST]`. Ne jamais réimporter une source RH réelle : un
+  import écrase en masse. `[KB]` audit P1 n°4 — la première édition après import peut échouer
+  sur `invalid input syntax for type uuid` ; c'est un constat attendu, à vérifier.
 - **Configuration de l'orchestrateur** (`?v=settings`) : ne rien y saisir. Ni URL, ni clé.
   Le mode `local` est le périmètre retenu (§0, §4).
 - **Transitions de statut** : sans objet en mode `local`, où elles sont simulées. Si la
