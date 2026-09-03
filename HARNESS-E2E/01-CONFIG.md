@@ -79,8 +79,21 @@ Provenance des valeurs, à confirmer au premier lancement :
   par défaut, lancé par `npm run dev` **dans `orchestrator/`** (`tsx watch src/api/bootstrap.ts`).
   **Hors périmètre pour cette campagne** : rien ne doit tourner sur 3001. Si quelque chose y
   répond, l'agent le signale et ne s'y connecte pas pour autant.
-- `[À CONFIRMER]` L'URL reste à valider en ouvrant le navigateur : c'est cette fiche qui fait
-  foi, pas le code.
+- `[E2E]` **Confirmé le 2026-09-03 à 02h38** : `npm run dev` démarre Vite 7.3.6 et sert
+  `http://localhost:5173/`. Le navigateur affiche l'écran « ORGANIGRAD — Connexion »
+  (e-mail + mot de passe, lien magique, création de compte), titre de page
+  « Organigrad — Orchestration hybride Humain · IA · MCP ». Console sans erreur ni
+  avertissement, toutes les requêtes en 200. **L'application est donc en mode réel**, pas en
+  mode démo : l'authentification est bien exigée.
+
+⚠️ **`.claude/launch.json` contredit cette fiche.** `[CODE]` Le dépôt versionne une
+configuration `spa-dev` qui force `--port 5199 --strictPort` (commit `21a1262`, 2026-08-09).
+Un agent qui démarre l'application par cette configuration atterrit sur **5199**, pas 5173,
+et une campagne lancée sur la mauvaise URL trouve une page morte sans comprendre pourquoi.
+**Pour cette campagne : démarrage par `npm run dev` à la main, URL 5173, telle que
+constatée.** L'écart entre le `launch.json` (5199), le code (5173 par défaut) et la table
+des ports de la base de connaissance (5173) est un constat de phase 0 à inscrire, pas une
+erreur à corriger — on est en mode `CONSTAT`.
 
 Stack `[CODE]` : Vite + React + TypeScript (paquet `orga`), Supabase, Vitest, Playwright
 (`playwright.config.ts` et `playwright.connected.config.ts`). Backend séparé
