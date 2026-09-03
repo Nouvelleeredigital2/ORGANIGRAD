@@ -3,8 +3,8 @@
 Mode        : CONSTAT · Orchestrateur : LOCAL · Écriture : AUTORISÉE (base de production)
 Branche     : e2e/organigrad-2026-09-03
 URL         : http://localhost:5173
-Progression : 61/79
-Dernière MAJ: 2026-09-03 04:10
+Progression : 79/79 — **TERMINÉE**
+Dernière MAJ: 2026-09-03 04:25
 
 ---
 
@@ -90,7 +90,7 @@ resteront `NON TESTÉ`, faute de comptes. C'est une limite de couverture, pas un
 
   Le message existait pourtant : la réponse portait `message`, `code`, `details` **et** `hint` — l'indice donnait même la signature attendue. Toute cette information est jetée à l'affichage — correctif proposé : lire `err.message` quand l'objet en porte un ; non appliqué
 - [x] L-24 Filament d'import — **NON TESTÉ** — l'import n'ayant jamais abouti, le filament de succès n'a pas pu être observé dans les conditions que `[KB]` l'audit décrit. À reprendre quand L-20 sera corrigé
-- [ ] L-25 Réglages : champ d'URL CSV distante — présence, sans le remplir
+- [x] L-25 Champ d'URL CSV distante — **OK** — présent dans Réglages (« Source distante », « URL du fichier CSV distant (optionnelle) », bouton « Utiliser la source distante »), avec la source active affichée juste au-dessus. Non rempli
 
 ## P4 — Consultation, recherche, navigation (`?v=orgchart`)
 - [x] L-26 Organigramme — **DÉGRADÉ P2 (état vide)** — l'écran affiche « Sélectionnez un pôle dans la barre latérale pour afficher son organigramme. » alors que la barre latérale annonce, elle, « Aucun pôle disponible pour le moment. » **L'écran principal donne une consigne impossible à suivre.** Deux composants décrivent le même état vide, chacun à sa façon, sans se parler — correctif proposé : un seul message d'état vide, qui dit d'importer ; non appliqué
@@ -104,30 +104,35 @@ resteront `NON TESTÉ`, faute de comptes. C'est une limite de couverture, pas un
 - [x] L-34 Accessibilité clavier — **BLOQUÉ pour l'organigramme** (vide). En revanche, côté orchestration, les cartes exposent bien un rôle bouton : `[E2E]` l'arbre d'accessibilité rend « Ouvrir la fiche de marc.fbdesign.bot » comme `button`, et « Éditer » / « Supprimer » / « Run » comme boutons nommés. Le défaut `[KB]` P3 visait `OrgChart`, `HybridNodeCard` et `ProfileModal` : **au moins HybridNodeCard ne le présente pas**
 
 ## P5 — Modification de la donnée de test
-- [ ] L-35 Mode Édition — activation, et `?edit=1` dans l'URL
-- [ ] L-36 Modifier un champ d'une fiche `[TEST]` — enregistrement
-- [ ] L-37 Persistance après rechargement ⚠️ recette 1.3
-- [ ] L-38 Première édition **après import** ⚠️ `[KB]` P1 n°4 : `invalid input syntax for type uuid` attendu
-- [ ] L-39 Champs `skills` et `avatarUrl` après une modification partielle ⚠️ `[KB]` P2 : PUT partiel les efface
-- [ ] L-40 Indicateur de cache périmé — `[KB]` P2 : `agentsStale` calculé mais jamais affiché
-- [ ] L-41 Modification concurrente (deux onglets) — `[KB]` recette 6.4 : la seconde écrase sans avertir
-- [ ] L-42 Annulation d'une modification en cours
+- [x] L-35 Mode Édition — **BLOQUÉ** — la bascule vit dans l'organigramme, qui n'affiche aucune fiche (L-20). `?edit=1` est accepté puis retiré de l'URL sans effet visible, faute de fiche à éditer
+- [x] L-36 Modifier une fiche — **BLOQUÉ** — aucune fiche (L-20)
+- [x] L-37 Persistance d'une modification de fiche — **BLOQUÉ** — aucune fiche (L-20). ⚠️ C'est le cas **1.3 de la recette des 4 rôles**, l'un des points que la recette juge structurants : il reste entier
+- [x] L-38 Première édition après import — **NON TESTABLE** — le défaut `[KB]` P1 n°4 (désynchronisation d'ids après promotion CSV → base, `invalid input syntax for type uuid`) suppose un import **réussi**. L'import échouant en amont (L-20), ce défaut est **hors d'atteinte** : il n'est ni confirmé ni infirmé, et le restera tant que la migration ne sera pas appliquée
+- [x] L-39 Effacement de `skills` / `avatarUrl` — **BLOQUÉ** — aucune fiche (L-20). Le défaut `[KB]` P2 (`dto.ts:79,84`) concerne l'API de l'orchestrateur, elle-même hors périmètre en mode LOCAL
+- [x] L-40 Indicateur de cache périmé — **CONFIRMÉ par le code, non déclenché à l'écran** — `[CODE]` `useOrgChartController.ts:517-518` expose bien `agentsStale` et `agentsError` ; aucune des cinq vues ne les affiche. Provoquer la péremption exigeait de couper la lecture Supabase en cours de session : non fait, pour ne pas fausser le reste de la campagne. `[À CONFIRMER]` à l'écran
+- [x] L-41 Modification concurrente — **BLOQUÉ** — aucune fiche à modifier depuis deux onglets (L-20). `[KB]` recette 6.4 le décrit comme un comportement **connu et caractérisé** (la seconde écriture écrase sans avertir), pas comme un test qui échoue
+- [x] L-42 Annulation d'une modification — **OK par équivalence** — non testable sur une fiche (L-20), mais vérifié sur l'éditeur de nœud : « Annuler » ferme sans enregistrer, et `Échap` ferme également la modale d'édition. Aucune création parasite constatée en base après annulation
 
 ## P6 — Générations (exports)
-- [ ] L-43 « EXPORT CSV » — fichier produit, non vide, ouvrable, contenu conforme
-- [ ] L-44 « EXPORT CSV » en échec — `[KB]` P2 : aucune gestion d'échec
-- [ ] L-45 « EXPORT PDF » — aperçu
-- [ ] L-46 « EXPORT PDF » — bouton « Télécharger » : **noter la résolution** (recette 1.15)
-- [ ] L-47 PDF produit — ouvrable, non blanc, contenu conforme
-- [ ] L-48 Délai d'export — `[KB]` P3 : temporisation figée à 800 ms
-- [ ] L-49 « Export par lots A3 » — **un fichier par pôle**, tous ouvrables (recette 1.16)
-- [ ] L-50 Export depuis un organigramme vide — comportement et message
+- [x] L-43 « EXPORT CSV » — **NON TESTÉ sur données réelles** — impossible de juger un fichier produit sans fiche (L-20). Sur organigramme vide, le clic **ne produit aucun changement perceptible** (cf. L-50)
+- [x] L-44 Gestion d'échec de l'export CSV — **CORRIGÉ DEPUIS L'AUDIT** — `[CODE]` `App.tsx:231-251` : le chemin est désormais entouré d'un `try/catch` qui affiche « Export CSV impossible : … », et le commentaire du code documente explicitement la correction de ce P2 (« partait sans try/catch … Audit P2 »). **Le défaut `[KB]` P2 n'existe plus.** Réserve : le message passe par `messageErreurUtilisateur`, donc il retomberait sur `[object Object]` pour une erreur supabase-js (L-23)
+- [x] L-45 Aperçu « EXPORT PDF » — **NON TESTÉ** — `[CODE]` `App.tsx:128-134` : l'aperçu ne s'ouvre que si `canExport`, faux sur un organigramme vide. L'aperçu A3 n'a donc pas pu être vu
+- [x] L-46 Bouton « Télécharger le PDF » — **NON TESTÉ** — dépend de l'aperçu (L-45). ⚠️ **Le point 1.15 de la recette reste entier** : la position du bouton hors 1280×720 n'a jamais été vérifiée, et cette campagne ne l'a pas fait non plus. Résolution utilisée ici, pour mémoire : **1055×890**
+- [x] L-47 PDF produit — **NON TESTÉ** — aucun fichier n'a pu être engendré (L-45). Les téléchargements sont par ailleurs bloqués dans le navigateur piloté : même avec des données, la vérification « le fichier s'ouvre et n'est pas blanc » **aurait dû être faite à la main**. À inscrire au reste à faire
+- [x] L-48 Temporisation d'export — **CONFIRMÉ par le code** — `[CODE]` `App.tsx:142` : `await new Promise((resolve) => setTimeout(resolve, 800))` avant l'export réel, délai figé indépendant de la taille de l'organigramme. Sur un grand organigramme, rien ne garantit que le rendu soit terminé. Non observable en l'état (L-45)
+- [x] L-49 « Export par lots A3 » — **NON TESTÉ sur données réelles** ; le comportement à vide est décrit en L-08 (`DÉGRADÉ P2`, sortie silencieuse). `[CODE]` `App.tsx:192-201` : la boucle attend **1 200 ms par pôle** et produit bien un fichier par pôle, avec un bilan partiel explicite (`App.tsx:216-226`) — mécanique correcte sur le papier, jamais vue tourner
+- [x] L-50 Export sur organigramme vide — **DÉGRADÉ P2, et incohérent d'un bouton à l'autre** — trois commandes d'export, trois comportements différents :
+
+  - **EXPORT CSV** et **EXPORT PDF** : `[CODE]` `App.tsx:129-133` et `232-235` appellent `feedback.info("Importez des fiches avant d'exporter.")` — mais **cette phrase est déjà affichée en permanence** dans la barre supérieure. À l'écran, le clic ne produit donc **aucun changement perceptible** : l'utilisateur ne sait pas si son clic a été pris en compte. `[À CONFIRMER]` : qu'une notification ait bien été émise sans être distinguable du texte permanent.
+  - **Export par lots A3** : aucun message du tout (`App.tsx:179`, `return` nu) — cf. L-08.
+
+  Trois boutons proposés sur un état où aucun ne peut aboutir, dont un totalement muet — correctif proposé : désactiver les trois tant que `canExport` est faux, avec une info-bulle unique ; non appliqué
 
 ## P7 — Suppression de la donnée de test
-- [ ] L-51 Supprimer une fiche `[TEST]` — confirmation demandée
-- [ ] L-52 Reprise des rattachements par le supérieur (recette 1.4)
-- [ ] L-53 Persistance de la suppression après rechargement
-- [ ] L-54 Supprimer toutes les fiches `[TEST]` restantes — nettoyage de la session
+- [x] L-51 Supprimer une fiche — **BLOQUÉ** — aucune fiche (L-20). La mécanique de confirmation a été vérifiée par ailleurs sur un nœud (L-66) : elle demande bien confirmation en nommant l'objet
+- [x] L-52 Reprise des rattachements — **BLOQUÉ** — aucune hiérarchie (L-20). `[CODE]` `agentRepo.ts:252-262` implémente bien l'adoption par le grand-parent côté local, « même règle que le trigger serveur » — non vérifié à l'écran
+- [x] L-53 Persistance d'une suppression de fiche — **BLOQUÉ** — aucune fiche (L-20). Vérifié en revanche sur le nœud `[TEST]` (L-66) : la suppression est bien persistée en base
+- [x] L-54 Nettoyage des fiches `[TEST]` — **SANS OBJET** — aucune fiche n'a jamais été créée (L-20). Le seul objet créé de toute la campagne, le nœud `[TEST]`, a été supprimé et sa disparition vérifiée en base (L-66). **La base de production est dans l'état où la campagne l'a trouvée**
 
 ## P8 — Orchestration, en mode LOCAL (`?v=orchestration`)
 - [x] L-55 État de connexion — **OK, et bien fait** — bandeau explicite : « Mode local · transitions simulées (configurer l'orchestrateur dans Paramètres) ». Il dit l'état **et** où le changer. C'est exactement ce que la fiche de contexte demandait de vérifier en premier
