@@ -24,11 +24,21 @@ geste après la connexion est de lire l'indicateur d'état et de l'inscrire dans
 d'état. S'il annonce « Mode local · transitions simulées », l'agent le consigne et marque
 les éléments d'orchestration `NON TESTÉ — MODE LOCAL`.
 
-**Conséquence directe sur §5.** Passer en mode connecté suppose de coller une clé API
-`ok_…` dans un champ de l'interface. **C'est une action interdite à l'agent** (§5 :
-saisie d'une clé d'API). Donc : ou bien tu renseignes toi-même l'URL et la clé pendant la
-pause d'authentification, ou bien la campagne se limite au mode `local`. À trancher en §4
-avant de lancer — c'est le seul arbitrage qui change le périmètre réel de la campagne.
+**Arbitrage rendu : la campagne se déroule en mode `local` (§4).** L'orchestrateur n'est pas
+lancé, aucune clé API n'est posée — ni par Laurent, ni par l'agent, à qui le §5 l'interdit
+de toute façon. Ce qui en découle, et qui n'est pas négociable en cours de route :
+
+- L'agent **ne configure pas** l'orchestrateur, même si l'interface le lui propose et même
+  si un écran semble en dépendre. Il ne remplit ni `baseUrl` ni `apiKey`.
+- Les transitions de statut observées sont **simulées**. Elles ne prouvent rien sur
+  l'orchestration réelle : tout élément qui en dépend est `NON TESTÉ — MODE LOCAL`, jamais
+  `OK`. Un écran qui « marche » en simulation n'est pas un écran qui marche.
+- En revanche, l'interface elle-même se teste normalement : affichage, bandeau d'état,
+  message d'indisponibilité, comportement en l'absence d'orchestrateur. **Un écran qui,
+  faute d'orchestrateur, reste vide sans rien expliquer est un vrai constat** — c'est même
+  ce que le mode `local` permet de mesurer le mieux.
+- Le périmètre réel de la campagne est donc : organigramme, tableau de bord, membres,
+  clés API (lecture), réglages, exports — plus le comportement dégradé de l'orchestration.
 
 **Le routage se fait par paramètre d'URL, pas par chemin.**
 `[CODE]` `src/routing/appUrl.ts:16-23` : six vues — `orgchart` (défaut), `dashboard`,
@@ -57,7 +67,7 @@ APPLICATION            : ORGANIGRAD
 DÉPÔT LOCAL            : C:\Users\5070 Ti\Downloads\---APPLICATION-2026---\ORGANIGRAD
 BRANCHE DE TRAVAIL     : e2e/organigrad-2026-09-03        # créée depuis master, dépôt propre
 URL D'ACCÈS            : http://localhost:5173
-COMMANDE DE DÉMARRAGE  : npm run dev                      # + orchestrateur, voir ci-dessous
+COMMANDE DE DÉMARRAGE  : npm run dev                      # SPA seule — orchestrateur NON lancé (mode LOCAL, §4)
 ```
 
 Provenance des valeurs, à confirmer au premier lancement :
@@ -66,7 +76,9 @@ Provenance des valeurs, à confirmer au premier lancement :
 - `[KB]` `---APPLICATION-2026---/CLAUDE.md` §5, table des ports : Organigrad → **3001 / 5173**.
   Les deux concordent : 5173 est la SPA, 3001 l'orchestrateur.
 - `[CODE]` `orchestrator/src/config/env.ts:72` : port de l'orchestrateur = `PORT` ou **3001**
-  par défaut. Lancement séparé : `npm run dev` **dans `orchestrator/`** (`tsx watch src/api/bootstrap.ts`).
+  par défaut, lancé par `npm run dev` **dans `orchestrator/`** (`tsx watch src/api/bootstrap.ts`).
+  **Hors périmètre pour cette campagne** : rien ne doit tourner sur 3001. Si quelque chose y
+  répond, l'agent le signale et ne s'y connecte pas pour autant.
 - `[À CONFIRMER]` L'URL reste à valider en ouvrant le navigateur : c'est cette fiche qui fait
   foi, pas le code.
 
@@ -122,22 +134,29 @@ Déroulé imposé :
 4. L'agent vérifie que la session est bien active, puis déroule sans plus jamais s'arrêter.
 5. Si la session expire en cours de route : même signal, même reprise après `GO`. Aucune tentative de reconnexion automatique.
 
-**Pendant cette même pause**, si le mode connecté est retenu (§4), c'est le moment où je
-renseigne l'URL de l'orchestrateur et la clé API dans l'écran de réglages. L'agent ne le
-fait jamais lui-même.
+La pause d'authentification sert **uniquement** à ouvrir la session Supabase. Rien d'autre
+n'est à poser pendant cette pause : le mode `local` est arrêté (§4), aucune clé API n'entre
+dans l'interface.
 
 ---
 
 ## 4. PÉRIMÈTRE DE LA CAMPAGNE
 
 ```
-MODE                   : À RENSEIGNER        # CONSTAT (diagnostic seul) | CORRECTION (diagnostic + correctifs P0/P1)
-ORCHESTRATEUR          : À RENSEIGNER        # LOCAL (SPA seule) | CONNECTÉ (orchestrateur lancé + clé posée par Laurent)
+MODE                   : CONSTAT             # diagnostic seul — aucun correctif appliqué, aucun commit de code
+ORCHESTRATEUR          : LOCAL               # SPA seule : orchestrateur non lancé, aucune clé posée
 ESPACE ADMIN           : OUI                 # pas d'espace séparé : vues `members` et `api-keys`, réservées aux rôles admin
 RÔLES À COUVRIR        : le rôle réel du compte de Laurent dans son workspace, tel quel
 ROUTES EXCLUES         : aucune
 DURÉE MAX PAR ACTION   : 60 s                # attente d'une génération avant de conclure au blocage
 ```
+
+**Mode `CONSTAT`** : l'agent diagnostique et documente, il **ne corrige rien**. Aucun
+correctif appliqué, même trivial, même sur un P0 ; aucun commit de code ; aucune retouche
+« au passage ». Une cause identifiée s'écrit `fichier:ligne` dans le fichier d'état avec le
+correctif **proposé en une ligne**, non appliqué. Le seul contenu écrit dans le dépôt est
+`_e2e/` (fichier d'état, rapport, captures, fixtures). La section « MODE CORRECTION » du
+prompt 02 ne s'applique pas.
 
 **Rôles** `[CODE]` `src/auth/permissions.ts:55-75` : quatre rôles — `owner`, `admin`,
 `member`, `viewer`. `isAdminRole` = `owner` ou `admin`. La source de vérité des droits est
@@ -191,9 +210,11 @@ Non négociables, quelle que soit la configuration ci-dessus :
   l'agent, non.
 - **Nœuds et agents préexistants de l'organigramme** : consultables, jamais modifiés,
   jamais déplacés. L'agent travaille sur **ses propres** nœuds `[TEST]`.
-- **Transitions de statut en mode connecté** : elles écrivent l'état métier officiel et
-  peuvent émettre sur le bus Synapse. N'agir que sur les objets `[TEST]` créés pendant la
-  session.
+- **Configuration de l'orchestrateur** (`?v=settings`) : ne rien y saisir. Ni URL, ni clé.
+  Le mode `local` est le périmètre retenu (§0, §4).
+- **Transitions de statut** : sans objet en mode `local`, où elles sont simulées. Si la
+  campagne repassait un jour en mode connecté, elles écriraient l'état métier officiel et
+  pourraient émettre sur le bus Synapse — n'agir alors que sur les objets `[TEST]`.
 
 Face à l'une de ces actions : aller jusqu'à l'écran précédent, décrire ce qu'on y voit,
 marquer `NON TESTÉ — ACTION INTERDITE`, continuer.
