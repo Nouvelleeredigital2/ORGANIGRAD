@@ -3,8 +3,8 @@
 Mode        : CONSTAT · Orchestrateur : LOCAL · Écriture : AUTORISÉE (base de production)
 Branche     : e2e/organigrad-2026-09-03
 URL         : http://localhost:5173
-Progression : 25/79
-Dernière MAJ: 2026-09-03 03:35
+Progression : 61/79
+Dernière MAJ: 2026-09-03 04:10
 
 ---
 
@@ -93,15 +93,15 @@ resteront `NON TESTÉ`, faute de comptes. C'est une limite de couverture, pas un
 - [ ] L-25 Réglages : champ d'URL CSV distante — présence, sans le remplir
 
 ## P4 — Consultation, recherche, navigation (`?v=orgchart`)
-- [ ] L-26 Organigramme peuplé — hiérarchie et rattachements
-- [ ] L-27 Ouvrir une fiche `[TEST]` — modale de profil
-- [ ] L-28 Navigation par pôle — panneau PÔLES alimenté
-- [ ] L-29 Paramètre d'URL `?pole=`
-- [ ] L-30 Paramètre d'URL `?agent=<id>` à froid ⚠️ `[KB]` P1 n°5 : surlignage inopérant dans un onglet neuf
-- [ ] L-31 Recherche Spotlight sur une fiche `[TEST]`
-- [ ] L-32 Recherche sans résultat — retour à l'utilisateur
-- [ ] L-33 Vue Hybride de l'organigramme — `[KB]` P3 : Run/Valider/Éditer non transmis
-- [ ] L-34 Accessibilité clavier des nœuds — `[KB]` P3 : `<div onClick>` non focalisables
+- [x] L-26 Organigramme — **DÉGRADÉ P2 (état vide)** — l'écran affiche « Sélectionnez un pôle dans la barre latérale pour afficher son organigramme. » alors que la barre latérale annonce, elle, « Aucun pôle disponible pour le moment. » **L'écran principal donne une consigne impossible à suivre.** Deux composants décrivent le même état vide, chacun à sa façon, sans se parler — correctif proposé : un seul message d'état vide, qui dit d'importer ; non appliqué
+- [x] L-27 Ouvrir une fiche — **BLOQUÉ** — aucune fiche n'existe (L-20)
+- [x] L-28 Navigation par pôle — **BLOQUÉ** — aucun pôle (L-20)
+- [x] L-29 `?pole=` inconnu — **OK** — `?pole=inexistant` est ignoré sans erreur ni écran cassé, et la clé est **retirée de l'URL**. `[CODE]` `appUrl.ts:72` : seules les valeurs valides sont réécrites ; `?v=orgchart` disparaît aussi, la vue étant celle par défaut. Comportement propre
+- [x] L-30 `?agent=` à froid — **NON TESTABLE EN L'ÉTAT** — un UUID inexistant est ignoré proprement (aucune erreur, clé retirée de l'URL), mais le défaut `[KB]` P1 n°5 (surlignage inopérant dans un onglet neuf) exige une fiche réelle : il reste **non vérifié**, faute d'import (L-20)
+- [x] L-31 Spotlight sur une fiche — **BLOQUÉ** — aucune fiche à trouver (L-20)
+- [x] L-32 Recherche sans résultat — **OK** — « Aucun résultat trouvé pour … » suivi de « Vérifiez l'orthographe ou essayez un autre terme. » : message clair, accentué, orienté action
+- [x] L-33 Vue Hybride de l'organigramme — **BLOQUÉ** — la bascule vit dans l'organigramme, qui n'a aucun nœud à afficher (L-20)
+- [x] L-34 Accessibilité clavier — **BLOQUÉ pour l'organigramme** (vide). En revanche, côté orchestration, les cartes exposent bien un rôle bouton : `[E2E]` l'arbre d'accessibilité rend « Ouvrir la fiche de marc.fbdesign.bot » comme `button`, et « Éditer » / « Supprimer » / « Run » comme boutons nommés. Le défaut `[KB]` P3 visait `OrgChart`, `HybridNodeCard` et `ProfileModal` : **au moins HybridNodeCard ne le présente pas**
 
 ## P5 — Modification de la donnée de test
 - [ ] L-35 Mode Édition — activation, et `?edit=1` dans l'URL
@@ -130,33 +130,41 @@ resteront `NON TESTÉ`, faute de comptes. C'est une limite de couverture, pas un
 - [ ] L-54 Supprimer toutes les fiches `[TEST]` restantes — nettoyage de la session
 
 ## P8 — Orchestration, en mode LOCAL (`?v=orchestration`)
-- [ ] L-55 État de connexion affiché — attendu « Mode local · transitions simulées »
-- [ ] L-56 Créer un nœud `[TEST]` — éditeur de nœud
-- [ ] L-57 Enregistrer — anti double-clic ⚠️ `[KB]` P2 : absent (`NodeEditor.tsx:353-359`)
-- [ ] L-58 Où est écrit le nœud en l'absence d'orchestrateur ? ⚠️ `[KB]` **P1** : bascule Supabase directe, secrets en clair, sans avertissement
-- [ ] L-59 Bouton « Run » d'une carte — anti double-clic ⚠️ `[KB]` P2 : absent
-- [ ] L-60 Transition de statut — **simulée**, à marquer comme telle
-- [ ] L-61 Journal d'activité — alimenté, 30 dernières transitions
-- [ ] L-62 Centre de validation — approuver / refuser (simulés)
-- [ ] L-63 Réinitialiser un nœud
-- [ ] L-64 Micro vocal ⚠️ `[KB]` P2 : transcription non branchée, erreur visible en `title` seulement
-- [ ] L-65 Modale de détails d'un nœud — livrable cherché dans les 50 dernières transitions
-- [ ] L-66 Supprimer le nœud `[TEST]` — nettoyage
+- [x] L-55 État de connexion — **OK, et bien fait** — bandeau explicite : « Mode local · transitions simulées (configurer l'orchestrateur dans Paramètres) ». Il dit l'état **et** où le changer. C'est exactement ce que la fiche de contexte demandait de vérifier en premier
+- [x] L-56 Créer un nœud — **OK** — éditeur clair : archétype (Humain / Agent IA / Logiciel MCP), nom, rôle, parent (liste des 20 nœuds existants), compétences, prompt système. Le formulaire **s'adapte à l'archétype** : « Humain » remplace compétences et prompt par e-mail HITL et webhook Slack. Création confirmée, journal alimenté « Nœud créé »
+- [x] L-57 Anti double-clic à l'enregistrement — **[À CONFIRMER]** — non reproduit : le pilote ne peut pas garantir deux clics dans la fenêtre utile. Le défaut `[KB]` P2 (`NodeEditor.tsx:353-359`) reste **non infirmé** ; aucune création en double n'a été observée sur une création unique
+- [x] L-58 Destination d'écriture sans orchestrateur — **CONFIRMÉ — P1** — le nœud a été écrit **directement dans Supabase de production**, pas dans le cache local : `hybrid_nodes` contenait bien `[TEST] Noeud 2026-09-03-01` (id `3d13ce92-…`, créé à 01:11:39 UTC), tandis que le `localStorage` restait à ses 20 nœuds préexistants, inchangé. Aucun avertissement à l'écran : le journal affiche « Nœud créé », comme si l'orchestrateur avait travaillé.
+
+  **Et le prompt système est stocké en clair.** Sonde écrite dans le champ « Prompt système » (texte anodin, aucun secret) : `SONDE-E2E-2026-09-03 ceci n'est pas un secret…`. Relu depuis la base : **identique, en clair**. Il est de plus **affiché sur la carte** dans la liste, sans survol.
+
+  Ceci **confirme et étend** `[KB]` l'audit du 29/08, P1 n°3 fonctionnel, qui décrivait le cas « orchestrateur **configuré mais éteint** ». Le constat ici est plus large — **orchestrateur jamais configuré**, même bascule silencieuse, même écriture directe. C'était la zone d'ombre n°3 de la fiche de contexte : elle est levée. `[À CONFIRMER]` : que le chemin orchestrateur, lui, chiffrerait ce champ — non vérifiable sans lancer l'orchestrateur, hors périmètre en mode LOCAL
+- [x] L-59 Bouton « Run » — **OK (simulé)** — exécuté **sur mon propre nœud `[TEST]`**, jamais sur un nœud préexistant. Anti double-clic : **[À CONFIRMER]**, même raison qu'en L-57
+- [x] L-60 Transition de statut — **OK, conforme au mode annoncé** — `IDLE → EXECUTING` à 03:13:27 puis `EXECUTING → IDLE` à 03:13:28. La transition est **simulée et non persistée** : la table `node_transitions` reste à **0 ligne** et le statut en base demeure `IDLE`. Ce n'est pas un défaut — c'est ce que le bandeau L-55 annonce. **Aucun verdict sur l'orchestration réelle ne peut en être tiré**
+- [x] L-61 Journal d'activité — **OK** — quatre entrées horodatées, lisibles et cohérentes : « Nœud créé » (03:11:39), « Nœud mis à jour » (03:12:28), « IDLE → EXECUTING · En exécution » (03:13:27), « EXECUTING → IDLE · En repos » (03:13:28). Confirme `[KB]` l'audit : c'est un **flux volatile**, pas un audit — rien n'en est écrit dans `node_transitions`
+- [x] L-62 Centre de validation — **NON TESTÉ** — aucun nœud n'était en attente de validation, et en amener un exigeait d'exécuter une chaîne sur des nœuds **préexistants** (interdit, §5). Le mien, seul et sans parent, ne produit pas de gate
+- [x] L-63 Réinitialiser un nœud — **NON TESTÉ** — le bouton « Réinitialiser » de l'en-tête porte sur la chaîne entière, donc sur les 20 nœuds préexistants : action interdite (§5)
+- [x] L-64 Micro vocal — **NON TESTÉ** — le bouton n'a pas été trouvé dans la vue Orchestration au niveau de zoom utilisé ; `[KB]` audit P2 le situe dans `VoiceMicButton.tsx:18-22`, transcription non branchée. Non infirmé, non confirmé
+- [x] L-65 Modale de détails d'un nœud — **NON TESTÉ** — ouvrir la fiche d'un nœud **préexistant** est en lecture seule et aurait été licite, mais le nœud `[TEST]` a été supprimé avant ce point du parcours. À reprendre
+- [x] L-66 Suppression du nœud `[TEST]` — **OK** — confirmation demandée avant l'irréversible, libellé exact : « Supprimer [TEST] Noeud 2026-09-03-01 ? » (`HybridNodeCard.tsx:363`). Après acceptation, `hybrid_nodes` ne contient **plus aucune ligne `TEST`** et les 20 nœuds préexistants sont intacts. **Méthode** : la confirmation étant un `confirm()` **natif**, hors d'atteinte du pilote, elle a été instrumentée pour enregistrer son libellé et répondre « oui ». Le dialogue lui-même n'a donc pas été vu à l'écran — son déclenchement et son texte, si
 - [x] L-79 Erreurs console sur les cartes de nœuds — **DÉGRADÉ P3** — 5 erreurs React répétées : « Encountered two children with the same key, `veille` ». Cause : `src/components/HybridNodeCard.tsx:307`, `skills.map((skill) => <Pill key={skill}>)` — la clé est la valeur de la compétence, or cinq nœuds préexistants portent `skills: ["veille","veille"]` en double (Marina, Pedro, Alain, Hannah, Eric, créés le 2026-08-11). React avertit d'un risque de duplication ou d'omission d'éléments. **Trouvé hors plan**, en relevant la console pendant L-08 ; le déclencheur exact du rendu n'est pas attribué `[À CONFIRMER]` — correctif proposé : `key={`${skill}-${i}`}` ou déduplication des compétences à la lecture ; non appliqué
 
 ## P9 — Espace admin et écrans périphériques
-- [ ] L-67 `?v=members` — liste des membres, rôle affiché
-- [ ] L-68 Formulaire d'invitation — **ouvrir, décrire, ne pas soumettre** (action interdite)
-- [ ] L-69 Sélecteur de rôle ⚠️ `[KB]` P3 : appliqué au `onChange`, sans confirmation — **ne pas y toucher**
-- [ ] L-70 Validation du format d'e-mail d'invitation ⚠️ `[KB]` : la RPC accepte `"abc"` — testable sans soumettre ?
-- [ ] L-71 `?v=api-keys` — liste des clés, **lecture seule**
-- [ ] L-72 Absence de valeur de clé en clair à l'écran
-- [ ] L-73 `?v=settings` — inventaire des sections
-- [ ] L-74 « Zone de Danger » ⚠️ `[KB]` P3 : visible par tous les rôles, refus au clic seulement — **ne pas cliquer**
-- [ ] L-75 Messages d'erreur techniques bruts — `[KB]` P2 : anglais Supabase, codes PL/pgSQL, 3 `alert()`
-- [ ] L-76 Journal d'audit — `[KB]` : `audit_log` écrit mais lu nulle part dans le front
-- [ ] L-77 Gestion des workspaces — `[KB]` : absente de l'interface
-- [ ] L-78 Comportement à 375 px de large ⚠️ `[KB]` P3 : `px-12` sur Members/ApiKeys, zones tactiles < 44 px
+- [x] L-67 `?v=members` — **OK** — en-tête « Workspace · ceglialaurent workspace », texte d'intention (« Invite des collaborateurs, attribue-leur un rôle, ou retire l'accès. Les invitations expirent automatiquement après 14 jours. »), « MEMBRES ACTIFS · 1 » avec le compte et son badge `OWNER`, « INVITATIONS EN ATTENTE · 0 — Aucune invitation en attente. » États vides explicites et accentués
+- [x] L-68 Formulaire d'invitation — **NON TESTÉ — ACTION INTERDITE** — présent et complet : champ e-mail, liste de rôles, bouton « Inviter ». **Non soumis** : l'invitation expédie un courriel à un tiers (§5). Détail notable `[E2E]` : la liste de rôles propose `admin`, `member`, `viewer` — **jamais `owner`**, ce qui ferme proprement la promotion accidentelle
+- [x] L-69 Sélecteur de rôle d'un membre — **NON TESTÉ — ACTION INTERDITE**, mais **`[KB]` l'audit paraît périmé sur ce point** : il annonce un changement de rôle « appliqué au `onChange`, sans confirmation ». Or `[CODE]` `MembersView.tsx:202` porte bien une confirmation — `if (!confirm("Changer le rôle de ... en « ... » ?")) return;`. Le défaut a vraisemblablement été corrigé depuis le 29/08 ; à faire retirer de la liste des réserves. Non vérifié à l'écran, le seul membre étant l'owner lui-même, dont le rôle n'est pas modifiable (badge, pas de liste)
+- [x] L-70 Validation du format d'e-mail — **OK côté client** — le champ est un `input type="email"` **requis** : la saisie `abc` est refusée par le navigateur avant tout envoi, avec le message « Veuillez inclure "@" dans l'adresse e-mail. Il manque un symbole "@" dans "abc". » `[KB]` l'audit vise la **RPC**, qui accepte `abc` : la faiblesse serveur reste entière, mais elle n'est pas atteignable par l'interface. Champ vidé après le test, rien n'a été soumis
+- [x] L-71 `?v=api-keys` — **OK** — la vue charge et liste **une clé en service** : « Import LINK · Bots Hermes », créée le 11/08/2026, **utilisée le 11/08/2026**. Formulaire de création présent (« Nom de la clé », « Créer la clé ») et bouton de révocation — **aucun des deux actionné** (§5) : cette clé fait tourner l'import des bots LINK, la révoquer casserait une intégration réelle
+- [x] L-72 Absence de clé en clair — **OK** — seul le **préfixe** `ok_b91db5bf…` est affiché, jamais le token complet. L'écran l'annonce d'ailleurs : « Le token complet n'est affiché qu'une seule fois à la création — copie-le immédiatement. » Conforme à `[KB]` README §12 (hachage SHA-256, valeur montrée une fois)
+- [x] L-73 `?v=settings` — **OK** — cinq sections : **Source de données** (source active, fichier local, URL distante), **Orchestrateur · Connexion** (URL de l'API + clé API workspace + « Enregistrer la connexion » — c'est bien ici que se pose le mode connecté, cf. L-58), **Bots Hermes · LINK** (import des bots, correctement verrouillé : « Enregistre d'abord la connexion orchestrateur ci-dessus »), **Orchestration · Nœuds Hybrides** (vider le cache local, avec une explication honnête : « ce n'est pas une suppression »), **Zone de Danger**. Aucun champ renseigné par l'agent
+- [x] L-74 « Zone de Danger » — **NON TESTÉ — ACTION INTERDITE** — présente, avec le bouton « REINITIALISER LES DONNEES LOCALES ». Non cliqué.
+
+  **Constat supplémentaire, hors audit** : un second bouton **« Reset »**, rouge, est affiché **en permanence en haut à droite de l'organigramme** (`App.tsx:400-410`). Il appelle `handleResetData`, qui **supprime toutes les fiches enregistrées du workspace** (`clearWorkspace`, irréversible). Son affichage n'est conditionné qu'à la vue active — **aucun contrôle de rôle** — le refus n'arrive qu'au clic (`useOrgChartController.ts:255-258`). C'est le même motif que la Zone de Danger relevé par `[KB]` l'audit, mais sur un écran que l'audit ne cite pas, et bien plus exposé : il est dans le champ de vision permanent. Non cliqué
+- [x] L-75 Messages d'erreur techniques — **CONFIRMÉ, en pire** — le cas rencontré (L-23) ne produit ni anglais ni code PL/pgSQL, mais **`[object Object]`**, c'est-à-dire aucune information du tout. `[KB]` l'audit annonçait des messages bruts mais lisibles ; la réalité est un message vide de sens
+- [x] L-76 Journal d'audit — **CONFIRMÉ** — `audit_log` **contient des lignes** (lecture directe : au moins une), et **aucune vue de l'interface ne l'expose**. Le « Journal d'activité » de l'orchestration n'est pas cet audit : c'est un flux volatile, non persisté (L-61). Un administrateur n'a donc aucun moyen, dans l'application, de savoir qui a fait quoi
+- [x] L-77 Gestion des workspaces — **CONFIRMÉ** — aucune création, aucun renommage, aucune suppression de workspace nulle part dans les cinq vues. Le sélecteur liste, il n'administre pas
+- [x] L-78 Affichage à 375 px — **DÉGRADÉ P2 — et le défaut n'est pas celui qu'annonçait l'audit** — les vues Membres et Clés API se comportent **bien** : le contenu se réempile, les formulaires restent utilisables, les marges ne sont pas le problème que `[KB]` l'audit décrivait (`px-12`).
+
+  En revanche **la barre supérieure se superpose à elle-même** : le libellé « Rechercher un agent, un service… » déborde de son champ et chevauche la rangée « IMPORTER · EXPORT CSV · EXPORT PDF », qui chevauche à son tour le message « Importez des fiches avant d'exporter. » Trois textes empilés au même endroit, sur les deux vues testées. C'est le premier élément que voit un utilisateur sur téléphone — correctif proposé : masquer les libellés d'export sous un seuil de largeur, ou replier la recherche en icône ; non appliqué
 
 ---
 
@@ -167,6 +175,7 @@ Objets créés pendant la campagne, à supprimer manuellement par Laurent.
 | Objet | Emplacement | Créé le |
 |---|---|---|
 | _**Rien à nettoyer à ce stade.**_ L'import de 10 fiches `[TEST]` a été tenté à 03h25 et **refusé par la base** (L-20) : aucune ligne créée. L'appel de diagnostic de la RPC portait une charge **vide** et a lui aussi échoué. **Aucune écriture n'a abouti en production.** | — | — |
+| ~~Nœud hybride `[TEST] Noeud 2026-09-03-01`~~ — **déjà supprimé par l'agent en L-66**, vérifié en base : plus aucune ligne `TEST` dans `hybrid_nodes` | Orchestration | créé 03:11, supprimé 03:15 |
 
 **Données PRÉEXISTANTES repérées — à ne pas toucher** `[E2E]` `localStorage` :
 20 nœuds hybrides `AGENT_IA` créés le **2026-08-11** (`marc.fbdesign.bot`, `sofia.facebook.bot`,
