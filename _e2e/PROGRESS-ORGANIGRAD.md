@@ -222,6 +222,7 @@ Objets créés pendant la campagne, à supprimer manuellement par Laurent.
 
 | Objet | Emplacement | Créé le |
 |---|---|---|
+| _(2e passe annulée)_ — l import n a pas eu lieu : **session expirée** avant le dépôt du fichier. Aucune donnée créée, vérifié : le champ de fichier n existe pas hors session | — | — |
 | ~~10 fiches agents `[TEST]` + 2 pôles~~ — **supprimées par l'agent le 2026-09-04**, vérifié en base : 0 fiche dans `ceglialaurent workspace`, les 5 de « Recette staging » intactes | Workspace ceglialaurent workspace | créées 09:00, supprimées 09:25 |
 | _**Rien à nettoyer à ce stade.**_ L'import de 10 fiches `[TEST]` a été tenté à 03h25 et **refusé par la base** (L-20) : aucune ligne créée. L'appel de diagnostic de la RPC portait une charge **vide** et a lui aussi échoué. **Aucune écriture n'a abouti en production.** | — | — |
 | ~~Nœud hybride `[TEST] Noeud 2026-09-03-01`~~ — **déjà supprimé par l'agent en L-66**, vérifié en base : plus aucune ligne `TEST` dans `hybrid_nodes` | Orchestration | créé 03:11, supprimé 03:15 |
@@ -259,5 +260,6 @@ Ils apparaîtront en P8 : **consultation seulement**, aucune modification, aucun
 ## PAUSES D'AUTHENTIFICATION
 - 2026-09-03 02:31 — écran de connexion constaté, session non ouverte.
 - 2026-09-03 02:52 — **session déjà active à la reprise** : Laurent s'est connecté de
+- **2026-09-04 ~11h00 — session expirée en cours de reprise.** Constaté au retour sur l application : écran de connexion, plus de coquille applicative, donc plus de champ d import. Aucune tentative de reconnexion automatique. Pause signalée à Laurent, attente de GO.
   lui-même entre les deux relevés. Rôle `owner` confirmé au sélecteur de workspace.
   La pause prévue par le harnais n'a donc pas eu lieu à formuler.
