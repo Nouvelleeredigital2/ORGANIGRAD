@@ -3,8 +3,8 @@
 Mode        : CONSTAT · Orchestrateur : LOCAL · Écriture : AUTORISÉE (base de production)
 Branche     : e2e/organigrad-2026-09-03
 URL         : http://localhost:5173
-Progression : 79/79 — **TERMINÉE**
-Dernière MAJ: 2026-09-03 04:25
+Progression : 79/79 puis **REPRISE le 2026-09-04 après migration** — 5 éléments réinstruits, 2 constats neufs (L-80, L-81)
+Dernière MAJ: 2026-09-04 09:20
 
 ---
 
@@ -84,8 +84,16 @@ resteront `NON TESTÉ`, faute de comptes. C'est une limite de couverture, pas un
   Cause : `src/services/agentRepo.ts:238-245` envoie `p_expected_updated_at`, ajouté par la migration `20260901090000_import_org_agents_optimistic_lock.sql` — **qui n'est pas appliquée en production**. `[KB]` `docs/etat-production-2026-09-02.md` §3 documente précisément cette fenêtre, mais **dans l'autre sens** (SPA ancienne + fonction nouvelle → « import périmé »). La réalité constatée est le sens inverse : **code à jour + fonction ancienne → fonction introuvable**. Le document annonce « il n'existe pas d'ordre sans fenêtre » : la fenêtre est ouverte, et c'est le dépôt local qui est du mauvais côté.
 
   Correctif proposé (non appliqué, mode CONSTAT) : appliquer `20260901090000` **après** avoir reconstruit et téléversé la SPA, dans l'ordre exact du §3 du document du 02/09. Hors périmètre de cette campagne — schéma et migrations, cf. `01-CONFIG.md`
-- [x] L-21 Persistance après rechargement — **BLOQUÉ** — rien n'a été créé (L-20), il n'y a rien dont vérifier la persistance
-- [x] L-22 Destination des écritures — **TRANCHÉ** — l'import vise bien **Supabase** (RPC `import_org_agents` sur `xucmfdggetwxmpquqjvj`), pas le cache local : `agentRepo.ts:179-206` ne prend le chemin `localStorage` que si le contexte est local, ce qui n'est pas le cas avec un workspace actif. Le désaccord D3 se résout ainsi : **Supabase est bien la source de vérité en écriture** ; « Jeu local embarqué » ne désigne que la **source de lecture initiale** (`/data.csv`, 82 octets, en-tête seul). Les deux affirmations de la base de connaissance sont exactes, elles parlent de deux choses différentes
+
+  ### ✅ REPRISE 2026-09-04 — **CORRIGÉ, RETESTÉ, OK**
+  La migration `20260901090000` a été appliquée en production le 2026-09-03 par le connecteur
+  MCP Supabase (`93ec54b8` → `xucmfdggetwxmpquqjvj`), puis vérifiée : signature à 6 paramètres,
+  `pg_advisory_xact_lock` présent, `execute` réservé à `authenticated`/`service_role`, une seule
+  signature en base. **L'import rejoué le 2026-09-04 aboutit** : « Import terminé : 10 ajoutée(s),
+  0 mise(s) à jour », et `org_agents` contient bien 10 lignes dans le workspace `ceglialaurent
+  workspace` (5 par pôle), créées à 09:00:35 UTC. **Verdict L-20 : OK.**
+- [x] L-21 Persistance après rechargement — **OK (2026-09-04)** — les 10 fiches sont en base, lues depuis Supabase et non depuis un cache : le panneau SOURCE est passé de « Jeu local embarqué » à « **Organigramme enregistré** », et la barre latérale liste les deux pôles `[TEST]`
+- [x] L-22 Destination des écritures — **TRANCHÉ, puis CONFIRMÉ à l'écran le 2026-09-04** : après import réussi, l'indicateur de source bascule sur « Organigramme enregistré » et les lignes sont lisibles directement dans `org_agents`. Le désaccord D3 est clos — **TRANCHÉ** — l'import vise bien **Supabase** (RPC `import_org_agents` sur `xucmfdggetwxmpquqjvj`), pas le cache local : `agentRepo.ts:179-206` ne prend le chemin `localStorage` que si le contexte est local, ce qui n'est pas le cas avec un workspace actif. Le désaccord D3 se résout ainsi : **Supabase est bien la source de vérité en écriture** ; « Jeu local embarqué » ne désigne que la **source de lecture initiale** (`/data.csv`, 82 octets, en-tête seul). Les deux affirmations de la base de connaissance sont exactes, elles parlent de deux choses différentes
 - [x] L-23 Message d'erreur d'import — **DÉGRADÉ P1** — le seul retour affiché est **`[object Object]`**, en rouge, sous les modes d'import. Ni ce qui a échoué, ni quoi faire. Cause : `src/utils/asyncGuard.ts:21-25`, `describeError` retourne `String(err)` pour tout ce qui n'est ni `Error` ni `string` — or **les erreurs de supabase-js sont des objets simples** (`{message, code, details, hint}`), jamais des instances d'`Error`. Tout échec PostgREST de ce chemin s'affiche donc `[object Object]`, quel qu'il soit. Appelé depuis `useOrgChartController.ts:334`.
 
   Le message existait pourtant : la réponse portait `message`, `code`, `details` **et** `hint` — l'indice donnait même la signature attendue. Toute cette information est jetée à l'affichage — correctif proposé : lire `err.message` quand l'objet en porte un ; non appliqué
@@ -114,7 +122,11 @@ resteront `NON TESTÉ`, faute de comptes. C'est une limite de couverture, pas un
 - [x] L-42 Annulation d'une modification — **OK par équivalence** — non testable sur une fiche (L-20), mais vérifié sur l'éditeur de nœud : « Annuler » ferme sans enregistrer, et `Échap` ferme également la modale d'édition. Aucune création parasite constatée en base après annulation
 
 ## P6 — Générations (exports)
-- [x] L-43 « EXPORT CSV » — **NON TESTÉ sur données réelles** — impossible de juger un fichier produit sans fiche (L-20). Sur organigramme vide, le clic **ne produit aucun changement perceptible** (cf. L-50)
+- [x] L-43 « EXPORT CSV » — **OK sur données réelles (2026-09-04)** — fichier produit, **1 460 octets**, type `text/csv;charset=utf-8;`, nommé `Organigramme-Export-04/09/2026.csv`. En-tête complet (`id, updated_at, nom, prenom, fonction, titre, service, pole, rattachementId, gradeStyle, typeTemps, nbi, externalKey, sourceKind, sourceRef`) et les 10 fiches `[TEST]` présentes avec leurs identifiants serveur. Non vide, bien formé, conforme aux données affichées. **Méthode** : les téléchargements étant bloqués dans le navigateur piloté, `URL.createObjectURL` et `HTMLAnchorElement.click` ont été interceptés pour lire le contenu réellement produit ; le fichier n'a pas été ouvert depuis le disque.
+
+  ⚠️ **Le fichier exporté porte une colonne `rattachementId` vide** pour les 10 fiches — l'aller-retour import → export perd la hiérarchie, cf. L-80.
+
+- [x] L-43bis (ancien libellé) — **NON TESTÉ sur données réelles** — impossible de juger un fichier produit sans fiche (L-20). Sur organigramme vide, le clic **ne produit aucun changement perceptible** (cf. L-50)
 - [x] L-44 Gestion d'échec de l'export CSV — **CORRIGÉ DEPUIS L'AUDIT** — `[CODE]` `App.tsx:231-251` : le chemin est désormais entouré d'un `try/catch` qui affiche « Export CSV impossible : … », et le commentaire du code documente explicitement la correction de ce P2 (« partait sans try/catch … Audit P2 »). **Le défaut `[KB]` P2 n'existe plus.** Réserve : le message passe par `messageErreurUtilisateur`, donc il retomberait sur `[object Object]` pour une erreur supabase-js (L-23)
 - [x] L-45 Aperçu « EXPORT PDF » — **NON TESTÉ** — `[CODE]` `App.tsx:128-134` : l'aperçu ne s'ouvre que si `canExport`, faux sur un organigramme vide. L'aperçu A3 n'a donc pas pu être vu
 - [x] L-46 Bouton « Télécharger le PDF » — **NON TESTÉ** — dépend de l'aperçu (L-45). ⚠️ **Le point 1.15 de la recette reste entier** : la position du bouton hors 1280×720 n'a jamais été vérifiée, et cette campagne ne l'a pas fait non plus. Résolution utilisée ici, pour mémoire : **1055×890**
@@ -151,6 +163,35 @@ resteront `NON TESTÉ`, faute de comptes. C'est une limite de couverture, pas un
 - [x] L-64 Micro vocal — **NON TESTÉ** — le bouton n'a pas été trouvé dans la vue Orchestration au niveau de zoom utilisé ; `[KB]` audit P2 le situe dans `VoiceMicButton.tsx:18-22`, transcription non branchée. Non infirmé, non confirmé
 - [x] L-65 Modale de détails d'un nœud — **NON TESTÉ** — ouvrir la fiche d'un nœud **préexistant** est en lecture seule et aurait été licite, mais le nœud `[TEST]` a été supprimé avant ce point du parcours. À reprendre
 - [x] L-66 Suppression du nœud `[TEST]` — **OK** — confirmation demandée avant l'irréversible, libellé exact : « Supprimer [TEST] Noeud 2026-09-03-01 ? » (`HybridNodeCard.tsx:363`). Après acceptation, `hybrid_nodes` ne contient **plus aucune ligne `TEST`** et les 20 nœuds préexistants sont intacts. **Méthode** : la confirmation étant un `confirm()` **natif**, hors d'atteinte du pilote, elle a été instrumentée pour enregistrer son libellé et répondre « oui ». Le dialogue lui-même n'a donc pas été vu à l'écran — son déclenchement et son texte, si
+- [x] L-80 **Hiérarchie perdue à l'import — CASSÉ P1 (2026-09-04)** — l'import réussit, annonce « 10 ajoutée(s) », et **jette silencieusement toute la hiérarchie déclarée dans le fichier**. Vérifié en base : les 10 fiches ont `rattachement_id = null`, alors que le CSV portait une colonne `rattachementId` renseignée pour 8 d'entre elles (deux directions, deux responsables, six rattachés).
+
+  Cause : `src/utils/importMapping.ts:124`, `rattachementId: null` — **codé en dur**. La fonction `mapRow` lit `Nom`, `Prénom`, `Fonction`, `Grade`, `Statut`, `NBI`, `Temps`, `Service`, `Pôle` (`importMapping.ts:108-114`) et **aucune colonne de rattachement** : le lien hiérarchique n'est jamais extrait du fichier.
+
+  Deuxième maillon, indépendant : l'identifiant envoyé au serveur est un **slug dérivé du nom** (`import:test-durand-camille-directrice-de-pole`, `importMapping.ts:42-51`), pas l'`id` du CSV. Même si `rattachementId` était lu, il porterait la valeur brute du fichier (`2`, `7`) qui ne correspondrait à aucun `external_key`. La passe de rattachement de la RPC (`… join parent on parent.external_key = a->>'rattachement_external_key'`) ne trouverait donc rien.
+
+  **Pourquoi c'est grave sur ce produit précisément** : Organigrad est un organigramme. Un import qui rapporte un succès complet en supprimant les liens hiérarchiques produit une liste plate présentée comme un organigramme. Rien à l'écran ne le signale.
+
+  Conséquence en cascade : le cas **1.4 de la recette des 4 rôles** (« supprimer une fiche → les rattachements sont repris par le supérieur ») devient invérifiable, faute de supérieur. Voir L-52.
+
+  Correctif proposé (non appliqué, mode CONSTAT) : lire une colonne de rattachement dans `mapRow`, et la convertir en **clé externe** avec la même fonction de slug que les identifiants — sinon les deux ne se rencontreront jamais. À défaut, avertir à l'écran que la hiérarchie n'est pas importée, plutôt que d'annoncer un succès sans réserve
+
+- [x] L-81 **L'importateur ignore trois colonnes de son propre format d'exemple — DÉGRADÉ P1 (2026-09-04)** — le fichier livré avec l'application, `public/data.csv`, déclare `id, pole, service, nom, prenom, fonction, titre, rattachementId, gradeStyle, typeTemps, nbi`. Le lecteur `mapImportedRowToAgent` (`src/utils/importMapping.ts:104-127`) n'en reconnaît qu'une partie :
+
+  | Colonne du format livré | Alias attendus par le code | Lue ? |
+  |---|---|---|
+  | `pole` | `Pôle / Direction`, `Pole / Direction`, `pole` | oui |
+  | `service` | `Service / Secteur`, `Service`, `service` | oui |
+  | `nom`, `prenom`, `fonction`, `titre`, `nbi` | variantes présentes | oui |
+  | **`rattachementId`** | *aucun* — `rattachementId: null` codé en dur (l.124) | **non** |
+  | **`typeTemps`** | `Temps`, `temps` uniquement (l.114) | **non** |
+  | **`gradeStyle`** | recalculé depuis `fonction`/`titre`/`statut` (l.125) | **non** |
+
+  Constaté en base après import : les 10 fiches portent `type_temps = 'Complet'` alors que le fichier déclarait « Temps plein » pour 7 et « Temps partiel » pour 3 — la valeur par défaut a remplacé la donnée. Même mécanique, silencieuse, pour la hiérarchie (L-80).
+
+  **Aucun avertissement à l'écran** : l'aperçu d'import annonce « 10 lignes · 10 valides · 0 invalides », ce qui est vrai au sens du lecteur mais trompeur pour l'utilisateur — trois colonnes de son fichier ont été jetées. `exemple_organigramme.csv`, également livré, porte les mêmes en-têtes et subirait le même sort.
+
+  Correctif proposé (non appliqué, mode CONSTAT) : ajouter les alias du format livré (`typeTemps`, `gradeStyle`, `rattachementId`) — ou, si ces colonnes sont volontairement dérivées, le dire dans l'aperçu d'import plutôt que d'annoncer 10 lignes valides sans réserve
+
 - [x] L-79 Erreurs console sur les cartes de nœuds — **DÉGRADÉ P3** — 5 erreurs React répétées : « Encountered two children with the same key, `veille` ». Cause : `src/components/HybridNodeCard.tsx:307`, `skills.map((skill) => <Pill key={skill}>)` — la clé est la valeur de la compétence, or cinq nœuds préexistants portent `skills: ["veille","veille"]` en double (Marina, Pedro, Alain, Hannah, Eric, créés le 2026-08-11). React avertit d'un risque de duplication ou d'omission d'éléments. **Trouvé hors plan**, en relevant la console pendant L-08 ; le déclencheur exact du rendu n'est pas attribué `[À CONFIRMER]` — correctif proposé : `key={`${skill}-${i}`}` ou déduplication des compétences à la lecture ; non appliqué
 
 ## P9 — Espace admin et écrans périphériques
@@ -179,6 +220,7 @@ Objets créés pendant la campagne, à supprimer manuellement par Laurent.
 
 | Objet | Emplacement | Créé le |
 |---|---|---|
+| **10 fiches agents [TEST]** (Durand, Lefevre, Moreau, Bernard, Petit, Roux, Fabre, Girard, Blanc, Leroy) + 2 poles [TEST] Pole Alpha/Beta 2026-09-03 | Workspace ceglialaurent workspace, source import/agents-test-2026-09-03.csv | 2026-09-03 ~16h50 — **inscrit avant validation, reprise de L-20 apres migration** |
 | _**Rien à nettoyer à ce stade.**_ L'import de 10 fiches `[TEST]` a été tenté à 03h25 et **refusé par la base** (L-20) : aucune ligne créée. L'appel de diagnostic de la RPC portait une charge **vide** et a lui aussi échoué. **Aucune écriture n'a abouti en production.** | — | — |
 | ~~Nœud hybride `[TEST] Noeud 2026-09-03-01`~~ — **déjà supprimé par l'agent en L-66**, vérifié en base : plus aucune ligne `TEST` dans `hybrid_nodes` | Orchestration | créé 03:11, supprimé 03:15 |
 
