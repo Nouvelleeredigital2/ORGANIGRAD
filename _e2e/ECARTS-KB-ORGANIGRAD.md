@@ -1,6 +1,6 @@
 # Écarts base de connaissance ↔ réalité — ORGANIGRAD
 
-Établi le **2026-09-03**, en croisant [`CONTEXTE-ORGANIGRAD.md`](CONTEXTE-ORGANIGRAD.md),
+Établi le **2026-09-03**, **mis à jour le 2026-09-04** après application de la migration et reprise de campagne, en croisant [`CONTEXTE-ORGANIGRAD.md`](CONTEXTE-ORGANIGRAD.md),
 [`PROGRESS-ORGANIGRAD.md`](PROGRESS-ORGANIGRAD.md) et
 [`RAPPORT-ORGANIGRAD-2026-09-03.md`](RAPPORT-ORGANIGRAD-2026-09-03.md).
 
@@ -20,7 +20,7 @@ trouvé imaginaire.
 | Élément | Source KB | Constat E2E | Action proposée |
 |---|---|---|---|
 | `VITE_ORCHESTRATOR_URL` — « URL de l'orchestrateur (optionnel ; sans elle → mode brouillon) » | `README.md` §3, tableau des variables SPA | La variable **n'est lue nulle part** dans `src/` ni `orchestrator/src/` (`grep` vide). Seul le `localStorage` configure l'orchestrateur (`useOrchestratorConfig.ts:13`), alimenté par l'écran Réglages | **Corriger la doc** : retirer la variable du tableau, ou dire qu'elle est inerte. Elle figure aussi dans `.env.example` et `.env.local`, ce qui entretient l'illusion |
-| `import_org_agents` à 6 paramètres | `supabase/migrations/20260901090000_import_org_agents_optimistic_lock.sql`, présente au dépôt | La fonction **n'existe pas** sous cette signature en production : `PGRST202`. Seule la version à 5 paramètres répond | **Corriger la base** (appliquer la migration), pas la doc — l'ordre est déjà écrit dans `etat-production-2026-09-02.md` §3 |
+| ~~`import_org_agents` à 6 paramètres~~ — **RÉSOLU le 2026-09-03** | migration `20260901090000` | Appliquée par le connecteur MCP puis vérifiée : signature à 6 paramètres, verrou consultatif, `execute` réservé à `authenticated`/`service_role`. **L'import fonctionne** | **Fait.** Reste à téléverser le bundle : la production sert encore la version à 5 arguments |
 | Port `5199` de la SPA | `.claude/launch.json`, versionné (commit `21a1262`) | La SPA écoute sur **5173** ; `vite.config.ts` ne surcharge rien | **Corriger `launch.json`**, ou documenter pourquoi 5199. En l'état, un agent qui démarre par cette configuration cherche l'application au mauvais endroit |
 
 ---
@@ -33,6 +33,9 @@ trouvé imaginaire.
 | **L'écriture directe en base ne demande pas un orchestrateur configuré** — un orchestrateur *jamais* configuré suffit ; le prompt système est alors stocké en clair | L'audit décrit uniquement le cas « configuré mais éteint ». Le défaut est plus large et se déclenche dans la configuration **par défaut** de l'application | `AUDIT-ORGANIGRAD-2026-08-29.md` Phase 2, parcours 3 — élargir la formulation |
 | **La barre supérieure se superpose à elle-même à 375 px** — trois textes empilés | Constaté sur Membres et Clés API | `AUDIT-ORGANIGRAD-2026-08-29.md` Phase 2, parcours 5 (mobile) |
 | **Deux composants décrivent l'état vide différemment** — l'organigramme dit « sélectionnez un pôle », la barre latérale dit « aucun pôle disponible » | Rupture de parcours réelle, aucun des deux ne dit d'importer | Nouveau constat P2 fonctionnel |
+| **La hiérarchie déclarée dans un fichier importé n'est jamais lue** — `importMapping.ts:124`, `rattachementId: null` en dur ; la perte est **masquée** par une mise en page par `gradeStyle` | 10 fiches importées → 10 racines, vérifié en base et dans le cache client, alors que le fichier en rattachait 8 | **Constat neuf du 2026-09-04** — à ajouter en **P1**, Phase 2 parcours 2 |
+| **Trois colonnes du format d'exemple livré sont ignorées** : `rattachementId`, `typeTemps`, `gradeStyle` | `type_temps='Complet'` pour les 10 fiches, là où le fichier disait « Temps plein » / « Temps partiel » | **Constat neuf du 2026-09-04** — à ajouter en **P1** |
+| **Export PDF de 11,2 Mo pour 5 fiches** — rendu rastérisé | Mesuré à l'interception du blob | À ajouter en **P2**, avec la question du passage à l'échelle |
 | **Les graphiques du tableau de bord n'ont pas d'état vide** | Cartes vides, sans un mot | Nouveau constat P3 |
 | **Le menu du sélecteur de workspace ne se ferme pas avec `Échap`** | Deux pressions sans effet ; seul un second clic le referme | Nouveau constat P3 |
 | **Les libellés de la barre latérale et de la Zone de Danger sont sans accents** (`csvSource.ts:17-18`, `SettingsView`) | L'audit parle d'« accents manquants (écrans legacy) » — c'est ici la navigation principale | Préciser la portée dans l'audit |
@@ -47,6 +50,7 @@ trouvé imaginaire.
 | Sens de la fenêtre de migration | `etat-production-2026-09-02.md` §3 : risque = **SPA ancienne + fonction nouvelle** → « import périmé » (`40001`) | **Code à jour + fonction ancienne** → fonction introuvable (`PGRST202`). Le dépôt local est du mauvais côté de la fenêtre | **La réalité.** Le document a raison sur le principe (« il n'existe pas d'ordre sans fenêtre »), faux sur le sens — à corriger, en gardant la séquence qu'il prescrit, qui reste la bonne |
 | Changement de rôle d'un membre | Audit 29/08, Phase 3 : « appliqué au `onChange`, sans confirmation » | `MembersView.tsx:202` porte un `confirm()` nommant le membre et le rôle visé | **Le code.** Défaut corrigé depuis l'audit — **réserve à retirer** |
 | Export CSV sans gestion d'échec | Audit 29/08, P2 frontend : « export CSV sans gestion d'échec (`App.tsx:214-225`) » | `App.tsx:231-251` est entouré d'un `try/catch`, et le commentaire du code **documente explicitement** la correction de ce P2 | **Le code.** **Réserve à retirer.** Réserve résiduelle : le message passe par `messageErreurUtilisateur`, donc `[object Object]` sur une erreur supabase-js |
+| Désynchronisation d'ids après import (P1 n°4) | Audit 29/08 : la première édition après promotion CSV → base échouerait sur `invalid input syntax for type uuid` | **Non reproduit le 2026-09-04** : la première modification après import aboutit, la fiche porte un UUID serveur | **Le code.** Troisième réserve périmée de l'audit — à retirer ou requalifier |
 | Défaut mobile | Audit 29/08 : `px-12` sur Members/ApiKeys (96 px sur 375) | Ces deux vues se comportent **bien** ; c'est la barre supérieure qui casse | **La réalité** — remplacer le constat, ne pas l'ajouter |
 | Source de vérité de l'organigramme | `README.md` §9 : « Supabase = source de vérité persistante, CSV/XLSX = import/export seulement » | Exact **en écriture**. Mais l'écran affiche « Jeu local embarqué », qui désigne la source de **lecture initiale** (`/data.csv`) | **Les deux sont vrais** — ils parlent de deux choses. Le libellé de l'interface mériterait d'être moins ambigu |
 | Version du contrat partagé | `CLAUDE.md` racine §4 : `@apps2026/contracts` **1.1.2** | **1.1.1** vendorée dans `orchestrator/` (audit 29/08, Phase 0) | À trancher : aligner le client ou corriger la mention. P3 |
@@ -62,8 +66,8 @@ trouvé imaginaire.
 - **P1 n°2** — chemin `/mcp` cassé sous chiffrement actif : côté orchestrateur.
 - **P1 n°3** — repli sur un serveur **sans authentification** en l'absence de `SUPABASE_DB_URL` :
   côté orchestrateur. `[À CONFIRMER]` en production, comme l'audit le note déjà.
-- **P1 n°4** — désynchronisation d'ids après import : **hors d'atteinte**, l'import échouant en amont.
-- **P1 n°5** — lien profond `?agent=` inopérant à froid : exige une fiche réelle.
+- ~~**P1 n°4** — désynchronisation d'ids après import~~ : **testé le 2026-09-04, non reproduit** (§3).
+- **P1 n°5** — lien profond `?agent=` inopérant à froid : **toujours ouvert**, non rejoué pendant la reprise.
 - **Policy `wm write admin FOR ALL`** — un admin peut rétrograder l'owner par l'API directe :
   exige un second compte.
 - **Point 1.13 de la recette** — second e-mail HITL : exige l'orchestrateur **et** `RESEND_API_KEY`.
@@ -80,7 +84,9 @@ Par ordre, avec ce qu'il faut changer. **Aucune de ces modifications n'a été f
    quiconque lance la SPA depuis le dépôt**. La séquence prescrite reste valable, elle devient
    urgente.
 
-2. **`ORGANIGRAD/AUDIT-ORGANIGRAD-2026-08-29.md`** — trois corrections :
+2. **`ORGANIGRAD/AUDIT-ORGANIGRAD-2026-08-29.md`** — corrections, **révisées le 2026-09-04** :
+   *ajouter* deux P1 neufs (hiérarchie non importée ; colonnes du format d'exemple ignorées) ;
+   *retirer* le P1 n°4, non reproduit ; puis les trois corrections initiales —
    *retirer* la réserve sur la confirmation du changement de rôle et celle sur le `try/catch`
    de l'export CSV (toutes deux corrigées depuis) ; *remplacer* le constat mobile `px-12` par
    la superposition de la barre supérieure ; *ajouter* le bouton « Reset » de l'organigramme
@@ -116,3 +122,8 @@ et il avait raison **du point de vue du code**.
 
 C'est l'argument le plus solide pour rejouer cette campagne après la migration : ce qu'elle
 mesure n'est mesurable qu'à l'écran.
+
+**Et la reprise l'a confirmé.** Une fois l'import débloqué, deux défauts P1 sont apparus que
+personne n'avait vus — la hiérarchie jetée en silence, et trois colonnes du format livré
+ignorées — tandis qu'un P1 de l'audit s'est révélé non reproductible. Aucun des trois n'était
+visible sans importer un vrai fichier et relire la base derrière.

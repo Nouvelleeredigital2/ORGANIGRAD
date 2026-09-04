@@ -1,6 +1,6 @@
 # ORGANIGRAD — documentation de l'existant
 
-État constaté le **2026-09-03**, par parcours navigateur sur **79 éléments**, en mode LOCAL
+État constaté le **2026-09-03**, par parcours navigateur sur **81 éléments**, complété par une **reprise le 2026-09-04** après application de la migration `20260901090000` (16 éléments réinstruits), en mode LOCAL
 (orchestrateur non lancé), avec un compte `owner` sur la base de **production**
 `xucmfdggetwxmpquqjvj`.
 
@@ -30,22 +30,54 @@ La source de données affichée est « Jeu local embarqué » : le CSV d'amorça
 qui ne contient **que sa ligne d'en-tête** (82 octets). C'est un libellé de *lecture initiale* :
 les écritures, elles, vont bien dans Supabase (§3).
 
-### Importer des fiches — **cassé** `[E2E]` `[CODE]`
+### Importer des fiches — **fonctionne, mais perd trois colonnes** `[E2E]` `[CODE]`
 
-L'aperçu d'import fonctionne parfaitement : nom du fichier, destination nommée
-(« Workspace ceglialaurent workspace »), compteurs (10 lignes · 10 valides · 0 invalides ·
-0 doublons), deux modes explicités (Compléter / Remplacer).
+L'aperçu d'import est bon : nom du fichier, destination nommée (« Workspace ceglialaurent
+workspace »), compteurs, deux modes explicités (Compléter / Remplacer). La validation crée
+bien les fiches — « Import terminé : 10 ajoutée(s), 0 mise(s) à jour » — et elles persistent
+après rechargement.
 
-**La validation échoue.** La RPC `import_org_agents` est appelée avec six paramètres ; la base
-de production n'expose que la version à cinq. PostgREST répond `PGRST202`. Vérifié dans les
-deux sens par appel direct à charge vide : avec cinq paramètres, la fonction répond.
+> **Historique** : jusqu'au 2026-09-03 cette validation échouait (`PGRST202`), le code
+> envoyant six paramètres à une base qui n'en connaissait que cinq, et l'échec s'affichait
+> **`[object Object]`**. La migration `20260901090000` a été appliquée le 2026-09-03. Le
+> défaut d'affichage, lui, **n'est pas corrigé** (§5).
 
-L'échec s'affiche à l'utilisateur sous la forme **`[object Object]`**.
+**Ce que l'import jette en silence** — trois colonnes du format livré avec l'application
+(`public/data.csv`) ne sont reconnues par aucun alias de `mapImportedRowToAgent`
+(`src/utils/importMapping.ts:104-127`) :
 
-### Modifier, supprimer, exporter des fiches — **non jugeable** `[E2E]`
+- **`rattachementId`** — `rattachementId: null` codé en dur (l.124) : **aucune relation
+  hiérarchique n'est importée** ;
+- **`typeTemps`** — seuls `Temps`/`temps` sont lus (l.114) ; constaté : `type_temps='Complet'`
+  pour les 10 fiches, là où le fichier déclarait « Temps plein » (7) et « Temps partiel » (3) ;
+- **`gradeStyle`** — recalculé depuis `fonction`/`titre`/`statut` (l.125).
 
-Aucun de ces parcours n'a pu être évalué : ils supposent des fiches, que l'import ne crée pas.
-Ce ne sont pas des écrans en bon état, ce sont des écrans **non jugés**.
+L'aperçu annonce « 10 valides, 0 invalides » : exact pour le lecteur, trompeur pour l'utilisateur.
+
+### Le piège de la hiérarchie affichée `[E2E]` `[CODE]`
+
+L'organigramme et l'aperçu PDF montrent des niveaux — Direction, Responsable, Expert, Agent,
+Support. **Cette hiérarchie n'existe pas dans les données.** Elle vient de la mise en page par
+`gradeStyle` : `buildHierarchy.ts:46-67` n'attache un enfant que par `rattachementId`, et les
+10 fiches importées ont toutes `rattachement_id = null` — vérifié en base **et** dans le cache
+client. Ce sont dix racines affichées comme un arbre.
+
+La perte de hiérarchie est donc **invisible** : un utilisateur voit un organigramme plausible
+sur une base sans aucun lien d'autorité.
+
+### Modifier, supprimer — **fonctionne** `[E2E]`
+
+Modification d'une fiche : enregistrée, persistée, toujours affichée après rechargement complet
+— **cas 1.3 de la recette des 4 rôles : il passe**. La première édition *après import* aboutit
+également, la fiche portant un UUID serveur : le défaut annoncé par l'audit du 29/08 (P1 n°4,
+`invalid input syntax for type uuid`) **ne s'est pas manifesté**.
+
+Suppression : la commande « Reset » demande confirmation en annonçant le nombre exact
+(« Supprimer les 10 fiches enregistrées ? Cette action est irréversible. ») et supprime
+réellement — 0 ligne restante, vérifié en base.
+
+**Non testable** : la reprise des rattachements par le supérieur (recette 1.4), faute de
+supérieur — conséquence directe du défaut ci-dessus.
 
 ### Orchestrer — **fonctionne, en simulation** `[E2E]`
 
@@ -80,7 +112,7 @@ plus `?invite=` hors routeur. Une valeur inconnue est ignorée sans erreur et re
 
 | Route | Rôle requis | Éléments interactifs | Fonctionnels | Sources |
 |---|---|---|---|---|
-| `/` (`orgchart`) | authentifié | zone d'organigramme, bascule Vue Hybride, **bouton « Reset »**, export par lots | non jugeable (vide) ; « Reset » **non testé, interdit** | `[E2E]` `[CODE]` `App.tsx:400-410` |
+| `/` (`orgchart`) | authentifié | zone d'organigramme, bascule Vue Hybride, **bouton « Reset »**, export par lots | **OK sur données réelles (04/09)** : organigramme peuplé, mode Édition, Profil, Contact, corbeille. « Reset » **testé** une fois toutes les fiches créées par la campagne : confirmation chiffrée, suppression effective | `[E2E]` `[CODE]` `App.tsx:400-410` |
 | `?v=dashboard` | authentifié | 3 compteurs, 2 graphiques | compteurs **OK** (0/0/0, sans `NaN`) ; graphiques **vides sans explication** | `[E2E]` |
 | `?v=orchestration` | authentifié | Lancer la chaîne, Réinitialiser, Nouveau nœud, recherche, 4 filtres, et par carte : Éditer / Supprimer / Run | **OK en simulation** ; écriture réelle en base (§3) | `[E2E]` |
 | `?v=members` | `owner`/`admin` | formulaire d'invitation (e-mail, rôle, Inviter), liste des membres, invitations en attente | **OK** en lecture ; invitation **non soumise** (interdit) | `[E2E]` |
@@ -98,7 +130,7 @@ manquante, aucune route codée inaccessible — le désaccord que la phase 0 che
 
 | Entité | Réellement créable | Modifiable | Supprimable | Par qui, et où |
 |---|---|---|---|---|
-| `org_agents` (fiches) | **non** — l'import échoue ; aucune création manuelle n'existe | non jugeable | non jugeable | — |
+| `org_agents` (fiches) | **oui**, par import CSV/XLSX — **aucune création manuelle** dans l interface | **oui**, persistée après rechargement | **oui**, avec confirmation chiffrée (« Reset ») | `owner` ; **la hiérarchie du fichier n est jamais importée** (§1) |
 | `hybrid_nodes` | **oui** — éditeur complet, trois archétypes | **oui** | **oui**, avec confirmation nommant l'objet | `owner` ; **écrit directement dans Supabase**, pas via l'orchestrateur |
 | `node_transitions` | **non** en mode local — table vide après exécution | — | — | le journal d'activité est volatile |
 | `workspace_members` | non testé (invitation interdite) | non testé | non testé | — |
@@ -113,21 +145,21 @@ nœud hybride. Tout le versant RH est inerte tant que l'import ne passe pas.
 
 ## 4. Générations : comportement réel
 
-| Génération | Déclencheur | Comportement observé | Délai |
+| Génération | Déclencheur | Comportement observé (2026-09-04, données réelles) | Délai |
 |---|---|---|---|
-| Import CSV/XLSX | champ de fichier | aperçu correct, **puis échec `PGRST202`** affiché `[object Object]` | < 1 s |
-| Export CSV | « EXPORT CSV » | **aucun changement perceptible** sur organigramme vide | immédiat |
-| Export PDF | « EXPORT PDF » | aperçu **non ouvert** (`canExport` faux) | — |
-| Export par lots A3 | lien latéral | **rien, silencieusement** (`App.tsx:179`, `return` nu) | immédiat |
+| Import CSV/XLSX | champ de fichier | **10 fiches créées** ; 3 colonnes jetées (§1) | < 1 s |
+| Export CSV | « EXPORT CSV » | **1 460 octets**, `text/csv;charset=utf-8;`, en-tête complet, 10 lignes conformes | immédiat |
+| Export PDF (aperçu) | « EXPORT PDF » | aperçu A3 paysage, annuaire latéral, mention « Document généré automatiquement » | < 1 s |
+| Export PDF (fichier) | « Télécharger le PDF » | **11 209 133 octets**, `application/pdf` | ~8 s |
+| Export par lots A3 | lien latéral | non rejoué sur données réelles ; à vide, **rien, silencieusement** (`App.tsx:179`) | immédiat |
 
-**Taux d'échec observé : aucun fichier produit, aucun fichier ouvert.** La règle « un PDF blanc
-ou une image de 0 octet est un CASSÉ » n'a pas pu s'appliquer, faute de fichier.
+**Taux d'échec observé : aucun.** Tous les exports déclenchés ont produit un fichier non vide.
 
-Deux temporisations figées dans le code, non observables ici : **800 ms** avant l'export PDF
-(`App.tsx:142`) et **1 200 ms par pôle** pour l'export par lots (`App.tsx:192-194`) — délais
-indépendants de la taille de l'organigramme.
-
----
+Deux réserves, dites franchement : les téléchargements étant bloqués dans le navigateur piloté,
+les fichiers ont été lus **par interception** de `URL.createObjectURL` — le contenu du CSV a été
+vérifié, celui du **PDF ne l'a pas été** (taille et type seulement). Et **11,2 Mo pour un pôle
+de cinq fiches** trahit un rendu rastérisé : sur un organigramme réel, le poids deviendrait
+problématique.
 
 ## 5. Espace admin : état réel
 
@@ -159,14 +191,17 @@ Blocages, par ordre de gravité :
 
 Elle décrit **un** état, **une** configuration, **un** rôle. Ce qu'elle ne couvre pas :
 
+- **Le contenu visuel des fichiers produits** — CSV vérifié, PDF non ouvert (téléchargement
+  bloqué dans le navigateur piloté). « Le PDF s'ouvre-t-il et n'est-il pas blanc ? » reste à
+  faire à la main.
+- **La hiérarchie réelle** — jamais éprouvée, l'import ne la créant pas. Tout ce qui en dépend
+  (adoption par le supérieur, cycles, branches profondes) reste hors d'atteinte tant que ce
+  défaut tient.
 - **Les rôles `admin`, `member`, `viewer` et l'utilisateur extérieur** — un seul compte
   disponible, `owner`. Les sections 2 à 5 de la recette des 4 rôles restent entières.
 - **L'orchestration réelle** — transitions, flux SSE, validation humaine, notifications : tout
   cela suppose l'orchestrateur lancé et une clé posée à la main. Rien de ce qui est écrit ici
   ne vaut pour ce mode.
-- **Le versant RH complet** — création, modification, suppression, hiérarchie, exports sur
-  données réelles : suspendus à l'import.
-- **Les fichiers produits** — aucun export n'a abouti ; leur contenu n'a jamais été inspecté.
 - **Le sélecteur de fichier natif** et les dialogues `confirm()` — hors d'atteinte du pilote ;
   l'import et la suppression ont été déclenchés par instrumentation, et le chemin par
   l'interface reste à vérifier à la main.
