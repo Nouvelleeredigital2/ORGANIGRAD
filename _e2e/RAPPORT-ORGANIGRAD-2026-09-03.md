@@ -8,6 +8,43 @@ Fichier d'état : [`PROGRESS-ORGANIGRAD.md`](PROGRESS-ORGANIGRAD.md) · contexte
 
 ---
 
+## 0. Addendum du 2026-09-04 — reprise après migration
+
+Ce rapport a été écrit le 2026-09-03, **avant** que la migration `20260901090000` soit
+appliquée. Elle l'a été le 2026-09-03 par le connecteur MCP Supabase, et la campagne a été
+reprise le **2026-09-04** sur les 14 éléments qui en dépendaient. Le corps du rapport
+ci-dessous n'a pas été réécrit : lire cet addendum d'abord.
+
+**Le verdict change.** L'import fonctionne : 10 fiches créées, persistantes après
+rechargement, modifiables, supprimables. Le parcours principal va désormais de bout en bout.
+
+**Trois constats neufs, dont deux P1** — voir `PROGRESS-ORGANIGRAD.md` :
+
+| # | Constat | Sévérité |
+|---|---|---|
+| L-80 | **La hiérarchie déclarée dans le fichier n'est pas importée** (`importMapping.ts:124`, `rattachementId: null` en dur). Les 10 fiches sont 10 racines. La perte est **invisible** : l'écran affiche des niveaux par `gradeStyle`, donc un organigramme plausible sur une base sans aucun lien | **P1** |
+| L-81 | **L'importateur ne reconnaît pas trois colonnes de son propre format d'exemple** (`rattachementId`, `typeTemps`, `gradeStyle`). Constaté : `type_temps='Complet'` pour les 10 fiches, là où le fichier disait « Temps plein » / « Temps partiel » | **P1** |
+| L-38 | **Le P1 n°4 de l'audit du 29/08 ne se reproduit pas** : la première édition après import aboutit, la fiche porte un UUID serveur. À requalifier dans l'audit | — |
+
+**Ce qui passe maintenant** : L-20 import (CASSÉ → **OK**), L-21 persistance, L-35 à L-37
+modification et persistance (**cas 1.3 de la recette : passe**), L-43 export CSV (1 460 o,
+bien formé), L-45 aperçu A3, L-46 bouton « Télécharger » visible à 1054 px, L-47 PDF produit
+(11,2 Mo — rendu rastérisé, conformité visuelle non vérifiée), L-51/L-53/L-54 suppression et
+nettoyage.
+
+**Ce qui reste hors d'atteinte** : le cas 1.4 de la recette (reprise des rattachements par le
+supérieur) est **non testable tant que L-80 n'est pas corrigé**, faute de supérieur.
+
+**Données de test** : les 10 fiches créées pendant la reprise ont été supprimées par l'agent
+et leur absence vérifiée en base. Les 5 fiches de « Recette staging 2026-08-05 » n'ont pas été
+touchées.
+
+⚠️ **Le bundle de production n'a pas été téléversé.** Depuis la migration, le serveur sert
+toujours celui du 27/08, à cinq paramètres : un ré-import des deux sources de « Recette
+staging » y serait refusé (`40001`). Un import vers une source neuve passe.
+
+---
+
 ## 1. Verdict
 
 **Non, un utilisateur lambda ne peut pas aller au bout du parcours principal.** Il casse à la
