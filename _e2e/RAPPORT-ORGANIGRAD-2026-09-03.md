@@ -47,22 +47,23 @@ dernier qui compte.
 | Indicateur | Valeur |
 |---|---|
 | Éléments parcourus | **82** |
-| `OK` | 34 |
-| `CASSÉ` | 2 |
-| `DÉGRADÉ` | 12 |
+| `OK` | **38** |
+| `CASSÉ` | 3 |
+| `DÉGRADÉ` | 11 |
 | `NON CÂBLÉ` | 0 |
 | `CONFIRMÉ` / `TRANCHÉ` (constats de fond) | 7 |
-| `BLOQUÉ` — dépendance non satisfaite | 8 |
-| `NON TESTÉ` — action interdite, outil, ou périmètre | 13 |
-| `NON TESTABLE` en l'état | 3 |
-| `SANS OBJET` | 1 |
+| `NON TESTÉ` — action interdite, outil ou périmètre | 13 |
+| `NON TESTABLE` en l état (2 pilotes, données, orchestrateur) | 3 |
+| `BLOQUÉ` restant | 1 |
+| `NON PARCOURU` — **oubli de l agent**, testable et non fait | 1 |
+| `NON CONCLUANT` · `HORS PÉRIMÈTRE` · `SANS OBJET` | 3 |
 | Corrections de code appliquées | **0** — mode CONSTAT |
 | Migration appliquée en production | **1** (`20260901090000`, hors code, sur demande) |
 | Pauses d'authentification | 1 déclarée le 04/09 ; celle du 03/09 n'a pas eu lieu à formuler |
 
-Répartition par sévérité : **P1 = 7** · P2 ≈ 8 · P3 ≈ 6 · **P0 = 0**.
+Répartition par sévérité : **P1 = 7** · P2 ≈ 9 · P3 ≈ 6 · **P0 = 0**.
 
-Les 8 `BLOQUÉ` et 3 `NON TESTABLE` restants sont détaillés en §10 — ce ne sont pas des écrans
+Le `BLOQUÉ` restant, les 3 `NON TESTABLE` et le `NON PARCOURU` sont détaillés en §10 — ce ne sont pas des écrans
 en bon état, ce sont des écrans **non jugés**.
 
 ## 3. P0 et P1 restants
@@ -217,14 +218,17 @@ préexistants.
 > être **testé légitimement** le 04/09, une fois que toutes les fiches du workspace étaient des
 > données créées par la campagne.
 
-**Non atteint — dépendance non satisfaite (8)** : consultation d'un organigramme peuplé,
-ouverture d'une fiche, navigation par pôle, lien profond `?agent=` à froid (le P1 n°5 de
-l'audit), recherche Spotlight sur une fiche réelle, bascule Vue Hybride, export par lots sur
-données réelles, effacement de `skills`/`avatarUrl` sur PUT partiel.
+**Parcourus lors de la 2ᵉ passe du 04/09 (8)** : consultation d un organigramme peuplé, ouverture
+d une fiche, navigation par pôle, recherche Spotlight sur une fiche réelle, bascule Vue Hybride,
+export par lots sur données réelles, lien profond `?agent=` à froid, effacement `skills`/`avatarUrl`.
+Deux d entre eux ont livré des constats : le lien profond ouvre **le mauvais pôle** (§3, P2), et
+l export par lots produit bien **un fichier par pôle** — vérifié par empreinte SHA-256, après une
+fausse alerte de doublon fondée sur la seule taille.
 
-Ces huit-là **étaient** débloqués par la migration : ils ont été replanifiés le 04/09, et la
-reprise s'est arrêtée sur une **session expirée** avant de les parcourir. Ils restent donc
-non jugés — pas en bon état, non jugés.
+**Non parcouru — oubli de l agent (1)** : accessibilité clavier des nœuds de l organigramme. Les
+données étaient là, l élément était testable, il ne l a pas été. Ce n est pas une limite d outil.
+
+**Bloqué (1)** : modification concurrente sur deux onglets — un seul pilote de navigateur.
 
 **Non testable en l'état (3 + les dépendances d'outil)** :
 
