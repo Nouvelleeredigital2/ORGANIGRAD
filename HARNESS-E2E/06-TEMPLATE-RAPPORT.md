@@ -65,6 +65,15 @@ Section obligatoire, jamais vide. Distinguer :
 - non atteint (session interrompue, dépendance indisponible)
 - non testable en l'état, avec ce qu'il faudrait pour le rendre testable
 
+**Déclarer ici le MODE DE PREUVE établi au premier élément.** En mode « preuves citées »,
+dire explicitement que `_e2e/captures/` est vide parce que l'outil n'écrit pas sur le disque,
+et sur quoi reposent alors les constats `[E2E]` : mesures DOM, statuts réseau relevés dans le
+journal du serveur, réponses d'API, texte exact affiché. Un lecteur qui ouvre un dossier de
+captures vide sans explication conclut que le travail n'a pas été fait.
+
+**Nommer aussi les faux constats évités**, quand il y en a eu : ce qui paraissait cassé, ce
+qui l'a démenti. C'est ce qui rend le reste du rapport crédible.
+
 ## 11. Suite recommandée
 Trois actions maximum, ordonnées. Pas de liste de souhaits.
 ```
@@ -74,6 +83,7 @@ Trois actions maximum, ordonnées. Pas de liste de souhaits.
 ## RÈGLES DE RÉDACTION
 
 - Aucune affirmation sans étiquette `[KB]` `[CODE]` `[E2E]` `[À CONFIRMER]`.
-- Aucun constat sans référence : capture pour un constat d'écran, `fichier:ligne` pour un constat de code.
+- Aucun constat sans référence. Pour un constat d'écran : la capture si l'outil sait l'enregistrer, sinon la preuve citée qui la remplace — mesure DOM, statut réseau, ou texte exact affiché (cf. `02-PROMPT-CLAUDE-CODE.md`, temps 1 · OBSERVER). Pour un constat de code : `fichier:ligne`.
+- Le rapport indique en §10 le **mode de preuve** de la campagne. Si `_e2e/captures/` est vide parce que l'outil n'écrit pas sur le disque, c'est écrit noir sur blanc — un dossier vide ne doit jamais passer pour un dossier de preuves.
 - « Devrait fonctionner » n'est pas un verdict. Soit c'est retesté à l'écran, soit c'est `[À CONFIRMER]`.
 - Un rapport qui ne contient aucun problème est suspect : vérifier alors la couverture réelle avant de conclure.

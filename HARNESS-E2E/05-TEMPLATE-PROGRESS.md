@@ -8,9 +8,12 @@ C'est la **source de vérité de l'avancement**. Il est mis à jour après chaqu
 ```markdown
 # E2E {APP} — campagne du {AAAA-MM-JJ}
 
+Identifiant : {APP}-{AAAA-MM-JJ}-{NN}
 Mode        : CORRECTION | CONSTAT
+Preuve      : captures fichier | preuves citées    # établi au 1er élément, cf. 02 · temps 1
 Branche     : {branche}
 URL         : {url de 01-CONFIG}
+Commit init.: {git rev-parse HEAD au démarrage}
 Progression : 0/{N}
 Dernière MAJ: {horodatage}
 

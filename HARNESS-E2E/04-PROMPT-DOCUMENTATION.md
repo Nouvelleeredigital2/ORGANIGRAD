@@ -12,7 +12,7 @@
 |---|---|
 | `[KB]` | Base de connaissance, avec nom de fichier source |
 | `[CODE]` | Code source, avec `fichier:ligne` |
-| `[E2E]` | Constaté à l'écran pendant la campagne, avec capture |
+| `[E2E]` | Constaté à l'écran pendant la campagne — capture si l'outil sait l'écrire sur le disque, sinon la preuve citée qui la remplace : mesure DOM, statut réseau, ou texte exact affiché (cf. `02-PROMPT-CLAUDE-CODE.md`, temps 1 · OBSERVER) |
 | `[À CONFIRMER]` | Hypothèse ou déduction non vérifiée |
 
 Aucune affirmation sans étiquette. Aucune invention : un document que tu n'as pas ouvert n'existe pas, une fonctionnalité que tu n'as pas lue n'est pas documentée.
