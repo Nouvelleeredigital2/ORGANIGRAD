@@ -1,5 +1,8 @@
 import type { Agent, GradeStyle } from '../types/agent';
 
+/** Grades reconnus, mêmes valeurs que `normalizeAgent` — un fichier peut les fournir. */
+const GRADES_RECONNUS: readonly GradeStyle[] = ['Direction', 'Responsable', 'Expert', 'Agent', 'Support'];
+
 const normalizeLabel = (value: string): string => {
     return value
         .normalize('NFD')
@@ -111,7 +114,19 @@ export const mapImportedRowToAgent = (row: Record<string, unknown>): Agent => {
     const titre = getRowValue(row, ["Grade / Cadre d'emplois", 'Grade', 'titre']);
     const statut = getRowValue(row, ['Statut', 'statut']);
     const nbi = getRowValue(row, ['NBI', 'nbi']) || undefined;
-    const typeTemps = getRowValue(row, ['Temps', 'temps']) || 'Complet';
+    // `typeTemps` manquait à cette liste : le format livré avec l'application
+    // (`public/data.csv`, `exemple_organigramme.csv`) nomme ainsi sa colonne, qui
+    // retombait donc silencieusement sur « Complet ». Un fichier déclarant « Temps
+    // partiel » était importé à temps plein sans le moindre avertissement.
+    const typeTemps = getRowValue(row, ['Temps', 'temps', 'typeTemps', 'Type de temps', 'Temps de travail'])
+        || 'Complet';
+
+    // Le grade explicite du fichier fait foi quand il en porte un ET qu'il est
+    // valide ; la déduction depuis le libellé de fonction reste le secours.
+    const gradeStyleDuFichier = getRowValue(row, ['gradeStyle', 'Grade Style', 'Niveau']);
+    const gradeStyle = (GRADES_RECONNUS as readonly string[]).includes(gradeStyleDuFichier)
+        ? (gradeStyleDuFichier as GradeStyle)
+        : deriveGradeStyleFromImportedRow({ fonction, titre, statut });
 
     return {
         id: buildImportedAgentId(nom, prenom, fonction),
@@ -121,9 +136,72 @@ export const mapImportedRowToAgent = (row: Record<string, unknown>): Agent => {
         titre,
         service,
         pole,
+        // Résolu par `mapImportedRowsToAgents`, seul à disposer du fichier entier :
+        // un rattachement désigne une AUTRE ligne, il ne se lit pas ligne à ligne.
         rattachementId: null,
-        gradeStyle: deriveGradeStyleFromImportedRow({ fonction, titre, statut }),
+        gradeStyle,
         typeTemps,
         nbi,
     };
+};
+
+/** Valeur brute de la colonne d'identifiant de ligne, si le fichier en porte une. */
+const lireIdentifiantDeLigne = (row: Record<string, unknown>): string =>
+    getRowValue(row, ['id', 'ID', 'Identifiant', 'Matricule']);
+
+/** Valeur brute de la colonne de rattachement hiérarchique, si elle existe. */
+const lireRattachementDeLigne = (row: Record<string, unknown>): string =>
+    getRowValue(row, [
+        'rattachementId',
+        'Rattachement',
+        'Rattachement Id',
+        'Rattachement hiérarchique',
+        'Responsable hiérarchique',
+        'N+1',
+    ]);
+
+/**
+ * Mappe un fichier entier, **rattachements compris**.
+ *
+ * Pourquoi une seconde passe : `rattachementId` d'une ligne désigne l'`id` d'une
+ * AUTRE ligne du même fichier, tandis que l'identifiant interne d'un agent est un
+ * slug dérivé de son identité (`import:nom-prenom-fonction`) — volontairement, pour
+ * survivre au réordonnancement des lignes. Les deux ne se rencontrent donc jamais
+ * ligne à ligne : il faut d'abord connaître tous les identifiants du fichier, puis
+ * traduire chaque rattachement en identifiant interne.
+ *
+ * Avant ce correctif, `rattachementId` était fixé à `null` sans être lu : l'import
+ * annonçait un succès complet et produisait un organigramme **sans aucun lien
+ * hiérarchique**, ce que l'affichage par niveau de grade rendait invisible.
+ *
+ * Un rattachement qui ne désigne aucune ligne connue, ou qui se désigne lui-même,
+ * reste à `null` : l'agent redevient racine, visible, plutôt que de disparaître dans
+ * une branche orpheline ou un cycle.
+ */
+export const mapImportedRowsToAgents = (rows: Record<string, unknown>[]): Agent[] => {
+    const agents = rows.map((row) => mapImportedRowToAgent(row));
+
+    const identifiantVersAgent = new Map<string, string>();
+    rows.forEach((row, index) => {
+        const brut = lireIdentifiantDeLigne(row);
+        const agent = agents[index];
+        if (brut && agent && !identifiantVersAgent.has(brut)) {
+            identifiantVersAgent.set(brut, agent.id);
+        }
+    });
+
+    rows.forEach((row, index) => {
+        const agent = agents[index];
+        if (!agent) return;
+
+        const parentBrut = lireRattachementDeLigne(row);
+        if (!parentBrut || parentBrut === lireIdentifiantDeLigne(row)) return;
+
+        const parentInterne = identifiantVersAgent.get(parentBrut);
+        if (parentInterne && parentInterne !== agent.id) {
+            agent.rattachementId = parentInterne;
+        }
+    });
+
+    return agents;
 };
