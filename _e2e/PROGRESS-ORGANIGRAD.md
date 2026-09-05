@@ -1,10 +1,10 @@
 # E2E ORGANIGRAD — campagne du 2026-09-03
 
-Mode        : CONSTAT · Orchestrateur : LOCAL · Écriture : AUTORISÉE (base de production)
+Mode        : CONSTAT jusqu'au 2026-09-04, puis **CORRECTION** sur demande explicite (L-80, L-81) · Orchestrateur : LOCAL · Écriture : AUTORISÉE (base de production)
 Branche     : e2e/organigrad-2026-09-03
 URL         : http://localhost:5173
 Progression : 79/79 puis **REPRISE le 2026-09-04 après migration** — **24 éléments réinstruits** en deux passes, 2 constats neufs (L-80, L-81), 1 défaut de l'audit non reproduit (L-38). Données de test supprimées et vérifiées
-Dernière MAJ: 2026-09-04 — 2e passe terminée
+Dernière MAJ: 2026-09-05 — correctifs L-80 et L-81 appliqués et vérifiés ; L-52 fermé ; L-82 découvert
 
 ---
 
@@ -152,7 +152,7 @@ resteront `NON TESTÉ`, faute de comptes. C'est une limite de couverture, pas un
 
 ## P7 — Suppression de la donnée de test
 - [x] L-51 Suppression — **OK (2026-09-04)** — testée par la commande « Reset » de l'organigramme, qui vide les fiches enregistrées du workspace. Confirmation demandée avant l'irréversible, libellé exact et **chiffré** : « Supprimer les 10 fiches enregistrées ? Cette action est irréversible. » Après acceptation, `org_agents` ne contient **plus aucune ligne** dans ce workspace, vérifié en base
-- [x] L-52 Reprise des rattachements — **NON TESTABLE, à cause de L-80** — l'import n'ayant créé aucun lien hiérarchique, il n'existe aucun supérieur susceptible d'adopter les orphelins. Le cas **1.4 de la recette des 4 rôles reste entier**, et le restera tant que L-80 n'est pas corrigé. `[CODE]` `agentRepo.ts:252-262` implémente l'adoption par le grand-parent côté local — non vérifié à l'écran
+- [x] L-52 Reprise des rattachements par le supérieur — **OK — cas 1.4 de la recette, enfin vérifié (2026-09-05)** — devenu testable dès que L-80 a été corrigé. Suppression de `[TEST] Lefevre`, qui portait deux enfants : `[TEST] Moreau` et `[TEST] Bernard` sont **repris par `[TEST] Durand`**, le grand-parent, et non laissés orphelins. Vérifié en base. Le mécanisme est un trigger serveur `org_agents_reparent_children` (`BEFORE DELETE FOR EACH ROW`), pas une règle cliente
 - [x] L-53 Persistance d'une suppression — **OK (2026-09-04)** — la suppression des 10 fiches est persistée : lecture directe de `org_agents` après coup, 0 ligne dans `ceglialaurent workspace`, et les 5 fiches de « Recette staging 2026-08-05 » **intactes**
 - [x] L-54 Nettoyage des fiches `[TEST]` — **FAIT ET VÉRIFIÉ (2026-09-04)** — les 10 fiches créées pendant la reprise ont été supprimées par l'agent ; comptage final en base : `ceglialaurent workspace` = **0 fiche**, `Recette staging 2026-08-05` = 5 fiches, inchangées. Ancien libellé : **SANS OBJET** — aucune fiche n'a jamais été créée (L-20). Le seul objet créé de toute la campagne, le nœud `[TEST]`, a été supprimé et sa disparition vérifiée en base (L-66). **La base de production est dans l'état où la campagne l'a trouvée**
 
@@ -185,7 +185,30 @@ resteront `NON TESTÉ`, faute de comptes. C'est une limite de couverture, pas un
 
   Conséquence en cascade : le cas **1.4 de la recette des 4 rôles** (« supprimer une fiche → les rattachements sont repris par le supérieur ») devient invérifiable, faute de supérieur. Voir L-52.
 
-  Correctif proposé (non appliqué, mode CONSTAT) : lire une colonne de rattachement dans `mapRow`, et la convertir en **clé externe** avec la même fonction de slug que les identifiants — sinon les deux ne se rencontreront jamais. À défaut, avertir à l'écran que la hiérarchie n'est pas importée, plutôt que d'annoncer un succès sans réserve
+  ### ✅ CORRIGÉ ET VÉRIFIÉ — 2026-09-05, commit `f68a786`
+
+  `mapImportedRowsToAgents` mappe désormais le fichier entier puis **traduit chaque
+  rattachement** en identifiant interne — une seconde passe est indispensable, le rattachement
+  désignant l'`id` d'une autre ligne quand l'identifiant interne est un slug d'identité.
+  Un parent inconnu ou un auto-rattachement laisse l'agent racine, plutôt que de fabriquer un
+  orphelin invisible ou un cycle.
+
+  **Vérifié à l'écran et en base** sur un fichier de 4 lignes : `rattachement_id` renseigné pour
+  3 fiches sur 4, et `buildHierarchy` construit **un seul arbre** (Durand → Lefevre → {Moreau,
+  Bernard}, tailles de branche 4/3/1/1) là où la même campagne produisait dix racines.
+  11 tests de régression, dont le réordonnancement des lignes.
+
+- [x] L-82 **La suppression en masse échoue dès qu'il existe une hiérarchie — CASSÉ P1 (2026-09-05)** — le bouton « Reset » affiche « Suppression non effectuée : **[object Object]** » et **aucune fiche n'est supprimée**.
+
+  Erreur réelle, obtenue en rejouant l'appel : `27000 — tuple to be updated was already modified by an operation triggered by the current command`, avec l'indice « Consider using an AFTER trigger instead of a BEFORE trigger ».
+
+  Cause : le trigger `org_agents_reparent_children` est un **`BEFORE DELETE FOR EACH ROW`** qui réaffecte les enfants au grand-parent. Quand une seule instruction supprime à la fois un parent et ses enfants, il tente de modifier une ligne que la même commande est en train de supprimer. `clearWorkspace` fait exactement cela.
+
+  **Ce défaut n'est pas causé par le correctif de L-80 : il est révélé par lui.** Il dormait depuis toujours, inatteignable parce qu'aucun import ne créait jamais de hiérarchie. Toute suppression en masse d'un organigramme réel — le seul cas qui compte — y tombe.
+
+  Contournement constaté : supprimer **feuille par feuille** fonctionne parfaitement, le trigger réaffectant à chaque fois (L-52). Correctif proposé, non appliqué : passer le trigger en `AFTER DELETE`, ou faire supprimer `clearWorkspace` des feuilles vers la racine. **Schéma et migrations — hors périmètre de cette campagne** (`01-CONFIG.md`).
+
+  ⚠️ Et pour la troisième fois, **c'est `[object Object]` qui a masqué l'information** : le message, le code et l'indice existaient tous dans la réponse.
 
 - [x] L-81 **L'importateur ignore trois colonnes de son propre format d'exemple — DÉGRADÉ P1 (2026-09-04)** — le fichier livré avec l'application, `public/data.csv`, déclare `id, pole, service, nom, prenom, fonction, titre, rattachementId, gradeStyle, typeTemps, nbi`. Le lecteur `mapImportedRowToAgent` (`src/utils/importMapping.ts:104-127`) n'en reconnaît qu'une partie :
 
@@ -202,7 +225,12 @@ resteront `NON TESTÉ`, faute de comptes. C'est une limite de couverture, pas un
 
   **Aucun avertissement à l'écran** : l'aperçu d'import annonce « 10 lignes · 10 valides · 0 invalides », ce qui est vrai au sens du lecteur mais trompeur pour l'utilisateur — trois colonnes de son fichier ont été jetées. `exemple_organigramme.csv`, également livré, porte les mêmes en-têtes et subirait le même sort.
 
-  Correctif proposé (non appliqué, mode CONSTAT) : ajouter les alias du format livré (`typeTemps`, `gradeStyle`, `rattachementId`) — ou, si ces colonnes sont volontairement dérivées, le dire dans l'aperçu d'import plutôt que d'annoncer 10 lignes valides sans réserve
+  ### ✅ CORRIGÉ ET VÉRIFIÉ — 2026-09-05, commit `f68a786`
+
+  `typeTemps` et `gradeStyle` sont désormais lus, avec leurs variantes plausibles ; la déduction
+  depuis le libellé de fonction redevient un **secours**, pas une règle. **Vérifié en base** :
+  « Temps partiel » est conservé pour les deux fiches qui le déclarent, et le grade du fichier
+  est respecté (Direction, Responsable, Expert, Agent) au lieu d'être recalculé.
 
 - [x] L-79 Erreurs console sur les cartes de nœuds — **DÉGRADÉ P3** — 5 erreurs React répétées : « Encountered two children with the same key, `veille` ». Cause : `src/components/HybridNodeCard.tsx:307`, `skills.map((skill) => <Pill key={skill}>)` — la clé est la valeur de la compétence, or cinq nœuds préexistants portent `skills: ["veille","veille"]` en double (Marina, Pedro, Alain, Hannah, Eric, créés le 2026-08-11). React avertit d'un risque de duplication ou d'omission d'éléments. **Trouvé hors plan**, en relevant la console pendant L-08 ; le déclencheur exact du rendu n'est pas attribué `[À CONFIRMER]` — correctif proposé : `key={`${skill}-${i}`}` ou déduplication des compétences à la lecture ; non appliqué
 
@@ -232,6 +260,7 @@ Objets créés pendant la campagne, à supprimer manuellement par Laurent.
 
 | Objet | Emplacement | Créé le |
 |---|---|---|
+| ~~4 fiches `[TEST]` + 1 pôle — vérification du correctif~~ — **supprimées feuille par feuille** (le « Reset » ayant échoué, cf. L-82), absence vérifiée en base : 0 fiche dans `ceglialaurent workspace` | Workspace ceglialaurent workspace | créées puis supprimées le 2026-09-05 |
 | ~~10 fiches `[TEST]` + 2 pôles — 2e passe~~ — **supprimées par l'agent**, vérifié en base : 0 fiche dans `ceglialaurent workspace`, les 5 de « Recette staging » intactes | Workspace ceglialaurent workspace | créées puis supprimées le 2026-09-04 |
 | _(2e passe annulée)_ — l import n a pas eu lieu : **session expirée** avant le dépôt du fichier. Aucune donnée créée, vérifié : le champ de fichier n existe pas hors session | — | — |
 | ~~10 fiches agents `[TEST]` + 2 pôles~~ — **supprimées par l'agent le 2026-09-04**, vérifié en base : 0 fiche dans `ceglialaurent workspace`, les 5 de « Recette staging » intactes | Workspace ceglialaurent workspace | créées 09:00, supprimées 09:25 |
