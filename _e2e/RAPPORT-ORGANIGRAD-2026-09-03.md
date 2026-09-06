@@ -1,4 +1,4 @@
-# Rapport E2E — ORGANIGRAD — 2026-09-03, révisé le 2026-09-04
+# Rapport E2E — ORGANIGRAD — 2026-09-03, révisé les 2026-09-04 et 2026-09-06
 
 Campagne en **CONSTAT**, orchestrateur **LOCAL**, écriture autorisée.
 Compte `ceglialaurent@gmail.com`, rôle **`owner`**, sur la base de **production**
@@ -39,6 +39,12 @@ configuré**, sans le dire, en y stockant le prompt système en clair.
 Le reste du socle est sain : navigation, cloisonnement des rôles et des clés, confirmations
 avant l'irréversible, états vides pour la plupart explicites.
 
+> **Suite donnée, du 2026-09-05 au 2026-09-06.** Sur demande, la campagne est passée en
+> **CORRECTION** pour les trois P1 les plus coûteux. Les trois sont corrigés, vérifiés à
+> l'écran et en base, et **en ligne en production** : l'import lit la hiérarchie et les colonnes
+> du format livré, et l'application sait enfin dire ce qui ne va pas. Un quatrième défaut est
+> apparu en chemin (L-82, §3) — révélé par le correctif, pas causé par lui.
+
 ## 2. Chiffres
 
 Décompte au 2026-09-04, après reprise. Un élément peut porter un verdict révisé : c'est le
@@ -72,13 +78,14 @@ Aucun P0. Sept P1, dont deux découverts seulement après le déblocage de l'imp
 
 | # | Élément | Constat | Cause (fichier:ligne) | Correctif proposé |
 |---|---|---|---|---|
-| 1 | **Hiérarchie perdue à l'import** | Le fichier rattachait 8 fiches sur 10 ; en base, `rattachement_id = null` partout. La perte est **invisible** : l'organigramme dessine des niveaux par `gradeStyle` | `src/utils/importMapping.ts:124` (`rattachementId: null` en dur) ; aucune colonne de rattachement lue (l.104-114) ; l'identifiant envoyé est un slug du nom (l.42-51), pas l'`id` du fichier | Lire une colonne de rattachement **et** la convertir par la même fonction de slug, sinon les deux ne se rencontrent jamais. À défaut, le dire dans l'aperçu |
-| 2 | **Trois colonnes du format livré ignorées** | `rattachementId`, `typeTemps`, `gradeStyle` de `public/data.csv`. Constaté : `type_temps='Complet'` pour les 10 fiches, là où le fichier disait « Temps plein »/« Temps partiel » | `importMapping.ts:104-127` — alias trop étroits | Ajouter les alias du format livré, ou annoncer les colonnes dérivées dans l'aperçu |
-| 3 | **Toute erreur Supabase s'affiche `[object Object]`** | Rencontré sur l'import : la réponse portait `message`, `code`, `details` **et** un `hint` donnant la signature attendue. Rien n'est montré | `src/utils/asyncGuard.ts:21-25` — `String(err)` sur un objet simple ; appelé depuis `useOrgChartController.ts:334` | Lire `err.message` quand l'objet en porte un. Deux lignes, et l'application redevient capable de dire ce qui ne va pas |
+| 1 | ✅ **CORRIGÉ 05/09** — **Hiérarchie perdue à l'import** | Le fichier rattachait 8 fiches sur 10 ; en base, `rattachement_id = null` partout. La perte est **invisible** : l'organigramme dessine des niveaux par `gradeStyle` | `src/utils/importMapping.ts:124` (`rattachementId: null` en dur) ; aucune colonne de rattachement lue (l.104-114) ; l'identifiant envoyé est un slug du nom (l.42-51), pas l'`id` du fichier | Lire une colonne de rattachement **et** la convertir par la même fonction de slug, sinon les deux ne se rencontrent jamais. À défaut, le dire dans l'aperçu |
+| 2 | ✅ **CORRIGÉ 05/09** — **Trois colonnes du format livré ignorées** | `rattachementId`, `typeTemps`, `gradeStyle` de `public/data.csv`. Constaté : `type_temps='Complet'` pour les 10 fiches, là où le fichier disait « Temps plein »/« Temps partiel » | `importMapping.ts:104-127` — alias trop étroits | Ajouter les alias du format livré, ou annoncer les colonnes dérivées dans l'aperçu |
+| 3 | ✅ **CORRIGÉ 05/09** — **Toute erreur Supabase s'affiche `[object Object]`** | Rencontré sur l'import : la réponse portait `message`, `code`, `details` **et** un `hint` donnant la signature attendue. Rien n'est montré | `src/utils/asyncGuard.ts:21-25` — `String(err)` sur un objet simple ; appelé depuis `useOrgChartController.ts:334` | Lire `err.message` quand l'objet en porte un. Deux lignes, et l'application redevient capable de dire ce qui ne va pas |
 | 4 | **Écriture directe en base sans orchestrateur** | Orchestrateur **jamais** configuré : la création de nœud écrit en production sans avertissement, et le prompt système y est stocké **en clair** (vérifié par sonde) | `useOrchestratorBridge.ts` + `hybridNodeRepo.ts`, chemin de repli — cf. `[KB]` audit P1 n°3, dont le périmètre était plus étroit | Avertir à l'écran que l'écriture contourne l'orchestrateur, ou refuser les champs sensibles dans ce mode |
 | 5 | **Bouton « Reset » exposé sans contrôle de rôle** | Rouge, permanent, en haut à droite de l'organigramme : vide toutes les fiches du workspace, irréversible. Le refus n'arrive qu'au clic | `src/App.tsx:400-410` (affichage) ; refus tardif `useOrgChartController.ts:255-258` | Masquer hors rôle administrateur, comme le fait le reste de l'interface |
 | 6 | **`audit_log` écrit et lu nulle part** | La table contient des lignes ; aucune vue ne les expose. Un administrateur ne peut pas savoir qui a fait quoi | Absence d'écran, pas de défaut de code | Une vue de consultation, même minimale |
-| 7 | **Écart dépôt ↔ production** | ~~Import cassé, `PGRST202`~~ — **résolu le 2026-09-03** par application de la migration | `agentRepo.ts:238-245` ↔ base à 5 paramètres | **Fait.** Reste à téléverser le bundle : la production sert encore la version du 27/08 |
+| 7 | ✅ **RÉSOLU** — **Écart dépôt ↔ production** | ~~Import cassé, `PGRST202`~~ | `agentRepo.ts:238-245` ↔ base à 5 paramètres | Migration appliquée le 03/09, **bundle téléversé le 06/09** : code et base sont d'accord |
+| 8 | 🔴 **NOUVEAU** — **La suppression en masse échoue dès qu'une hiérarchie existe** | « Reset » affiche « Suppression non effectuée », **aucune fiche supprimée**. Erreur réelle : `27000 — tuple to be updated was already modified…` | trigger `org_agents_reparent_children`, **`BEFORE DELETE FOR EACH ROW`** ; `clearWorkspace` supprime parent et enfants en une instruction | Passer le trigger en `AFTER DELETE`, ou supprimer des feuilles vers la racine. Contournement : la suppression une à une fonctionne |
 
 ## 4. Ruptures de parcours
 
@@ -180,14 +187,29 @@ Le détail est dans [`ECARTS-KB-ORGANIGRAD.md`](ECARTS-KB-ORGANIGRAD.md). Les qu
 |---|---|---|---|
 | `20260901090000_import_org_agents_optimistic_lock` | **Migration de base de données**, appliquée en production le 2026-09-03 par le connecteur MCP, à la demande explicite de Laurent | **Oui** — signature à 6 paramètres, verrou consultatif présent, `execute` réservé à `authenticated`/`service_role`, une seule signature en base | commit `ef60139`, fichier `_e2e/migration-a-coller-20260903.sql` |
 
-**Aucune correction de code n'a été appliquée** : la campagne était en `CONSTAT`. Les correctifs
-proposés dans le fichier d'état n'ont été ni écrits, ni compilés, ni testés — ce sont des
-pistes, pas des livrables.
+### Corrections de code, appliquées les 2026-09-05 et 06 sur demande explicite
 
-La migration fait exception parce qu'elle ne corrigeait pas un défaut de code mais un **écart
-d'état** entre le dépôt et la base, et parce qu'elle a été demandée puis vérifiée pièce par
-pièce. Le bundle de production, lui, **n'a pas été téléversé** : le serveur sert toujours celui
-du 27/08.
+| Correctif | Fichier | Vérification | Commit |
+|---|---|---|---|
+| Lecture de la hiérarchie du fichier importé (`mapImportedRowsToAgents`, seconde passe) | `src/utils/importMapping.ts`, `src/services/importService.ts` | **À l'écran et en base** : `rattachement_id` renseigné, `buildHierarchy` construit **un seul arbre** là où la campagne produisait dix racines | `f68a786` |
+| Lecture de `typeTemps` et `gradeStyle` du format livré | `src/utils/importMapping.ts` | **En base** : « Temps partiel » conservé, grade du fichier respecté | `f68a786` |
+| `describeError` lit les erreurs supabase-js | `src/utils/asyncGuard.ts` | **À l'écran, sur un appel réel** : « mode invalide : append (attendu merge\|replace) (22023) » au lieu de `[object Object]` | `7793303` |
+
+`typecheck` 0 erreur · `lint` propre · **289 tests verts** (48 fichiers), dont **17 de
+régression ajoutés** · `build` OK.
+
+### Opérations d'infrastructure
+
+| Objet | Nature | Vérifié |
+|---|---|---|
+| `20260901090000_import_org_agents_optimistic_lock` | Migration appliquée en production le 03/09 (connecteur MCP) | Signature à 6 paramètres, verrou consultatif, `execute` restreint |
+| Bundle `index-CEzZZbxB.js` | Téléversé en production le 06/09, après archivage de `dist-avant-20260905` | **Depuis l'extérieur** : `https://organigrad.nouvelleeredigital.fr` sert le nouveau bundle, HTTP 200, et les trois marqueurs de correctif y sont présents |
+
+> ⚠️ **Un déploiement s'est d'abord trompé de machine.** Le 05/09, le bundle est parti sur
+> `srv1017182` en se fiant au relevé du 02/09 — or la SPA avait migré sur `srv1915630`. Le
+> répertoire visé n'était plus servi par personne. L'erreur a été vue en interrogeant le **site
+> public**, pas la machine. Documentée dans `docs/etat-production-2026-09-06.md` §1, avec les
+> reliquats à nettoyer.
 
 ## 9. À nettoyer
 
@@ -251,15 +273,18 @@ est le favicon absent. Toutes les tables interrogées répondent pourtant correc
 
 ## 11. Suite recommandée
 
-1. **Réparer l'import avant tout le reste.** Lire la colonne de rattachement et la convertir
-   par la même fonction de slug que les identifiants ; ajouter les alias `typeTemps` et
-   `gradeStyle`. Sans cela, l'application produit des organigrammes sans hiérarchie et le
-   dit à personne — et le cas 1.4 de la recette reste invérifiable.
-2. **Corriger `describeError`** (`asyncGuard.ts:21-25`) pour lire `err.message`. Deux lignes,
-   et l'application redevient capable d'expliquer ses pannes. C'est ce défaut qui a masqué
-   l'écart de migration pendant des semaines.
-3. **Téléverser le bundle en production**, puis rejouer les 8 éléments non atteints. Le script
-   est prêt ; la production sert encore la version du 27/08, à cinq paramètres.
+Les trois premières recommandations de la version du 04/09 sont **faites**. Restent :
+
+1. **Corriger L-82** — la suppression en masse échoue sur tout organigramme ayant une
+   hiérarchie, c'est-à-dire sur tout organigramme correct depuis le correctif de l'import.
+   Trigger en `AFTER DELETE`, ou suppression des feuilles vers la racine. Schéma et migrations :
+   c'est un arbitrage, pas une évidence.
+2. **Trancher le sort de l'orchestrateur** — il ne tourne sur aucune des deux machines
+   (`docs/etat-production-2026-09-06.md` §4). Tant qu'il est absent, la SPA écrit directement en
+   base et y stocke le prompt système en clair : c'est le P1 n°4, et il n'a pas de correctif
+   côté code tant que la décision n'est pas prise.
+3. **Rejouer les deux éléments non jugés** — accessibilité clavier de l'organigramme (non
+   parcouru par oubli) et modification concurrente (deux navigateurs requis).
 
 ## Note de méthode
 

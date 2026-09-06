@@ -1,5 +1,20 @@
 # Organigrad — état réel de la production au 2026-09-02
 
+> ⚠️ **PARTIELLEMENT PÉRIMÉ depuis le 2026-09-06** — lire d'abord
+> [`etat-production-2026-09-06.md`](etat-production-2026-09-06.md).
+>
+> Deux affirmations de ce document sont devenues fausses : la SPA n'est plus sur
+> `srv1017182` mais sur **`srv1915630`** (`195.35.2.84`), et le répertoire servi n'est plus
+> `/home/deploy/organigrad-front/repo/dist` mais **`/opt/organigrad-front/dist`**. Un
+> déploiement s'est trompé de machine le 2026-09-05 en se fiant à ce §1.
+>
+> Le §3 (fenêtre de migration) reste juste sur le principe, mais la fenêtre est **refermée** :
+> migration appliquée le 03/09, bundle téléversé le 06/09.
+>
+> L'orchestrateur annoncé « joignable » au §2 **ne tourne plus** sur aucune des deux machines.
+>
+> Le reste — CORS, RLS, faille P0-2, idempotence, advisors, e-mails muets — tient toujours.
+
 Ce document **remplace** la partie « état public » et « actions restantes » de
 [`reste-a-faire-production-2026-09-01.md`](reste-a-faire-production-2026-09-01.md),
 qui repose sur une prémisse fausse (voir §1). Tout ce qui est affirmé ici a été

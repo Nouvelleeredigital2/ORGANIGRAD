@@ -1,6 +1,6 @@
 # Écarts base de connaissance ↔ réalité — ORGANIGRAD
 
-Établi le **2026-09-03**, **mis à jour le 2026-09-04** après application de la migration et reprise de campagne, en croisant [`CONTEXTE-ORGANIGRAD.md`](CONTEXTE-ORGANIGRAD.md),
+Établi le **2026-09-03**, **mis à jour les 2026-09-04 et 2026-09-06** après application de la migration et reprise de campagne, en croisant [`CONTEXTE-ORGANIGRAD.md`](CONTEXTE-ORGANIGRAD.md),
 [`PROGRESS-ORGANIGRAD.md`](PROGRESS-ORGANIGRAD.md) et
 [`RAPPORT-ORGANIGRAD-2026-09-03.md`](RAPPORT-ORGANIGRAD-2026-09-03.md).
 
@@ -33,8 +33,10 @@ trouvé imaginaire.
 | **L'écriture directe en base ne demande pas un orchestrateur configuré** — un orchestrateur *jamais* configuré suffit ; le prompt système est alors stocké en clair | L'audit décrit uniquement le cas « configuré mais éteint ». Le défaut est plus large et se déclenche dans la configuration **par défaut** de l'application | `AUDIT-ORGANIGRAD-2026-08-29.md` Phase 2, parcours 3 — élargir la formulation |
 | **La barre supérieure se superpose à elle-même à 375 px** — trois textes empilés | Constaté sur Membres et Clés API | `AUDIT-ORGANIGRAD-2026-08-29.md` Phase 2, parcours 5 (mobile) |
 | **Deux composants décrivent l'état vide différemment** — l'organigramme dit « sélectionnez un pôle », la barre latérale dit « aucun pôle disponible » | Rupture de parcours réelle, aucun des deux ne dit d'importer | Nouveau constat P2 fonctionnel |
-| **La hiérarchie déclarée dans un fichier importé n'est jamais lue** — `importMapping.ts:124`, `rattachementId: null` en dur ; la perte est **masquée** par une mise en page par `gradeStyle` | 10 fiches importées → 10 racines, vérifié en base et dans le cache client, alors que le fichier en rattachait 8 | **Constat neuf du 2026-09-04** — à ajouter en **P1**, Phase 2 parcours 2 |
-| **Trois colonnes du format d'exemple livré sont ignorées** : `rattachementId`, `typeTemps`, `gradeStyle` | `type_temps='Complet'` pour les 10 fiches, là où le fichier disait « Temps plein » / « Temps partiel » | **Constat neuf du 2026-09-04** — à ajouter en **P1** |
+| ~~**La hiérarchie déclarée dans un fichier importé n'est jamais lue**~~ — **CORRIGÉ le 2026-09-05** (`f68a786`) | 10 fiches → 10 racines avant ; 4 fiches → 1 arbre après, vérifié en base | **Fait.** À retirer des défauts, mais à **ajouter à l'audit comme incident résolu** : il masquait L-82 |
+| ~~**Trois colonnes du format d'exemple livré sont ignorées**~~ — **CORRIGÉ le 2026-09-05** (`f68a786`) | « Temps partiel » et le grade du fichier sont désormais conservés | **Fait** |
+| **La suppression en masse échoue dès qu'une hiérarchie existe** — trigger `org_agents_reparent_children` en `BEFORE DELETE FOR EACH ROW` face à `clearWorkspace` | `27000`, aucune fiche supprimée ; la suppression une à une fonctionne | **Constat neuf du 2026-09-05** — à ajouter en **P1**. Défaut ancien, resté inatteignable tant qu'aucun import ne créait de hiérarchie |
+| **L'application affichait `[object Object]` sur toute erreur Supabase** — ~~corrigé le 2026-09-05~~ (`7793303`) | Trois pannes réelles masquées par ce seul repli | **Fait.** À documenter comme cause racine des trois diagnostics coûteux de la semaine |
 | **Export PDF de 11,2 Mo pour 5 fiches** — rendu rastérisé | Mesuré à l'interception du blob | À ajouter en **P2**, avec la question du passage à l'échelle |
 | **Les graphiques du tableau de bord n'ont pas d'état vide** | Cartes vides, sans un mot | Nouveau constat P3 |
 | **Le menu du sélecteur de workspace ne se ferme pas avec `Échap`** | Deux pressions sans effet ; seul un second clic le referme | Nouveau constat P3 |
@@ -107,7 +109,9 @@ Par ordre, avec ce qu'il faut changer. **Aucune de ces modifications n'a été f
    corriger sur Organigrad : 3001 / 5173 est exact, confirmé à l'écran. Signalé pour clore le
    doute soulevé par `launch.json`.
 
-7. **`CLAUDE.md` racine §1** — « ~45 dossiers » à réviser (119 entrées). Hors périmètre
+7. **`ORGANIGRAD/docs/etat-production-2026-09-02.md`** — **fait le 2026-09-06** : avertissement de péremption ajouté, et relevé neuf dans `etat-production-2026-09-06.md`. La SPA a changé de machine (`srv1915630`, `/opt/organigrad-front/dist`) et l'orchestrateur ne tourne plus nulle part. Un déploiement s'est trompé de machine à cause de ce document.
+
+8. **`CLAUDE.md` racine §1** — « ~45 dossiers » à réviser (119 entrées). Hors périmètre
    Organigrad, mais relevé par la phase A.
 
 ---

@@ -1,6 +1,6 @@
 # ORGANIGRAD — documentation de l'existant
 
-État constaté le **2026-09-03**, par parcours navigateur sur **81 éléments**, complété par une **reprise le 2026-09-04** après application de la migration `20260901090000` (16 éléments réinstruits), en mode LOCAL
+État constaté le **2026-09-03**, par parcours navigateur sur **81 éléments**, complété par une **reprise le 2026-09-04** après application de la migration `20260901090000` (24 éléments réinstruits en deux passes), puis **corrigé les 2026-09-05 et 06**, en mode LOCAL
 (orchestrateur non lancé), avec un compte `owner` sur la base de **production**
 `xucmfdggetwxmpquqjvj`.
 
@@ -42,28 +42,25 @@ après rechargement.
 > **`[object Object]`**. La migration `20260901090000` a été appliquée le 2026-09-03. Le
 > défaut d'affichage, lui, **n'est pas corrigé** (§5).
 
-**Ce que l'import jette en silence** — trois colonnes du format livré avec l'application
-(`public/data.csv`) ne sont reconnues par aucun alias de `mapImportedRowToAgent`
-(`src/utils/importMapping.ts:104-127`) :
+**Ce que l'import jetait en silence — corrigé le 2026-09-05, commit `f68a786`.** Trois colonnes
+du format livré (`public/data.csv`) n'étaient reconnues par aucun alias : `rattachementId`
+(fixé à `null` en dur), `typeTemps` (seuls `Temps`/`temps` étaient lus) et `gradeStyle`
+(toujours recalculé). Elles sont désormais lues, la déduction depuis le libellé de fonction
+restant un secours.
 
-- **`rattachementId`** — `rattachementId: null` codé en dur (l.124) : **aucune relation
-  hiérarchique n'est importée** ;
-- **`typeTemps`** — seuls `Temps`/`temps` sont lus (l.114) ; constaté : `type_temps='Complet'`
-  pour les 10 fiches, là où le fichier déclarait « Temps plein » (7) et « Temps partiel » (3) ;
-- **`gradeStyle`** — recalculé depuis `fonction`/`titre`/`statut` (l.125).
+**Vérifié après correctif**, sur un fichier de 4 lignes : `rattachement_id` renseigné pour 3
+fiches sur 4, « Temps partiel » conservé, grade du fichier respecté. Le correctif est **en ligne
+en production** depuis le 2026-09-06.
 
-L'aperçu annonce « 10 valides, 0 invalides » : exact pour le lecteur, trompeur pour l'utilisateur.
+### Le piège de la hiérarchie affichée — **résolu** `[E2E]` `[CODE]`
 
-### Le piège de la hiérarchie affichée `[E2E]` `[CODE]`
+Jusqu'au 2026-09-05, l'organigramme montrait des niveaux (Direction, Responsable, Expert,
+Agent, Support) **qui ne venaient pas des données** : `buildHierarchy` n'attache un enfant que
+par `rattachementId`, et l'import n'en produisait aucun — dix fiches, dix racines, affichées
+comme un arbre. La perte était donc invisible.
 
-L'organigramme et l'aperçu PDF montrent des niveaux — Direction, Responsable, Expert, Agent,
-Support. **Cette hiérarchie n'existe pas dans les données.** Elle vient de la mise en page par
-`gradeStyle` : `buildHierarchy.ts:46-67` n'attache un enfant que par `rattachementId`, et les
-10 fiches importées ont toutes `rattachement_id = null` — vérifié en base **et** dans le cache
-client. Ce sont dix racines affichées comme un arbre.
-
-La perte de hiérarchie est donc **invisible** : un utilisateur voit un organigramme plausible
-sur une base sans aucun lien d'autorité.
+Depuis le correctif, l'arbre est construit sur les données du fichier : un import de 4 lignes
+produit **une seule racine** (Durand → Lefevre → {Moreau, Bernard}, tailles de branche 4/3/1/1).
 
 ### Modifier, supprimer — **fonctionne** `[E2E]`
 
@@ -73,11 +70,21 @@ Modification d'une fiche : enregistrée, persistée, toujours affichée après r
 `invalid input syntax for type uuid`) **ne s'est pas manifesté**.
 
 Suppression : la commande « Reset » demande confirmation en annonçant le nombre exact
-(« Supprimer les 10 fiches enregistrées ? Cette action est irréversible. ») et supprime
-réellement — 0 ligne restante, vérifié en base.
+(« Supprimer les N fiches enregistrées ? Cette action est irréversible. »).
 
-**Non testable** : la reprise des rattachements par le supérieur (recette 1.4), faute de
-supérieur — conséquence directe du défaut ci-dessus.
+⚠️ **Mais elle échoue dès qu'un organigramme a une hiérarchie** — c'est-à-dire, depuis le
+correctif de l'import, sur tout organigramme correct. L'écran annonce « Suppression non
+effectuée » et **rien n'est supprimé**. Erreur réelle : `27000 — tuple to be updated was already
+modified by an operation triggered by the current command`. Le trigger
+`org_agents_reparent_children` est un `BEFORE DELETE FOR EACH ROW` ; `clearWorkspace` supprime
+parent et enfants en une seule instruction, et le trigger tente alors de modifier une ligne que
+la commande supprime. **La suppression une à une fonctionne**, et réaffecte correctement.
+
+**Reprise des rattachements par le supérieur — vérifiée** (recette 1.4, restée entière depuis le
+début faute de hiérarchie) : supprimer un parent de deux enfants les fait reprendre par le
+grand-parent, constaté en base.
+
+**Non testable** : la modification concurrente sur deux onglets — un seul pilote de navigateur.
 
 ### Orchestrer — **fonctionne, en simulation** `[E2E]`
 
