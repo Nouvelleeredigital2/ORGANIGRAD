@@ -56,6 +56,37 @@ depuis `/home/deploy/organigrad-front/repo/dist`. **Ce n'est plus vrai.**
 
 ---
 
+## 2 bis. Comment déployer, depuis le 2026-09-06
+
+`bash scripts/deploy-front.sh` — à lancer depuis le dépôt, poste connecté au VPS.
+
+Il remplace le `scp -r` employé jusque-là, qui **ajoutait sans jamais retirer** : trois
+déploiements successifs avaient laissé trois bundles `index-*.js` dans le répertoire servi,
+dont un seul référencé — **66 fichiers et 5,8 Mo** là où le build en produit **37 et 3,5 Mo**.
+La synchronisation du 06/09 a ramené le répertoire à l'exact contenu du build.
+
+Ce que le script fait, et pourquoi :
+
+1. **contrôles locaux** — `dist/` présent, bundle référencé, et surtout **présence du marqueur
+   `p_expected_updated_at`** : sans lui, on redéploierait un build antérieur à la migration du
+   03/09, et l'import recasserait. C'est arrivé, trois jours durant ;
+2. **archivage** de ce qui est servi, en `dist-avant-AAAAMMJJ` ;
+3. **téléversement dans un répertoire de transit**, puis `rsync -a --delete-after` **côté
+   serveur** — `rsync` n'existe pas sur le poste Windows, mais il est sur le VPS ;
+4. **vérification depuis l'extérieur**, pas depuis la machine : le script échoue si le domaine
+   public ne sert pas le bundle attendu.
+
+> **Pourquoi la synchronisation se fait EN PLACE et non par échange de répertoires**, qui serait
+> pourtant plus atomique : le conteneur monte `/opt/organigrad-front/dist` en **bind**.
+> Remplacer le répertoire changerait son inode, le montage continuerait de pointer sur l'ancien,
+> et nginx servirait indéfiniment la version précédente.
+
+`--delete-after` plutôt que `--delete` : les anciens fichiers ne disparaissent qu'une fois les
+nouveaux en place. Un navigateur ayant chargé l'ancien `index.html` peut encore réclamer son
+bundle — il le trouvera jusqu'au déploiement suivant, pas au-delà.
+
+---
+
 ## 3. La fenêtre de migration est refermée
 
 Le §3 du document du 02/09 décrivait le risque d'un décalage entre la SPA servie et la
