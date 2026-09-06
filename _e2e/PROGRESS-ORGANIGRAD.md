@@ -4,7 +4,7 @@ Mode        : CONSTAT jusqu'au 2026-09-04, puis **CORRECTION** sur demande expli
 Branche     : e2e/organigrad-2026-09-03
 URL         : http://localhost:5173
 Progression : 79/79 puis **REPRISE le 2026-09-04 après migration** — **24 éléments réinstruits** en deux passes, 2 constats neufs (L-80, L-81), 1 défaut de l'audit non reproduit (L-38). Données de test supprimées et vérifiées
-Dernière MAJ: 2026-09-05 — correctifs L-80 et L-81 appliqués et vérifiés ; L-52 fermé ; L-82 découvert
+Dernière MAJ: 2026-09-06 — quatre P1 corrigés et en ligne ; L-34 et L-41 enfin parcourus ; **aucun élément non jugé**
 
 ---
 
@@ -117,7 +117,15 @@ resteront `NON TESTÉ`, faute de comptes. C'est une limite de couverture, pas un
 - [x] L-31 Spotlight sur une fiche réelle — **OK (2026-09-04)** — `Ctrl+K` puis « Girard » : la fiche remonte dans les résultats, aucun message « Aucun résultat ». La recherche porte bien sur les données enregistrées
 - [x] L-32 Recherche sans résultat — **OK** — « Aucun résultat trouvé pour … » suivi de « Vérifiez l'orthographe ou essayez un autre terme. » : message clair, accentué, orienté action
 - [x] L-33 Bascule Vue Hybride — **NON CONCLUANT (2026-09-04)** — le bouton « Bascule entre la carte RH legacy et la carte HybridNode » existe et répond, mais aucune commande `Run` / `Valider` / `Éditer` n'apparaît sur les cartes après bascule. Cohérent avec `[KB]` l'audit P3 (« non transmis par OrgChartNode, volontaire mais trompeur ») — **le constat de l'audit se vérifie**, sans que je puisse distinguer un choix délibéré d'un oubli `[À CONFIRMER]`
-- [x] L-34 Accessibilité clavier des nœuds — **NON PARCOURU, par ma faute (2026-09-04)** — les données existaient pendant la 2ᵉ passe, l'élément était donc testable, et je ne l'ai pas fait : je l'ai laissé de côté en enchaînant sur l'export par lots, puis j'ai supprimé les fiches. **Ce n'est pas une limite d'outil, c'est un oubli**, et il est écrit ici comme tel. Ce qu'on sait par ailleurs : côté orchestration, `HybridNodeCard` expose bien des rôles bouton nommés (L-34 initial) ; côté organigramme, `[KB]` l'audit signale des `<div onClick>` non focalisables dans `OrgChart` et `ProfileModal` — **non vérifié à l'écran**
+- [x] L-34 Accessibilité clavier des nœuds — **DÉGRADÉ P2, parcouru le 2026-09-06** — l'oubli de la 2ᵉ passe est réparé.
+
+  **Ce qui est atteignable** : les actions d'une carte — « Profil », « Contact » et la corbeille — sont exposées comme boutons nommés dans l'arbre d'accessibilité, donc utilisables au clavier.
+
+  **Ce qui ne l'est pas** : la carte elle-même est un `DIV` avec `tabIndex = -1` et **aucun `role`**. Elle est cliquable à la souris (sélection, dépliage de branche) et **inatteignable au clavier**. Confirme `[KB]` l'audit du 29/08 P3 sur les `<div onClick>` d'`OrgChart`.
+
+  **Constat supplémentaire, hors audit** : deux boutons par carte — ceux en pied, `absolute -bottom-4`, qui ne portent qu'une icône SVG — n'ont **aucun nom accessible** : ni texte, ni `aria-label`, ni `title`. Un lecteur d'écran annonce « bouton » et rien d'autre. `[E2E]` mesuré sur la zone principale : 15 boutons, dont 2 sans nom.
+
+  Correctif proposé (non appliqué) : donner à la carte un `role="button"` et un `tabIndex={0}` avec gestion de `Entrée`/`Espace`, et un `aria-label` aux deux boutons d'icône
 
 ## P5 — Modification de la donnée de test
 - [x] L-35 Mode Édition — **OK (2026-09-04)** — `?edit=1` active le mode (badge « ÉDITION » en bas de l'organigramme) ; la clé est ensuite retirée de l'URL. Les commandes d'édition apparaissent sur la carte (Profil, Contact, corbeille). ~~BLOQUÉ~~ — la bascule vit dans l'organigramme, qui n'affiche aucune fiche (L-20). `?edit=1` est accepté puis retiré de l'URL sans effet visible, faute de fiche à éditer
@@ -126,7 +134,13 @@ resteront `NON TESTÉ`, faute de comptes. C'est une limite de couverture, pas un
 - [x] L-38 Première édition après import — **NON REPRODUIT — le défaut `[KB]` P1 n°4 ne s'est pas manifesté (2026-09-04)** — l'audit du 29/08 annonçait qu'après une promotion CSV → base, la première édition échouerait sur `invalid input syntax for type uuid`, les ids clients survivant à l'import. Constaté ici : la première modification après import **aboutit**, la fiche porte bien un UUID serveur (`346c45a1-…`) et non un slug, et rien n'apparaît en console. À faire retirer des P1 de l'audit, ou à requalifier. Ancien libellé : **NON TESTABLE** — le défaut `[KB]` P1 n°4 (désynchronisation d'ids après promotion CSV → base, `invalid input syntax for type uuid`) suppose un import **réussi**. L'import échouant en amont (L-20), ce défaut est **hors d'atteinte** : il n'est ni confirmé ni infirmé, et le restera tant que la migration ne sera pas appliquée
 - [x] L-39 Effacement de `skills` / `avatarUrl` — **HORS PÉRIMÈTRE, confirmé** — le défaut `[KB]` P2 (`dto.ts:79,84`) porte sur le **PUT de l'API orchestrateur**. En mode LOCAL, la SPA n'emprunte pas ce chemin : elle écrit en Supabase direct. Non reproductible ici par construction, et non par manque de données
 - [x] L-40 Indicateur de cache périmé — **CONFIRMÉ par le code, non déclenché à l'écran** — `[CODE]` `useOrgChartController.ts:517-518` expose bien `agentsStale` et `agentsError` ; aucune des cinq vues ne les affiche. Provoquer la péremption exigeait de couper la lecture Supabase en cours de session : non fait, pour ne pas fausser le reste de la campagne. `[À CONFIRMER]` à l'écran
-- [x] L-41 Modification concurrente — **NON TESTABLE avec un seul pilote** — exige deux sessions simultanées sur la même fiche ; le navigateur piloté n'en tient qu'une. `[KB]` La recette 6.4 décrit d'ailleurs ce comportement comme **connu et caractérisé** (la seconde écriture écrase sans avertir), pas comme un test qui échoue. Depuis, le verrou optimiste sur `updated_at` (`docs/architecture/concurrence-ecritures.md`, et la migration appliquée le 03/09 pour les imports) devrait le refuser par un `409` : **à vérifier à deux navigateurs**
+- [x] L-41 Modification concurrente — **OK — et `[KB]` la recette 6.4 est PÉRIMÉE (2026-09-06)** — testé pour de bon, dans **deux onglets réels** chargés sur la même fiche.
+
+  Déroulé : l'onglet B ouvre la fiche (version `…16:39:23`), l'onglet A la modifie et enregistre (la version passe à `…16:40:11`), puis B enregistre à son tour avec la version qu'il détient toujours. **L'écriture de B est refusée** — `AgentConflictError`, « La fiche … a été modifiée depuis son chargement » — et **la modification de A est préservée** en base.
+
+  `[KB]` La recette 6.4 annonce « la seconde écrase la première **sans avertissement** — comportement connu, décision en attente (B3) ». **Ce n'est plus vrai** : le verrou optimiste sur `updated_at` (`agentRepo.ts:150-161`) le refuse désormais. À retirer des comportements connus.
+
+  ⚠️ **Un premier essai a conclu l'inverse, à tort.** J'avais périmé le champ `updatedAt` (camelCase) alors que le code lit `updated_at` : le verrou n'était jamais armé, l'écriture passait, et j'ai failli écrire que le défaut était confirmé. C'est en relisant `upsert` que l'erreur est apparue. Un instrument qui confirme ce qu'on attend mérite un second regard
 - [x] L-42 Annulation d'une modification — **OK par équivalence** — non testable sur une fiche (L-20), mais vérifié sur l'éditeur de nœud : « Annuler » ferme sans enregistrer, et `Échap` ferme également la modale d'édition. Aucune création parasite constatée en base après annulation
 
 ## P6 — Générations (exports)
@@ -260,6 +274,7 @@ Objets créés pendant la campagne, à supprimer manuellement par Laurent.
 
 | Objet | Emplacement | Créé le |
 |---|---|---|
+| ~~3 fiches `[TEST]` + 1 pôle — reprise de L-34 et L-41~~ — **supprimées**, vérifié en base : il ne reste que les 8 fiches `demo/atelier-nova-v1`, qui ne sont pas de la campagne | Workspace ceglialaurent workspace | créées puis supprimées le 2026-09-06 |
 | ~~4 fiches [TEST] + 1 pole — verification de L-82~~ — **supprimees par la sequence corrigee**, verifie en base | Workspace ceglialaurent workspace | creees puis supprimees le 2026-09-06 |
 | ~~4 fiches `[TEST]` + 1 pôle — vérification du correctif~~ — **supprimées feuille par feuille** (le « Reset » ayant échoué, cf. L-82), absence vérifiée en base : 0 fiche dans `ceglialaurent workspace` | Workspace ceglialaurent workspace | créées puis supprimées le 2026-09-05 |
 | ~~10 fiches `[TEST]` + 2 pôles — 2e passe~~ — **supprimées par l'agent**, vérifié en base : 0 fiche dans `ceglialaurent workspace`, les 5 de « Recette staging » intactes | Workspace ceglialaurent workspace | créées puis supprimées le 2026-09-04 |
