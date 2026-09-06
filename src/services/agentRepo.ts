@@ -274,13 +274,42 @@ export const agentRepo = {
         if (error) throw error;
     },
 
-    /** Vide les fiches RH du workspace courant. */
+    /**
+     * Vide les fiches RH du workspace courant.
+     *
+     * **Deux instructions, et l'ordre n'est pas négociable.** Le trigger serveur
+     * `org_agents_reparent_children` est un `BEFORE DELETE FOR EACH ROW` : il
+     * réaffecte les enfants d'une fiche supprimée à son propre parent, ce qui est
+     * exactement ce qu'on veut pour une suppression unitaire (« les rattachements
+     * sont repris par le supérieur »).
+     *
+     * Mais sur une suppression de masse, parent et enfants partent dans la MÊME
+     * instruction : le trigger tente alors de modifier une ligne que la commande
+     * est en train de supprimer, et PostgreSQL refuse tout le lot —
+     * `27000 — tuple to be updated was already modified by an operation triggered
+     * by the current command`. Résultat constaté avant ce correctif : le bouton
+     * « Reset » échouait et **aucune fiche n'était supprimée**, dès que
+     * l'organigramme avait une hiérarchie — c'est-à-dire, depuis que l'import la
+     * lit, sur tout organigramme correct.
+     *
+     * On coupe donc les liens d'abord. Une fois `rattachement_id` à `null`
+     * partout, le trigger ne trouve plus d'enfant à réaffecter et la suppression
+     * passe en une fois. La mise à `null` est acceptée sans contrôle par
+     * `tg_org_agents_guard`, qui ne valide un rattachement que s'il est renseigné.
+     */
     async clearWorkspace(ctx: AgentRepoContext): Promise<number> {
         if (isLocal(ctx)) {
             const compte = agentStore.list(ctx.workspaceId).length;
             agentStore.reset(ctx.workspaceId);
             return compte;
         }
+
+        const { error: erreurLiens } = await supabase!
+            .from('org_agents')
+            .update({ rattachement_id: null })
+            .eq('workspace_id', ctx.workspaceId!)
+            .not('rattachement_id', 'is', null);
+        if (erreurLiens) throw erreurLiens;
 
         const { data, error } = await supabase!
             .from('org_agents')
