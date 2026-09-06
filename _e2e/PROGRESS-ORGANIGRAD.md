@@ -260,6 +260,7 @@ Objets créés pendant la campagne, à supprimer manuellement par Laurent.
 
 | Objet | Emplacement | Créé le |
 |---|---|---|
+| ~~4 fiches [TEST] + 1 pole — verification de L-82~~ — **supprimees par la sequence corrigee**, verifie en base | Workspace ceglialaurent workspace | creees puis supprimees le 2026-09-06 |
 | ~~4 fiches `[TEST]` + 1 pôle — vérification du correctif~~ — **supprimées feuille par feuille** (le « Reset » ayant échoué, cf. L-82), absence vérifiée en base : 0 fiche dans `ceglialaurent workspace` | Workspace ceglialaurent workspace | créées puis supprimées le 2026-09-05 |
 | ~~10 fiches `[TEST]` + 2 pôles — 2e passe~~ — **supprimées par l'agent**, vérifié en base : 0 fiche dans `ceglialaurent workspace`, les 5 de « Recette staging » intactes | Workspace ceglialaurent workspace | créées puis supprimées le 2026-09-04 |
 | _(2e passe annulée)_ — l import n a pas eu lieu : **session expirée** avant le dépôt du fichier. Aucune donnée créée, vérifié : le champ de fichier n existe pas hors session | — | — |
@@ -303,3 +304,22 @@ Ils apparaîtront en P8 : **consultation seulement**, aucune modification, aucun
 - **2026-09-04 ~11h00 — session expirée en cours de reprise.** Constaté au retour sur l application : écran de connexion, plus de coquille applicative, donc plus de champ d import. Aucune tentative de reconnexion automatique. Pause signalée à Laurent, attente de GO.
   lui-même entre les deux relevés. Rôle `owner` confirmé au sélecteur de workspace.
   La pause prévue par le harnais n'a donc pas eu lieu à formuler.
+
+  ### CORRIGE ET VERIFIE — 2026-09-06
+
+  Correction **cote application**, sans toucher au schema : `agentRepo.clearWorkspace` coupe
+  desormais les rattachements (`update ... set rattachement_id = null`) **avant** de supprimer.
+  Le trigger ne trouve alors plus d enfant a reaffecter, et la suppression passe en une fois.
+  La mise a null est acceptee sans controle par `tg_org_agents_guard`, qui ne valide un
+  rattachement que s il est renseigne — verifie dans la definition de la fonction.
+
+  **Prouve sur la base reelle, dans les deux sens**, sur un jeu de 4 fiches hierarchisees :
+  suppression directe → `27000`, **0 supprimee** ; sequence corrigee → aucune erreur,
+  **4 supprimees**. 3 tests de regression verrouillent l ordre des deux instructions — un test
+  qui verifierait seulement qu une mise a jour a eu lieu laisserait repasser le defaut.
+
+  ⚠️ Le bouton « Reset » lui-meme n a **pas** ete actionne : le workspace contenait 8 fiches
+  d une autre source (`demo/atelier-nova-v1`, creees le 2026-09-05) qui ne sont pas les
+  miennes, et « Reset » les aurait supprimees. Interdiction du §5 respectee ; la sequence a donc
+  ete exercee sur ma seule source. Le chemin par le bouton reste a confirmer sur un workspace
+  dont toutes les donnees appartiennent a la campagne
