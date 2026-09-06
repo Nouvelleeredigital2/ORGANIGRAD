@@ -30,10 +30,9 @@ depuis `/home/deploy/organigrad-front/repo/dist`. **Ce n'est plus vrai.**
 > plus aucun serveur ne lit. L'erreur n'a été vue qu'en interrogeant le **site public**, qui
 > renvoyait encore l'ancien bundle. Vérifier la machine avant d'écrire, pas après.
 >
-> Reliquat à nettoyer sur `srv1017182`, sans effet mais sans usage :
-> `/home/deploy/organigrad-front/repo/dist` (téléversement erroné),
-> `/home/deploy/organigrad-front/repo/dist-avant-20260905` (son archive),
-> `/tmp/orga-sonde-transfert.html`.
+> **Reliquats nettoyés le 2026-09-06** : `srv1017182` a été remise dans son état antérieur —
+> le `dist/` d'origine restauré depuis son archive, l'archive supprimée du même geste, et
+> `/tmp/orga-sonde-transfert.html` effacé. Aucune trace ajoutée sur cette machine.
 
 ---
 
@@ -42,17 +41,19 @@ depuis `/home/deploy/organigrad-front/repo/dist`. **Ce n'est plus vrai.**
 | | |
 |---|---|
 | URL | `https://organigrad.nouvelleeredigital.fr` → **200** |
-| Bundle servi | `assets/index-CEzZZbxB.js`, **95 552 octets**, HTTP 200 depuis l'extérieur |
-| Déployé le | 2026-09-06, par téléversement dans `/opt/organigrad-front/dist` |
-| Archive du précédent | `/opt/organigrad-front/dist-avant-20260905` — 37 fichiers, bundle `index-wXHpLQFf.js` du 27/08 |
+| Bundle servi | `assets/index-CBOIH-W8.js`, **95 704 octets**, HTTP 200 depuis l'extérieur |
+| Déployé le | 2026-09-06, par `scripts/deploy-front.sh` (§2 bis) |
+| Répertoire servi | **37 fichiers, 3,5 Mo** — exactement le contenu du build, depuis la synchronisation |
+| Archives de retour arrière | `dist-avant-20260905` (bundle du 27/08) · `dist-avant-20260906` (bundle intermédiaire du 06/09) |
 
-**Trois correctifs sont désormais en ligne**, vérifiés dans le bundle servi :
+**Quatre correctifs sont désormais en ligne**, vérifiés dans le bundle servi :
 
 | Marqueur cherché | Ce qu'il prouve |
 |---|---|
 | `p_expected_updated_at` | le code appelle `import_org_agents` en **6 paramètres**, en accord avec la base |
 | `rattachement_external_key` | l'import **transmet la hiérarchie** du fichier |
 | `hint` | `describeError` lit les erreurs supabase-js au lieu d'afficher `[object Object]` |
+| mise à `null` de `rattachement_id` avant suppression | la **suppression en masse** ne bute plus sur le trigger `BEFORE DELETE` |
 
 ---
 
@@ -131,14 +132,16 @@ Ce qui tourne sur `srv1915630`, pour mémoire : `organigrad-front`, `synapse-bac
 - **La recette manuelle des 4 rôles** reste à faire : elle suppose un projet Supabase **de
   test**, qui n'existe pas. La campagne E2E n'a couvert que le rôle `owner`.
 
-Et un défaut nouveau, trouvé le 2026-09-05 :
+Et un défaut trouvé le 2026-09-05, **corrigé le 06/09** :
 
-- **La suppression en masse échoue dès qu'un organigramme a une hiérarchie.** Le trigger
-  `org_agents_reparent_children` est un `BEFORE DELETE FOR EACH ROW` ; quand une seule
-  instruction supprime un parent et ses enfants, il modifie une ligne que la commande est en
-  train de supprimer → `27000`. `clearWorkspace` fait exactement cela. Supprimer feuille par
-  feuille fonctionne. Correctif : passer le trigger en `AFTER DELETE`, ou supprimer des
-  feuilles vers la racine. Détail dans `_e2e/PROGRESS-ORGANIGRAD.md`, élément L-82.
+- ~~La suppression en masse échoue dès qu'un organigramme a une hiérarchie.~~ Le trigger
+  `org_agents_reparent_children` est un `BEFORE DELETE FOR EACH ROW` : sur une suppression de
+  masse, il modifiait une ligne que la même commande supprimait → `27000`, et **rien n'était
+  supprimé**. `clearWorkspace` coupe désormais les rattachements avant de supprimer, ce qui
+  laisse le trigger sans enfant à réaffecter. Correction **côté application — le schéma et les
+  triggers ne sont pas touchés**, et l'adoption par le grand-parent reste intacte pour les
+  suppressions unitaires. Prouvé sur la base réelle dans les deux sens. Détail dans
+  `_e2e/PROGRESS-ORGANIGRAD.md`, élément L-82.
 
 ---
 
@@ -148,7 +151,10 @@ Et un défaut nouveau, trouvé le 2026-09-05 :
 |---|---|---|
 | 1 | Poser `RESEND_API_KEY` + `EMAIL_FROM`, confirmer une réception | **toi** (dashboard) |
 | 2 | Activer la protection des mots de passe compromis | **toi** (dashboard) |
-| 3 | Corriger L-82 (trigger `AFTER DELETE` ou ordre de suppression) | à décider |
-| 4 | Retrouver ou redéployer l'orchestrateur, ou acter qu'il n'y en a pas | à décider |
-| 5 | Nettoyer les reliquats sur `srv1017182` (§1) | quand tu veux |
-| 6 | Recette manuelle des 4 rôles, une fois un projet de test fourni | **toi** |
+| 3 | Retrouver ou redéployer l'orchestrateur, ou acter qu'il n'y en a pas (§4) — tant qu'il est absent, la SPA écrit en direct et stocke le prompt système en clair | à décider |
+| 4 | Recette manuelle des 4 rôles, une fois un projet de test fourni | **toi** |
+| 5 | Purger les archives `dist-avant-*` devenues inutiles | quand tu veux |
+
+**Les quatre P1 corrigeables par le code sont corrigés, vérifiés et en ligne.** Ce qui reste ne
+dépend plus du dépôt : deux réglages au tableau de bord Supabase, une décision sur
+l'orchestrateur, et un projet de test pour la recette des rôles.
