@@ -72,10 +72,19 @@ export const AgentCard: React.FC<AgentCardProps> = ({
                         e.stopPropagation();
                         onDelete();
                     }}
-                    className="absolute left-4 top-4 z-30 rounded-lg bg-red-50 p-2 text-red-500 opacity-0 shadow-sm transition-all hover:bg-red-100 group-hover:opacity-100 print:hidden"
+                    /*
+                     * `opacity-0 group-hover:opacity-100` : le bouton n'apparaît
+                     * qu'au survol. Il reste dans l'ordre de tabulation, donc
+                     * atteignable au clavier — mais invisible tant qu'il n'a pas
+                     * le focus. D'où l'anneau de focus, sans quoi un utilisateur
+                     * au clavier déclencherait une suppression sur un bouton
+                     * qu'il ne voit pas.
+                     */
+                    className="absolute left-4 top-4 z-30 rounded-lg bg-red-50 p-2 text-red-500 opacity-0 shadow-sm transition-all hover:bg-red-100 focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500 group-hover:opacity-100 print:hidden"
                     title="Supprimer l'agent"
+                    aria-label={`Supprimer ${[agent.prenom, agent.nom].filter(Boolean).join(' ') || 'cette fiche'}`}
                 >
-                    <Trash2 className="h-4 w-4" />
+                    <Trash2 aria-hidden="true" className="h-4 w-4" />
                 </button>
             )}
 
@@ -154,13 +163,30 @@ export const AgentCard: React.FC<AgentCardProps> = ({
 
             {hasChildren && (
                 <button
+                    type="button"
                     onClick={(e) => {
                         e.stopPropagation();
                         onToggleExpand?.();
                     }}
-                    className="absolute -bottom-4 left-1/2 z-20 flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-full border border-white/80 bg-white text-slate-400 shadow-[0_16px_32px_rgba(148,163,184,0.18)] transition-all hover:border-sky-200 hover:text-sky-600 print:hidden"
+                    /*
+                     * Ce bouton ne porte qu'un chevron. Sans nom explicite, un
+                     * lecteur d'écran annonce « bouton » et rien d'autre — relevé
+                     * par la campagne E2E (élément L-34), à deux exemplaires par
+                     * vue. `HybridNodeCard` nommait déjà le sien ; la carte RH, non.
+                     *
+                     * Le nom dit ce que le clic va faire ET sur qui : « Déplier »
+                     * seul laisserait l'utilisateur deviner de quelle carte il
+                     * s'agit lorsque plusieurs sont annoncées à la suite.
+                     */
+                    aria-label={`${isExpanded ? 'Replier' : 'Déplier'} la branche de ${[agent.prenom, agent.nom].filter(Boolean).join(' ') || 'ce poste'}`}
+                    aria-expanded={isExpanded}
+                    title={isExpanded ? 'Replier la branche' : 'Déplier la branche'}
+                    className="absolute -bottom-4 left-1/2 z-20 flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-full border border-white/80 bg-white text-slate-400 shadow-[0_16px_32px_rgba(148,163,184,0.18)] transition-all hover:border-sky-200 hover:text-sky-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500 print:hidden"
                 >
-                    <ChevronRight className={cn('h-5 w-5 transition-transform duration-500', isExpanded ? 'rotate-90' : 'rotate-0')} />
+                    <ChevronRight
+                        aria-hidden="true"
+                        className={cn('h-5 w-5 transition-transform duration-500', isExpanded ? 'rotate-90' : 'rotate-0')}
+                    />
                 </button>
             )}
         </motion.div>

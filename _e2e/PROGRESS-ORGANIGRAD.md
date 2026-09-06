@@ -117,7 +117,7 @@ resteront `NON TESTÉ`, faute de comptes. C'est une limite de couverture, pas un
 - [x] L-31 Spotlight sur une fiche réelle — **OK (2026-09-04)** — `Ctrl+K` puis « Girard » : la fiche remonte dans les résultats, aucun message « Aucun résultat ». La recherche porte bien sur les données enregistrées
 - [x] L-32 Recherche sans résultat — **OK** — « Aucun résultat trouvé pour … » suivi de « Vérifiez l'orthographe ou essayez un autre terme. » : message clair, accentué, orienté action
 - [x] L-33 Bascule Vue Hybride — **NON CONCLUANT (2026-09-04)** — le bouton « Bascule entre la carte RH legacy et la carte HybridNode » existe et répond, mais aucune commande `Run` / `Valider` / `Éditer` n'apparaît sur les cartes après bascule. Cohérent avec `[KB]` l'audit P3 (« non transmis par OrgChartNode, volontaire mais trompeur ») — **le constat de l'audit se vérifie**, sans que je puisse distinguer un choix délibéré d'un oubli `[À CONFIRMER]`
-- [x] L-34 Accessibilité clavier des nœuds — **DÉGRADÉ P2, parcouru le 2026-09-06** — l'oubli de la 2ᵉ passe est réparé.
+- [x] L-34 Accessibilité clavier des nœuds — **CORRIGÉ le 2026-09-06**, après rectification du constat — l'oubli de la 2ᵉ passe est réparé.
 
   **Ce qui est atteignable** : les actions d'une carte — « Profil », « Contact » et la corbeille — sont exposées comme boutons nommés dans l'arbre d'accessibilité, donc utilisables au clavier.
 
@@ -125,7 +125,31 @@ resteront `NON TESTÉ`, faute de comptes. C'est une limite de couverture, pas un
 
   **Constat supplémentaire, hors audit** : deux boutons par carte — ceux en pied, `absolute -bottom-4`, qui ne portent qu'une icône SVG — n'ont **aucun nom accessible** : ni texte, ni `aria-label`, ni `title`. Un lecteur d'écran annonce « bouton » et rien d'autre. `[E2E]` mesuré sur la zone principale : 15 boutons, dont 2 sans nom.
 
-  Correctif proposé (non appliqué) : donner à la carte un `role="button"` et un `tabIndex={0}` avec gestion de `Entrée`/`Espace`, et un `aria-label` aux deux boutons d'icône
+  ### ⚠️ CONSTAT RECTIFIÉ, puis CORRIGÉ — 2026-09-06
+
+  **La moitié de ce constat était fausse, et je l'ai vue en préparant le correctif.** J'avais
+  écrit que la carte est « cliquable à la souris et inatteignable au clavier ». Vérification
+  faite dans `AgentCard.tsx:44-54` : la carte racine porte `cursor-default` et **aucun
+  gestionnaire de clic**. Elle n'est pas cliquable du tout — il n'y a donc **aucune action
+  perdue** au clavier, et rien à corriger de ce côté. Mon `tabIndex = -1` était exact ; la
+  conclusion que j'en tirais ne l'était pas.
+
+  **Ce qui restait vrai, et qui est corrigé** : deux boutons par vue n'avaient aucun nom
+  accessible — le chevron de dépliage (`AgentCard.tsx:155`) et, en mode Édition, la corbeille
+  (`AgentCard.tsx:69`). Un lecteur d'écran annonçait « bouton », rien de plus, y compris devant
+  une **action destructrice**.
+
+  Correctif appliqué : `aria-label` nommant l'action **et sa cible** — « Replier la branche de
+  Camille Durand », « Supprimer Camille Durand » —, plus `aria-expanded` sur le chevron,
+  `aria-hidden` sur les icônes, et un anneau de focus visible. La corbeille n'apparaissant qu'au
+  survol (`opacity-0 group-hover:opacity-100`) restait dans l'ordre de tabulation tout en étant
+  **invisible** : `focus-visible:opacity-100` la fait apparaître quand elle prend le focus, sans
+  quoi un utilisateur au clavier déclencherait une suppression sur un bouton qu'il ne voit pas.
+
+  **Vérifié à l'écran, sur données réelles** : l'arbre d'accessibilité annonce désormais
+  « Replier la branche de Camille [TEST] Durand » et « Supprimer Camille [TEST] Durand ».
+  **18 boutons dans la vue, 0 sans nom** — contre 2 avant. `HybridNodeCard` nommait déjà les
+  siens : la carte RH était seule en retard
 
 ## P5 — Modification de la donnée de test
 - [x] L-35 Mode Édition — **OK (2026-09-04)** — `?edit=1` active le mode (badge « ÉDITION » en bas de l'organigramme) ; la clé est ensuite retirée de l'URL. Les commandes d'édition apparaissent sur la carte (Profil, Contact, corbeille). ~~BLOQUÉ~~ — la bascule vit dans l'organigramme, qui n'affiche aucune fiche (L-20). `?edit=1` est accepté puis retiré de l'URL sans effet visible, faute de fiche à éditer
