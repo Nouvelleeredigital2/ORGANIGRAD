@@ -122,6 +122,48 @@ async function currentMember(tx: TransactionSql, workspaceId: string, userId: st
     }
 }
 
+/** Shared projection only. Caller must authorize workspace/project in this transaction. */
+export async function readProjectContext(tx: TransactionSql, workspaceId: string, projectId: string) {
+    const projects = await tx<Record<string, unknown>[]>`
+        select id, workspace_id, left(name, 160) as name, left(description, 500) as description,
+               archived_at, created_at,
+               to_char(updated_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as updated_at,
+               version
+        from public.projects
+        where workspace_id = ${workspaceId} and id = ${projectId}
+        limit 1
+    `;
+    if (!projects[0]) throw new ProjectReadError(404, 'PROJECT_NOT_FOUND');
+    const project = safeProject(projects[0], workspaceId);
+    const summaries = await tx<Record<string, unknown>[]>`
+        select count(*) as total,
+               count(*) filter (where status = 'done') as done,
+               count(*) filter (where status = 'running') as running,
+               count(*) filter (where status = 'blocked') as blocked
+        from public.project_tasks
+        where workspace_id = ${workspaceId} and project_id = ${projectId} and archived_at is null
+    `;
+    const summary = summaries[0];
+    const taskSummary = {
+        total: integer(summary?.total), done: integer(summary?.done),
+        running: integer(summary?.running), blocked: integer(summary?.blocked),
+    };
+    const members = await tx<{ count: unknown }[]>`
+        select count(*) as count from public.workspace_members where workspace_id = ${workspaceId}
+    `;
+    const workspaceMemberCount = integer(members[0]?.count);
+    // Latest real task rows, including archive updates; counters exclude archived tasks.
+    const activity = await tx<Record<string, unknown>[]>`
+        select id, left(title, 200) as title, status, updated_at, archived_at
+        from public.project_tasks
+        where workspace_id = ${workspaceId} and project_id = ${projectId}
+        order by updated_at desc, id desc
+        limit 10
+    `;
+    return { project, taskSummary, workspaceMemberCount,
+        recentActivity: activity.slice(0, MAX_ACTIVITY).map(safeActivity) };
+}
+
 /** Product reads only. No writes, outbound calls, profile joins or LINK binding. */
 export function registerProjectRoutes(app: FastifyInstance, deps: AuthDeps): void {
     void app.register(async routes => {
@@ -208,45 +250,7 @@ export function registerProjectRoutes(app: FastifyInstance, deps: AuthDeps): voi
             const workspaceId = req.workspaceId!;
             return deps.sql.begin('isolation level repeatable read read only', async tx => {
                 await currentMember(tx, workspaceId, req.userId!);
-                const projects = await tx<Record<string, unknown>[]>`
-                    select id, workspace_id, left(name, 160) as name, left(description, 500) as description,
-                           archived_at, created_at,
-                           to_char(updated_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as updated_at,
-                           version
-                    from public.projects
-                    where workspace_id = ${workspaceId} and id = ${projectId}
-                    limit 1
-                `;
-                if (!projects[0]) throw new ProjectReadError(404, 'PROJECT_NOT_FOUND');
-                const project = safeProject(projects[0], workspaceId);
-                const summaries = await tx<Record<string, unknown>[]>`
-                    select count(*) as total,
-                           count(*) filter (where status = 'done') as done,
-                           count(*) filter (where status = 'running') as running,
-                           count(*) filter (where status = 'blocked') as blocked
-                    from public.project_tasks
-                    where workspace_id = ${workspaceId} and project_id = ${projectId} and archived_at is null
-                `;
-                const summary = summaries[0];
-                const taskSummary = {
-                    total: integer(summary?.total), done: integer(summary?.done),
-                    running: integer(summary?.running), blocked: integer(summary?.blocked),
-                };
-                const members = await tx<{ count: unknown }[]>`
-                    select count(*) as count from public.workspace_members where workspace_id = ${workspaceId}
-                `;
-                const workspaceMemberCount = integer(members[0]?.count);
-                // These are the latest real task rows, not a fabricated event/audit log.
-                // Include archive updates, but exclude archived tasks from counters above.
-                const activity = await tx<Record<string, unknown>[]>`
-                    select id, left(title, 200) as title, status, updated_at, archived_at
-                    from public.project_tasks
-                    where workspace_id = ${workspaceId} and project_id = ${projectId}
-                    order by updated_at desc, id desc
-                    limit 10
-                `;
-                return { project, taskSummary, workspaceMemberCount,
-                    recentActivity: activity.slice(0, MAX_ACTIVITY).map(safeActivity) };
+                return readProjectContext(tx, workspaceId, projectId);
             });
         });
     });
