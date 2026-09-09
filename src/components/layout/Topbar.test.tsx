@@ -6,7 +6,8 @@ import { Topbar } from './Topbar';
 import { OriginProvider } from '../../origin';
 
 const mobileStyles = document.createElement('style');
-afterEach(() => mobileStyles.remove());
+const lateUtilities = document.createElement('style');
+afterEach(() => { mobileStyles.remove(); lateUtilities.remove(); });
 
 function renderTopbar(canExport = false, handleImportFile = vi.fn(async () => {})) {
     const handleExportCSV = vi.fn();
@@ -32,6 +33,18 @@ function applyMobileRules() {
 }
 
 describe('Topbar mobile flow', () => {
+    it('keeps mobile layout when origin-system re-emits the competing Tailwind utilities afterwards', () => {
+        const { container } = renderTopbar();
+        applyMobileRules();
+        // These exact declarations were observed after index.css in Chromium's
+        // origin-system.css stylesheet. Keep the actual application load order.
+        lateUtilities.textContent = '.h-24 { height: 6rem; } .absolute { position: absolute; } .px-8 { padding-left: 2rem; padding-right: 2rem; } .px-12 { padding-left: 3rem; padding-right: 3rem; }';
+        document.head.append(lateUtilities);
+        expect(getComputedStyle(container.firstElementChild!).height).toBe('auto');
+        expect(getComputedStyle(container.firstElementChild!).paddingLeft).toBe('16px');
+        expect(getComputedStyle(screen.getByRole('status')).position).toBe('static');
+        expect(getComputedStyle(screen.getByRole('textbox', { name: 'Rechercher' }).parentElement!).paddingLeft).toBe('0px');
+    });
     it('reserves natural header height and keeps the export hint inside its action flow', () => {
         const { container } = renderTopbar();
         applyMobileRules();

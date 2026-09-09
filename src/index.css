@@ -25,11 +25,11 @@
 
 
 
-/* Dot Grid Background Effect */
 /* Mobile header content must reserve its own height above the active view.
-   OriginGlass adds an inner flex column; notices must also stay in that flow. */
+   OriginGlass adds an inner flex column; notices must also stay in that flow.
+   Scope specificity beats utilities re-emitted later by origin-system.css. */
 @media (max-width: 1023px) {
-  .organigrad-topbar {
+  .origin-glass.organigrad-topbar {
     height: auto;
     flex-shrink: 0;
     padding: 12px 16px;
@@ -41,12 +41,12 @@
     gap: 8px;
   }
 
-  .organigrad-topbar-search {
+  .organigrad-topbar .organigrad-topbar-search {
     min-width: 0;
     padding: 0;
   }
 
-  .organigrad-topbar-actions {
+  .organigrad-topbar .organigrad-topbar-actions {
     flex-wrap: wrap;
     gap: 8px;
   }
@@ -58,11 +58,11 @@
     white-space: nowrap;
   }
 
-  .organigrad-topbar-separator {
+  .organigrad-topbar .organigrad-topbar-separator {
     display: none;
   }
 
-  .organigrad-topbar-notice {
+  .organigrad-topbar .organigrad-topbar-notice {
     position: static;
     flex-basis: 100%;
     max-width: 100%;
@@ -72,6 +72,7 @@
   }
 }
 
+/* Dot Grid Background Effect */
 .dot-grid-bg {
   background-image: radial-gradient(rgba(148, 163, 184, 0.14) 1px, transparent 1px);
   background-size: 30px 30px;
