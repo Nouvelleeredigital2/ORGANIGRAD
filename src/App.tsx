@@ -12,6 +12,7 @@ import { useWorkspaceContext } from './contexts/WorkspaceContext';
 import { Sidebar } from './components/layout/Sidebar';
 import { Topbar } from './components/layout/Topbar';
 import type { OrgChartRef } from './components/OrgChart';
+import { isProjectsEnabled } from './lib/projectsFeature';
 
 // Code-splitting (Priorité 12) : les vues lourdes (recharts, orgchart zoom/pan,
 // export PDF…) sont chargées à la demande, hors du bundle initial.
@@ -23,6 +24,9 @@ const SettingsView = lazy(() =>
 );
 const OrchestrationView = lazy(() =>
     import('./components/views/OrchestrationView').then((m) => ({ default: m.OrchestrationView })),
+);
+const ProjectsView = lazy(() =>
+    import('./components/views/ProjectsView').then((m) => ({ default: m.ProjectsView })),
 );
 const ApiKeysView = lazy(() =>
     import('./components/views/ApiKeysView').then((m) => ({ default: m.ApiKeysView })),
@@ -296,9 +300,9 @@ function AppContent() {
                 {/* L'orchestration dispose de sa propre source de nœuds (locale
                     ou serveur). Elle doit rester consultable pendant le
                     chargement indépendant des fiches RH. */}
-                {loading && activeView !== 'orchestration' ? (
+                {loading && activeView !== 'orchestration' && activeView !== 'projects' ? (
                     <OriginLoader />
-                ) : error && activeView !== 'settings' && activeView !== 'orchestration' ? (
+                ) : error && activeView !== 'settings' && activeView !== 'orchestration' && activeView !== 'projects' ? (
                     /* L'écran d'erreur reste une impasse tant qu'il n'offre pas de sortie :
                        on propose donc un nouvel essai et l'accès aux Paramètres, seule vue
                        encore utile sans données (changement de source / import). (ORG-005) */
@@ -337,7 +341,7 @@ function AppContent() {
                             sur le cache local, présenté comme s'il était à jour — même
                             défaut que l'orchestration corrigeait déjà avec son propre
                             bandeau (OrchestrationView). Audit P2. */}
-                        {isServerBacked && agentsStale && (
+                        {isServerBacked && agentsStale && activeView !== 'projects' && (
                             <div
                                 role="status"
                                 className="mx-4 mt-4 rounded-xl px-4 py-2.5 text-[13px] sm:mx-6 lg:mx-10"
@@ -362,6 +366,8 @@ function AppContent() {
                             />
                         ) : activeView === 'orchestration' ? (
                             <OrchestrationView rawAgents={rawAgents || []} />
+                        ) : activeView === 'projects' && isProjectsEnabled() ? (
+                            <ProjectsView />
                         ) : activeView === 'members' ? (
                             <MembersView />
                         ) : activeView === 'api-keys' ? (

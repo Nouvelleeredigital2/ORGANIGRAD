@@ -6,6 +6,8 @@ import type { PoleDirectoryEntry } from '../../utils/poleDirectory';
 import { useWorkspaceContext } from '../../contexts/WorkspaceContext';
 import { supabase } from '../../lib/supabase';
 import { useFeedback } from '../../feedback/FeedbackContext';
+import { isProjectsEnabled } from '../../lib/projectsFeature';
+import { FolderKanban } from 'lucide-react';
 
 /**
  * Sidebar — Apple-style refinement.
@@ -221,6 +223,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     <NavItem icon={<Users size={17} strokeWidth={1.6} />} label="Organigrammes" active={activeView === 'orgchart'} onClick={() => setActiveView('orgchart')} />
                     <NavItem icon={<LayoutDashboard size={17} strokeWidth={1.6} />} label="Tableau de bord" active={activeView === 'dashboard'} onClick={() => setActiveView('dashboard')} />
                     <NavItem icon={<Workflow size={17} strokeWidth={1.6} />} label="Orchestration" active={activeView === 'orchestration'} onClick={() => setActiveView('orchestration')} />
+                    {isProjectsEnabled() && <NavItem icon={<FolderKanban size={17} strokeWidth={1.6} />} label="Projets" active={activeView === 'projects'} onClick={() => setActiveView('projects')} />}
                     <NavItem icon={<UsersRound size={17} strokeWidth={1.6} />} label="Membres" active={activeView === 'members'} onClick={() => setActiveView('members')} />
                     <NavItem icon={<Key size={17} strokeWidth={1.6} />} label="Clés API" active={activeView === 'api-keys'} onClick={() => setActiveView('api-keys')} />
                     <NavItem icon={<Settings size={17} strokeWidth={1.6} />} label="Paramètres" active={activeView === 'settings'} onClick={() => setActiveView('settings')} />
