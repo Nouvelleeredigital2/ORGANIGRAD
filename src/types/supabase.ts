@@ -3,6 +3,8 @@
  * À régénérer après chaque migration.
  */
 
+import type { Project, ProjectTask, NewProject, NewTask, ProjectChanges, TaskChanges } from './project';
+
 export type Json =
     | string
     | number
@@ -18,6 +20,19 @@ export type Database = {
     __InternalSupabase: { PostgrestVersion: '14.5' };
     public: {
         Tables: {
+            // Local projects pilot contract; this does not imply a deployed migration.
+            projects: {
+                Row: Project;
+                Insert: NewProject & { workspace_id: string };
+                Update: ProjectChanges & { version: number };
+                Relationships: [];
+            };
+            project_tasks: {
+                Row: ProjectTask;
+                Insert: NewTask & { workspace_id: string; project_id: string };
+                Update: TaskChanges & { version: number };
+                Relationships: [];
+            };
             hybrid_nodes: {
                 Row: {
                     avatar_url: string | null;

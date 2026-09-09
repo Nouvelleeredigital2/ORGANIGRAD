@@ -70,3 +70,6 @@ vite-dev.log
 
 _e2e/captures/
 _e2e/fixtures/
+
+# Preuves locales du lot projets, synthétisées dans la documentation versionnée.
+/reports/projets-*.json

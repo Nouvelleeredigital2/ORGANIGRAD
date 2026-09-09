@@ -52,6 +52,17 @@ create schema if not exists auth;
 create schema if not exists extensions;
 create extension if not exists pgcrypto with schema extensions;
 create table if not exists auth.users (id uuid primary key, email text);
+-- Colonnes et table lues par les migrations du lot projets (2026-09-09). Ajoutées
+-- par ALTER plutôt que dans le CREATE : la base de service persiste d'une étape à
+-- l'autre du job, donc le \`if not exists\` de la table ne rejouerait rien.
+alter table auth.users add column if not exists is_anonymous boolean not null default false;
+alter table auth.users add column if not exists banned_until timestamptz;
+create table if not exists auth.sessions (
+    id uuid primary key,
+    user_id uuid references auth.users(id) on delete cascade,
+    created_at timestamptz not null default now(),
+    not_after timestamptz
+);
 create or replace function auth.uid() returns uuid language sql stable as
     $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
 create or replace function auth.email() returns text language sql stable as

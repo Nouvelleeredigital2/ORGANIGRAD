@@ -17,6 +17,7 @@ export default defineConfig({
     exclude: [
       'node_modules/**',
       'e2e/**',
+      'e2e-projects/**',
       'e2e-connected/**',
       'dist/**',
       'orchestrator/**',

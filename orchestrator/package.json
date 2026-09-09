@@ -24,6 +24,7 @@
     "postgres": "^3.4.9"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.5.8",
     "@types/node": "^24.10.1",
     "axe-core": "^4.9.1",
     "tsx": "^4.20.0",
