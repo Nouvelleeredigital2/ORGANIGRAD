@@ -41,7 +41,11 @@ type Fixture = {
 function database(fixture: Fixture = {}) {
     const queries: Query[] = [];
     const transactions: string[] = [];
-    const failure = () => { throw new Error('SQL secret postgres://admin:password@private profiles.email'); };
+    // Appât : porte les cinq mots que l'assertion de non-fuite traque plus bas
+    // (sql, password, postgres, profiles, email). Volontairement PAS sous forme
+    // de chaîne de connexion : le contrôle « valeur secrète » de la CI y voit un
+    // vrai DSN, et un appât de test ne doit pas rendre ce garde-fou ininterprétable.
+    const failure = () => { throw new Error('SQL failure: password of the postgres role, read from profiles.email'); };
     const tag = (transaction: boolean, phase: 'auth' | 'read' = 'auth') => async (strings: TemplateStringsArray, ...values: unknown[]) => {
         const text = strings.join('?').replace(/\s+/g, ' ').trim().toLowerCase();
         queries.push({ text, values, transaction, phase });
