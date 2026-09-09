@@ -26,8 +26,12 @@ revoke all on public.personal_project_tokens from public,anon,authenticated,serv
 grant select,insert on public.personal_project_tokens to service_role;
 grant update (revoked_at) on public.personal_project_tokens to service_role;
 
+-- Definer : la cible réelle n'accorde AUCUN droit sur auth.sessions/auth.users à
+-- service_role (vérifié le 2026-09-09 sur xucmfdggetwxmpquqjvj). En invoker, le
+-- INSERT autorisé plus bas pour service_role échouerait sur « permission denied
+-- for table sessions » au lieu de la règle métier. Contrôles inchangés.
 create or replace function public.guard_personal_project_token() returns trigger
-language plpgsql security invoker set search_path='' as $$
+language plpgsql security definer set search_path='' as $$
 begin
     if tg_op = 'UPDATE' then
         if (to_jsonb(new) - 'revoked_at') is distinct from (to_jsonb(old) - 'revoked_at')
