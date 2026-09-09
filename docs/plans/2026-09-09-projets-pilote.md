@@ -20,11 +20,15 @@ Base relue : 4c333be. origin/master 6b7822b est déjà ancêtre ; la branche ide
 - `project_tasks` : UUID id/workspace_id/project_id, title (1–200), description (0–2000), status `todo|running|blocked|done`, assignee_id nullable, due_date nullable, archived_at, dates et version.
 - Les membres actuels du workspace lisent ses projets. Owner/admin/member écrivent ; viewer lit. Aucune visibilité extérieure implicite, aucun droit tiré de l'e-mail.
 - Le responsable est un membre actuel du même workspace. Son départ ne bloque pas son retrait du workspace et ne doit pas autoriser un nouveau rattachement.
-- Aucun déplacement d'objet vers un autre workspace/projet. Une écriture concurrente obsolète échoue ; pas d'écrasement silencieux.
+- Aucun déplacement d'objet vers un autre workspace/projet. Une écriture concurrente obsolète échoue ; pas d'écrasement silencieux. Chaque UPDATE transmet `version = version_lue + 1` et filtre `version = version_lue` ; la base refuse une version omise ou non suivante.
 - Archivage/réactivation explicites, aucune suppression physique dans ce premier lot. Les tâches d'un projet archivé sont consultables mais non modifiables.
 - Pas de seed, génération, émission bus ni conversion automatique des brouillons historiques.
 
 ## Ordre d'exécution
+
+État détaillé et résultats : [preuves locales](2026-09-09-projets-preuves.md).
+Les étapes 1 à 3 sont implémentées et validées localement ; l'étape 4 consigne
+la finition navigateur et les commits. L'étape 5 n'est pas un raccordement livré.
 
 ### 1. Stockage et isolation
 
