@@ -17,10 +17,66 @@
 
 export type Outcome<T> = { ok: true; value: T } | { ok: false; error: Error };
 
-/** Normalise une valeur levée (souvent `unknown`) en message lisible. */
+/** Champs d'erreur que portent PostgREST et supabase-js, qui ne lèvent pas d'`Error`. */
+interface ErreurPortee {
+    message?: unknown;
+    hint?: unknown;
+    code?: unknown;
+    details?: unknown;
+    error_description?: unknown;
+    error?: unknown;
+}
+
+const texteNonVide = (valeur: unknown): string | null => {
+    if (typeof valeur !== 'string') return null;
+    const t = valeur.trim();
+    return t.length > 0 ? t : null;
+};
+
+/**
+ * Normalise une valeur levée (souvent `unknown`) en message lisible.
+ *
+ * **Pourquoi ce n'est pas qu'un `String(err)`.** Les erreurs de supabase-js et de
+ * PostgREST sont des **objets simples**, jamais des instances d'`Error` : elles
+ * portent `message`, `code`, `details` et parfois `hint`. Le repli `String(err)`
+ * les rendait toutes en `"[object Object]"` — un message vide de sens, affiché tel
+ * quel à l'utilisateur.
+ *
+ * Trois pannes réelles ont été masquées par ce seul repli, chacune ayant coûté un
+ * diagnostic complet alors que la réponse contenait déjà la réponse :
+ *
+ *  - un import refusé faute de migration : `PGRST202`, avec un `hint` qui donnait la
+ *    signature attendue ;
+ *  - une suppression en masse refusée : `27000`, avec un `hint` désignant le trigger ;
+ *  - un mode d'import invalide : `22023`, message explicite.
+ *
+ * On concatène donc le message et l'indice — l'indice de PostgREST dit souvent quoi
+ * faire — et on ajoute le code entre parenthèses, qui est ce qu'un utilisateur peut
+ * recopier dans un signalement.
+ */
 export function describeError(err: unknown): string {
     if (err instanceof Error) return err.message;
     if (typeof err === 'string') return err;
+
+    if (err && typeof err === 'object') {
+        const e = err as ErreurPortee;
+
+        const message = texteNonVide(e.message)
+            ?? texteNonVide(e.error_description)
+            ?? texteNonVide(e.error)
+            ?? texteNonVide(e.details);
+
+        if (message) {
+            const indice = texteNonVide(e.hint);
+            const code = texteNonVide(e.code);
+            return [
+                message,
+                indice ? ` — ${indice}` : '',
+                code ? ` (${code})` : '',
+            ].join('');
+        }
+    }
+
     return String(err);
 }
 

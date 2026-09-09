@@ -59,3 +59,16 @@ sa capacité à reconstruire de zéro est raisonnée, pas prouvée.
 Ne sont pas couverts : le schéma `auth` (géré par Supabase), les extensions
 autres que `pgcrypto`, les Edge Functions, et la configuration Auth
 (dont *Leaked Password Protection*, aujourd'hui désactivée).
+
+## Report local du pilote personnel projets — 9 septembre 2026
+
+`baseline_private_project_tokens_2026-09-09.sql` est le report exact de
+`../migrations/20260909150000_private_project_tokens.sql`. C'est un complément
+local, pas un relevé de production et pas un remplacement du miroir historique.
+Il exige les tables projets de `20260909090010_projects_and_tasks.sql` et les
+tables `auth.users` / `auth.sessions` détenues par Supabase. La migration ne crée
+ni ne modifie les tables Auth. Ne pas inclure ce complément avant ces prérequis.
+Le test PGlite `orchestrator/tests/privateProjects.test.ts` vérifie son identité
+avec la migration et la réapplication de celle-ci. Le rôle SQL réellement chargé,
+ses droits de lecture Auth, le schéma Auth et sa politique de session restent à
+qualifier séparément avant toute activation. Aucun déploiement n'est autorisé ici.

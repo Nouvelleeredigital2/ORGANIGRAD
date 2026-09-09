@@ -16,6 +16,8 @@ export default defineConfig([
     'coverage',
     'test-results',
     'playwright-report',
+    'e2e-projects/test-results/**',
+    'e2e-projects/playwright-report/**',
     'node_modules',
     'supabase/.temp/**',
     'supabase/.branches/**',

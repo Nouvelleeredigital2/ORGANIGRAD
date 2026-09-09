@@ -8,6 +8,9 @@ import { createSynapseProducer } from '../synapse/producer.js';
 import { IllegalTransitionError } from '../domain/stateMachine.js';
 import { NodeNotFoundError, OptimisticConcurrencyError } from '../state/pgGraphStore.js';
 import { buildAuthHook } from './auth.js';
+import { isProjectReadRoute, registerProjectRoutes } from './projectRoutes.js';
+import { isPrivateProjectPath, isPrivateProjectRoute, registerPrivateProjectRoutes } from './privateProjectRoutes.js';
+import { verifySupabaseJwt } from './userAuth.js';
 import type { UserTokenVerifier } from './userAuth.js';
 import { assertScope, MissingScopeError, SCOPES } from './scopes.js';
 import { toPublicNodeDTO, validateNodeMutation, NodeMutationValidationError } from './dto.js';
@@ -41,6 +44,13 @@ export interface PgNotifierConfig {
 
 export interface PgServerDeps {
     sql: Sql;
+    /** Product project reads are opt-in; bootstrap owns deployment activation. */
+    projectsEnabled?: boolean;
+    /** Independent opt-in; no legacy authentication or graph authority is delegated. */
+    privateProjectsEnabled?: boolean;
+    privateProjectsIssuer?: string;
+    /** Dedicated bounded verifier for the private runtime; leaves legacy JWKS behavior intact. */
+    privateProjectsVerifyUserToken?: UserTokenVerifier;
     mcpClient?: McpClient;
     notifierOptions?: PgNotifierConfig;
     /**
@@ -179,10 +189,29 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
     });
     app.addHook('onRequest', async (req, reply) => {
         const path = req.url.split('?')[0]!;
+        if (isPrivateProjectPath(path)) {
+            reply.header('Cache-Control', 'private, no-store');
+            if (deps.privateProjectsEnabled !== true || !isPrivateProjectRoute(req)) {
+                return reply.code(404).send({ error: 'PRIVATE_PROJECTS_NOT_FOUND' });
+            }
+            return; // The private plugin owns every authentication/error boundary here.
+        }
         if (PUBLIC_PATHS.has(path)) return;
         if (isSseStreamPath(req.url)) return; // authentifié par ticket dans le handler
+        // Project reads run the existing auth inside their own error/cache boundary.
+        if (deps.projectsEnabled === true && isProjectReadRoute(req)) return;
         if (!req.url.startsWith('/api/') && !req.url.startsWith('/mcp')) return;
         await authHook(req, reply);
+    });
+
+    if (deps.projectsEnabled === true) registerProjectRoutes(app, deps);
+    if (deps.privateProjectsEnabled === true) registerPrivateProjectRoutes(app, {
+        sql: deps.sql,
+        issuer: deps.privateProjectsIssuer ?? '',
+        verifyUserToken: deps.privateProjectsVerifyUserToken ?? deps.verifyUserToken ?? (deps.jwtSecret
+            ? async token => verifySupabaseJwt(token, deps.jwtSecret!)
+            : undefined)!,
+        allowedOrigins,
     });
 
     // --- POST /api/events/ticket — émet un ticket SSE court à usage unique ----

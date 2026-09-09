@@ -38,7 +38,7 @@ export const Topbar: React.FC<TopbarProps> = ({
     return (
         <OriginGlass 
             variant="panel" 
-            className="h-24 flex items-center justify-between px-8 border-b border-white/70 z-30 print:hidden relative"
+            className="organigrad-topbar h-24 flex items-center justify-between px-8 border-b border-white/70 z-30 print:hidden relative"
         >
             <div className="flex items-center gap-6">
                 <div className="w-10 h-10 shrink-0" />
@@ -52,11 +52,11 @@ export const Topbar: React.FC<TopbarProps> = ({
                 </div>
             </div>
 
-            <div className="flex-1 px-12">{spotlightInput}</div>
+            <div className="organigrad-topbar-search flex-1 px-12">{spotlightInput}</div>
 
-            <div className="flex items-center gap-3">
+            <div className="organigrad-topbar-actions flex items-center gap-3">
                 {importError && (
-                    <div className="absolute top-[100%] right-8 mt-2 bg-red-50 text-red-600 text-xs font-bold px-4 py-2 rounded-xl shadow-lg border border-red-100 flex items-center gap-2">
+                    <div role="alert" className="organigrad-topbar-notice absolute top-[100%] right-8 mt-2 bg-red-50 text-red-600 text-xs font-bold px-4 py-2 rounded-xl shadow-lg border border-red-100 flex items-center gap-2">
                         <AlertCircle className="w-4 h-4" />
                         {importError}
                     </div>
@@ -77,7 +77,7 @@ export const Topbar: React.FC<TopbarProps> = ({
                     {isImporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
                     Importer
                 </button>
-                <div className="w-px h-8 bg-slate-200/60 mx-1"></div>
+                <div className="organigrad-topbar-separator w-px h-8 bg-slate-200/60 mx-1"></div>
                 <button
                     className="origin-button flex items-center gap-2 text-xs font-extrabold uppercase tracking-widest"
                     onClick={handleExportCSV}
@@ -96,7 +96,7 @@ export const Topbar: React.FC<TopbarProps> = ({
                     Export PDF
                 </button>
                 {!canExport && !loading && (
-                    <p className="absolute right-8 top-[100%] mt-2 text-xs font-medium text-slate-500" role="status">
+                    <p className="organigrad-topbar-notice absolute right-8 top-[100%] mt-2 text-xs font-medium text-slate-500" role="status">
                         Importez des fiches avant d&apos;exporter.
                     </p>
                 )}
