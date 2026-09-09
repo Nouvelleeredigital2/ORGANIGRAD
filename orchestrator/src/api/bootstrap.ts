@@ -37,6 +37,7 @@ export async function startOrchestrator() {
                 : undefined;
         const app = buildPgServer({
             sql,
+            projectsEnabled: env.projectsEnabled,
             allowedOrigins: env.corsAllowedOrigins,
             jwtSecret: env.supabaseJwtSecret,
             verifyUserToken,
