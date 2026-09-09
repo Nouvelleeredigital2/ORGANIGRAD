@@ -59,4 +59,3 @@ drop trigger if exists personal_project_token_guard on public.personal_project_t
 create trigger personal_project_token_guard before insert or update on public.personal_project_tokens
 for each row execute function public.guard_personal_project_token();
 commit;
-

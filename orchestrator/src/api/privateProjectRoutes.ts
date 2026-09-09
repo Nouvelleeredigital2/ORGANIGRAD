@@ -113,7 +113,7 @@ export function registerPrivateProjectRoutes(app: FastifyInstance, deps: Private
             const ws = workspace(req);
             const body = object(req.body, ['projectId','name','expiresAt']);
             if (!privateUuid(body.projectId) || typeof body.name !== 'string' || body.name.length > 80 ||
-                !body.name.trim() || /[\x00-\x1f\x7f]/.test(body.name) || !unixSeconds(body.expiresAt) ||
+                !body.name.trim() || [...body.name].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127) || !unixSeconds(body.expiresAt) ||
                 body.expiresAt <= Date.now() / 1000) throw invalid();
             const projectId = body.projectId, name = body.name.trim(), requestedExpiry = body.expiresAt;
             const result = await deps.sql.begin(WRITE, async tx => {

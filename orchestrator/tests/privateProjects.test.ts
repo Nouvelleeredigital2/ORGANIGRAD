@@ -171,7 +171,7 @@ describe.sequential('private projects: real SQL and signed sessions, no network'
     it('enforces origin and strict, bounded request bodies',async()=>{
         expect((await issue(jwt(),{}, {origin:'https://evil.example'})).statusCode).toBe(403);
         expect((await issue(jwt(),{}, {origin:''})).statusCode).toBe(403);
-        for(const changes of [{scopes:['projects:read','graph:read']},{ownerId:V},{sessionId:T},{name:'x'.repeat(81)},{expiresAt:0},{expiresAt:'tomorrow'},{projectId:null}]) {
+        for(const changes of [{scopes:['projects:read','graph:read']},{ownerId:V},{sessionId:T},{name:'x'.repeat(81)},...Array.from({length:33},(_,index)=>({name:`Synapse${String.fromCharCode(index===32?127:index)}`})),{expiresAt:0},{expiresAt:'tomorrow'},{projectId:null}]) {
             expect((await issue(jwt(),changes)).statusCode).toBe(400);
         }
         const large=await issue(jwt(),{name:'x'.repeat(5000)});expect(large.statusCode).toBe(413);

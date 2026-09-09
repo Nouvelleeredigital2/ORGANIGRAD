@@ -172,10 +172,13 @@ réussis ; revue indépendante supplémentaire de 137 tests sans défaut actionn
 `npm run typecheck` et `git diff --check -- orchestrator supabase`
 réussissent. Les messages de panne Synapse de la suite complète proviennent des
 scénarios historiques de résilience ; le nouveau parcours ne journalise aucun
-secret. HEAD reste `7601504`, aucun commit créé. Les changements frontend
-concurrents appartiennent à l'autre lot et n'ont pas été modifiés ici.
+secret. Le backend est enregistré dans `e44eb76`, depuis `7601504`. Le contrôle
+global frontend a ensuite relevé `no-control-regex` dans le validateur du nom :
+contrôle numérique équivalent, test des 33 caractères interdits et nouveau rejeu
+460 réussis / 62 ignorés. Les deux SQL identiques ont seulement perdu leur ligne
+vide finale supplémentaire. Aucun changement de migration ni de base distante.
 
-Main a annoncé séparément 8/8 pour sa preuve transverse H. La migration vers
-`contracts@1.6.0-pilot.2` / `projectConnectionIntrospectionSchema` reste à main ;
-ce backend ne met à jour ni package ni lockfile et respecte déjà la forme exacte
-de la preuve Organigrad annoncée.
+La preuve transverse H a été rejouée à 8/8 après revue ; elle utilise le contrat
+`contracts@1.6.0-pilot.2` distribué dans Synapse. Ce backend ne change ni package
+ni lockfile de son consommateur historique d'événements et respecte la forme
+exacte `projectConnectionIntrospectionSchema`, vérifiée par cette intégration.
