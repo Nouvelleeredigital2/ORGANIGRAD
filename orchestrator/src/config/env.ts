@@ -10,6 +10,7 @@ export type OrchestratorMode = 'pg' | 'memory';
 
 export interface OrchestratorEnv {
     mode: OrchestratorMode;
+    projectsEnabled: boolean;
     port: number;
     appUrl?: string;
     supabaseDbUrl?: string;
@@ -116,12 +117,22 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): OrchestratorEn
         issues.push('INTEGRATION_ENCRYPTION_KEY doit être 32 octets encodés en base64');
     }
 
+    const projectsRaw = source.PROJECTS_ENABLED?.trim() || 'false';
+    const projectsEnabled = projectsRaw === 'true';
+    if (!['true', 'false'].includes(projectsRaw)) {
+        issues.push('PROJECTS_ENABLED doit valoir true ou false');
+    }
+    if (projectsEnabled && (mode !== 'pg' || !(source.SUPABASE_JWT_SECRET?.trim() || source.SUPABASE_JWKS_URL?.trim()))) {
+        issues.push('PROJECTS_ENABLED exige Postgres et une configuration de vérification des sessions humaines');
+    }
+
     if (issues.length > 0) {
         throw new EnvValidationError(issues);
     }
 
     return {
         mode,
+        projectsEnabled,
         port,
         appUrl: source.APP_URL?.trim() || undefined,
         supabaseDbUrl: dbUrl,
