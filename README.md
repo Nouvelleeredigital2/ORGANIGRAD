@@ -5,6 +5,10 @@ où chaque nœud est un humain (garant/validation), un agent IA, ou un logiciel 
 Le flux avance d'un nœud à l'autre sous contrôle d'une machine à états, avec
 validation humaine (HITL), notifications, et audit.
 
+Le [module projets/tâches](docs/projets-pilote.md) est un ajout pilote local,
+désactivé par défaut : il ne remplace pas le graphe et n'est pas encore livré
+ni raccordé au panneau LINK.
+
 - **SPA** (`/`, `src/`) : React 19 + Vite + Tailwind, données via Supabase.
 - **Orchestrateur** (`orchestrator/`) : Node + Fastify + `postgres.js`, moteur d'exécution + MCP.
 - **Supabase** : Postgres (source de vérité persistante), Auth, Edge Functions, RLS.
