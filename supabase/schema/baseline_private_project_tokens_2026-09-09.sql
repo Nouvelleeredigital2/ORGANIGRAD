@@ -1,6 +1,9 @@
 -- Local private-projects pilot. Requires projects_and_tasks and Supabase-owned auth tables.
 -- No production application is implied. Browser roles have no access.
-begin;
+-- Pas de `begin;`/`commit;` explicite, comme les migrations precedentes :
+-- l'atomicite vient de la transaction implicite du lot multi-instructions. Une
+-- transaction ouverte dans le fichier fait echouer le harnais d'integration, qui
+-- rejoue les migrations par `sql.unsafe` (UNSAFE_TRANSACTION).
 create table if not exists public.personal_project_tokens (
     id uuid primary key default gen_random_uuid(),
     owner_id uuid not null references auth.users(id) on delete cascade,
@@ -62,4 +65,3 @@ revoke all on function public.guard_personal_project_token() from public,anon,au
 drop trigger if exists personal_project_token_guard on public.personal_project_tokens;
 create trigger personal_project_token_guard before insert or update on public.personal_project_tokens
 for each row execute function public.guard_personal_project_token();
-commit;

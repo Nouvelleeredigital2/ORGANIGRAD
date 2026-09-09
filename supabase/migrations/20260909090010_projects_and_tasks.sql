@@ -1,6 +1,9 @@
 -- Lot projets pilote, additif. Ne pas appliquer sans qualification de la cible
 -- et accord opératoire. Aucun seed et aucune modification du graphe existant.
-begin;
+-- Pas de `begin;`/`commit;` explicite, comme les 27 migrations précédentes :
+-- l'atomicité vient de la transaction implicite du lot multi-instructions. Une
+-- transaction ouverte dans le fichier fait échouer le harnais d'intégration, qui
+-- rejoue les migrations par `sql.unsafe` (UNSAFE_TRANSACTION).
 
 create table public.projects (
     id uuid primary key default gen_random_uuid(),
@@ -139,5 +142,3 @@ for each row execute function public.guard_project_mutation();
 create trigger project_tasks_guard before insert or update on public.project_tasks
 for each row execute function public.guard_project_task_mutation();
 revoke all on function public.guard_project_mutation(), public.guard_project_task_mutation() from public, anon, authenticated;
-
-commit;
