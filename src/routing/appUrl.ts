@@ -1,4 +1,5 @@
 import type { AppView } from '../hooks/useOrgChartController';
+import { isProjectsEnabled } from '../lib/projectsFeature';
 
 /**
  * Sérialisation de l'état de navigation dans l'URL.
@@ -17,6 +18,7 @@ const VIEWS: readonly AppView[] = [
     'orgchart',
     'dashboard',
     'orchestration',
+    'projects',
     'members',
     'api-keys',
     'settings',
@@ -28,6 +30,8 @@ export interface AppRoute {
     agentId: string | null;
     nodeId: string | null;
     editMode: boolean;
+    projectId?: string | null;
+    workspaceId?: string | null;
 }
 
 export const DEFAULT_ROUTE: AppRoute = {
@@ -41,7 +45,8 @@ export const DEFAULT_ROUTE: AppRoute = {
 /** Clés gérées par le routeur — les autres sont conservées telles quelles. */
 const OWNED_KEYS = ['v', 'pole', 'agent', 'node', 'edit'] as const;
 
-const isView = (value: string): value is AppView => (VIEWS as readonly string[]).includes(value);
+const isView = (value: string): value is AppView =>
+    (VIEWS as readonly string[]).includes(value) && (value !== 'projects' || isProjectsEnabled());
 
 /**
  * Lit une route depuis une query string. Tolérant par construction : une vue
@@ -57,6 +62,8 @@ export function parseAppRoute(search: string): AppRoute {
         agentId: params.get('agent') || null,
         nodeId: params.get('node') || null,
         editMode: params.get('edit') === '1',
+        projectId: params.get('project') || null,
+        workspaceId: params.get('workspace') || null,
     };
 }
 
@@ -69,11 +76,20 @@ export function serializeAppRoute(route: AppRoute, currentSearch: string): strin
     OWNED_KEYS.forEach((key) => params.delete(key));
 
     // La vue par défaut n'est pas écrite : `/` reste une URL propre.
-    if (route.view !== DEFAULT_ROUTE.view) params.set('v', route.view);
+    if (route.view !== DEFAULT_ROUTE.view && isView(route.view)) params.set('v', route.view);
     if (route.poleKey) params.set('pole', route.poleKey);
     if (route.agentId) params.set('agent', route.agentId);
     if (route.nodeId) params.set('node', route.nodeId);
     if (route.editMode) params.set('edit', '1');
+    // Optional so legacy callers still preserve these formerly unknown keys.
+    if (route.projectId !== undefined) {
+        if (route.projectId) params.set('project', route.projectId);
+        else params.delete('project');
+    }
+    if (route.workspaceId !== undefined) {
+        if (route.workspaceId) params.set('workspace', route.workspaceId);
+        else params.delete('workspace');
+    }
 
     const query = params.toString();
     return query ? `?${query}` : '';
@@ -85,6 +101,8 @@ export function routesEqual(a: AppRoute, b: AppRoute): boolean {
         a.poleKey === b.poleKey &&
         a.agentId === b.agentId &&
         a.nodeId === b.nodeId &&
-        a.editMode === b.editMode
+        a.editMode === b.editMode &&
+        (a.projectId ?? null) === (b.projectId ?? null) &&
+        (a.workspaceId ?? null) === (b.workspaceId ?? null)
     );
 }
