@@ -9,13 +9,14 @@ const mocks = vi.hoisted(() => ({
     accessToken: 'token-a',
     role: 'member' as WorkspaceRole,
     workspaceLoading: false,
+    workspaceUnavailable: false,
     workspaceError: null as string | null,
     refresh: vi.fn(),
     setActive: vi.fn(),
     repo: { getRole: vi.fn(), listProjects: vi.fn(), getProject: vi.fn(), listTasks: vi.fn(), listMembers: vi.fn(), createProject: vi.fn(), updateProject: vi.fn(), createTask: vi.fn(), updateTask: vi.fn() },
 }));
 vi.mock('../../hooks/useSession', () => ({ useSession: () => ({ session: mocks.userId ? { user: { id: mocks.userId }, access_token: mocks.accessToken } : null, loading: false }) }));
-vi.mock('../../contexts/WorkspaceContext', () => ({ useWorkspaceContext: () => ({ userId: mocks.userId, activeId: mocks.workspaceId, activeWorkspace: { id: mocks.workspaceId, name: 'Espace actuel', role: mocks.role }, workspaces: [{ id: mocks.workspaceId, name: 'Espace actuel', role: mocks.role }, { id: '55555555-5555-4555-8555-555555555555', name: 'Autre espace', role: 'viewer' }], setActive: mocks.setActive, refresh: mocks.refresh, loading: mocks.workspaceLoading, error: mocks.workspaceError }) }));
+vi.mock('../../contexts/WorkspaceContext', () => ({ useWorkspaceContext: () => ({ userId: mocks.userId, activeId: mocks.workspaceId, activeWorkspace: mocks.workspaceUnavailable ? null : { id: mocks.workspaceId, name: 'Espace actuel', role: mocks.role }, workspaces: [{ id: mocks.workspaceId, name: 'Espace actuel', role: mocks.role }, { id: '55555555-5555-4555-8555-555555555555', name: 'Autre espace', role: 'viewer' }], setActive: mocks.setActive, refresh: mocks.refresh, loading: mocks.workspaceLoading, error: mocks.workspaceError }) }));
 vi.mock('../../services/projectRepo', async importOriginal => ({ ...await importOriginal<typeof import('../../services/projectRepo')>(), createProjectRepo: () => mocks.repo }));
 
 import { ProjectsView } from './ProjectsView';
@@ -29,11 +30,13 @@ const deepLink = () => window.history.replaceState(null, '', `/?v=projects&works
 beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv('VITE_PROJECTS_ENABLED', 'true');
+    vi.stubEnv('VITE_PRIVATE_PROJECTS_ENABLED', 'false');
     mocks.workspaceId = project.workspace_id;
     mocks.userId = '44444444-4444-4444-8444-444444444444';
     mocks.accessToken = 'token-a';
     mocks.role = 'member';
     mocks.workspaceLoading = false;
+    mocks.workspaceUnavailable = false;
     mocks.workspaceError = null;
     mocks.refresh.mockResolvedValue([]);
     window.history.replaceState(null, '', '/?v=projects');
@@ -47,9 +50,271 @@ beforeEach(() => {
     mocks.repo.createTask.mockResolvedValue(task);
     mocks.repo.updateTask.mockResolvedValue({ ...task, version: 2, status: 'done' });
 });
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+describe('personal Synapse access lifecycle', () => {
+    const tokenId = '88888888-8888-4888-8888-888888888888';
+    const secret = `ogp_${'b'.repeat(64)}`;
+    const expiresAt = Math.floor(Date.now() / 1000) + 120;
+    const issuance = () => new Response(JSON.stringify({ id: tokenId, token: secret, workspace: mocks.workspaceId, projectId: project.id, scopes: ['projects:read'], expiresAt }), { status: 201 });
+    const row = { id: tokenId, name: 'Mon Synapse', prefix: secret.slice(0, 12), expiresAt, createdAt: '2026-09-09T10:00:00Z', revokedAt: null };
+    const fetcher = vi.fn<typeof fetch>();
+    const writeText = vi.fn();
+    beforeEach(() => {
+        deepLink();
+        vi.stubEnv('VITE_PRIVATE_PROJECTS_ENABLED', 'true');
+        vi.stubEnv('VITE_ORCHESTRATOR_URL', 'https://orchestrator.example.test');
+        mocks.accessToken = 'human.session.signature';
+        fetcher.mockReset().mockImplementation(async (_url, init) => init?.method === 'POST' ? issuance() : new Response(JSON.stringify({ tokens: [] })));
+        vi.stubGlobal('fetch', fetcher);
+        writeText.mockReset().mockResolvedValue(undefined);
+        Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    });
+    const open = async () => {
+        fireEvent.click(await screen.findByRole('button', { name: 'Accès Synapse' }));
+        await screen.findByText('Aucun accès personnel pour ce projet.');
+    };
+    const submit = () => {
+        fireEvent.change(screen.getByLabelText('Nom de l’accès'), { target: { value: 'Mon Synapse' } });
+        fireEvent.submit(screen.getByRole('button', { name: 'Créer l’accès' }).closest('form')!);
+    };
+    it('issues once on double submit, masks by default, shows actual expiry, and never writes secrets to persistence/URL/clipboard', async () => {
+        const pending = deferred<Response>();
+        render(<ProjectsView />);
+        await open();
+        const persistence = vi.spyOn(Storage.prototype, 'setItem');
+        fetcher.mockReturnValueOnce(pending.promise);
+        submit();
+        fireEvent.submit(screen.getByRole('button', { name: 'Créer l’accès' }).closest('form')!);
+        expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+        await act(async () => pending.resolve(issuance()));
+        expect(await screen.findByText('Secret masqué')).toBeInTheDocument();
+        const connection = within(screen.getByRole('region', { name: 'Accès créé' }));
+        expect(connection.getByText(mocks.userId)).toBeInTheDocument();
+        expect(connection.getByText(mocks.workspaceId)).toBeInTheDocument();
+        expect(connection.getByText(project.id)).toBeInTheDocument();
+        expect(document.body.innerHTML).not.toContain(secret);
+        expect(screen.getByText(/expiration effective/i).querySelector('time')).toHaveAttribute('dateTime', new Date(expiresAt * 1000).toISOString());
+        fireEvent.click(screen.getByRole('button', { name: 'Révéler le secret' }));
+        expect(screen.getByText(secret)).toBeInTheDocument();
+        expect(writeText).not.toHaveBeenCalled();
+        expect(persistence).not.toHaveBeenCalled();
+        expect(window.location.href).not.toContain(secret);
+        expect(window.location.href).not.toContain(mocks.accessToken);
+        fireEvent.click(screen.getByRole('button', { name: 'Fermer' }));
+        expect(document.body.innerHTML).not.toContain(secret);
+        await open();
+        expect(screen.queryByRole('button', { name: 'Révéler le secret' })).not.toBeInTheDocument();
+    });
+    it.each(['workspace', 'user', 'session', 'role', 'project', 'unmount', 'close', 'membership', 'logout'])('discards an old POST after %s and never resurrects its secret', async dimension => {
+        const pending = deferred<Response>();
+        const view = render(<ProjectsView />);
+        await open();
+        fetcher.mockReturnValueOnce(pending.promise);
+        submit();
+        const oldResponse = issuance();
+        const read = vi.spyOn(oldResponse, 'json');
+        if (dimension === 'membership') mocks.workspaceUnavailable = true;
+        if (dimension === 'logout') mocks.userId = '';
+        if (dimension === 'workspace') mocks.workspaceId = '55555555-5555-4555-8555-555555555555';
+        if (dimension === 'user') mocks.userId = '77777777-7777-4777-8777-777777777777';
+        if (dimension === 'session') mocks.accessToken = 'human.new.signature';
+        if (dimension === 'role') mocks.role = 'viewer';
+        if (dimension === 'project') act(() => { window.history.replaceState(null, '', '/?v=projects'); window.dispatchEvent(new PopStateEvent('popstate')); });
+        if (dimension === 'unmount') view.unmount();
+        else if (dimension === 'close') fireEvent.click(screen.getByRole('button', { name: 'Fermer' }));
+        else view.rerender(<ProjectsView />);
+        await act(async () => pending.resolve(oldResponse));
+        expect(read).not.toHaveBeenCalled();
+        expect(document.body.innerHTML).not.toContain(secret);
+        expect(screen.queryByRole('button', { name: 'Révéler le secret' })).not.toBeInTheDocument();
+        expect(writeText).not.toHaveBeenCalled();
+    });
+    it.each(['workspace', 'user', 'session', 'role', 'project', 'unmount', 'membership', 'logout'])('clears an already revealed secret on %s', async dimension => {
+        const view = render(<ProjectsView />);
+        await open(); submit();
+        fireEvent.click(await screen.findByRole('button', { name: 'Révéler le secret' }));
+        expect(screen.getByText(secret)).toBeInTheDocument();
+        if (dimension === 'membership') mocks.workspaceUnavailable = true;
+        if (dimension === 'logout') mocks.userId = '';
+        if (dimension === 'workspace') mocks.workspaceId = '55555555-5555-4555-8555-555555555555';
+        if (dimension === 'user') mocks.userId = '77777777-7777-4777-8777-777777777777';
+        if (dimension === 'session') mocks.accessToken = 'human.new.signature';
+        if (dimension === 'role') mocks.role = 'viewer';
+        if (dimension === 'project') act(() => { window.history.replaceState(null, '', '/?v=projects'); window.dispatchEvent(new PopStateEvent('popstate')); });
+        if (dimension === 'unmount') view.unmount(); else view.rerender(<ProjectsView />);
+        expect(document.body.innerHTML).not.toContain(secret);
+    });
+    it('keeps loading distinct from empty/error and paginates metadata with confirmation before revoke', async () => {
+        const pending = deferred<Response>();
+        fetcher.mockReturnValueOnce(pending.promise);
+        render(<ProjectsView />);
+        fireEvent.click(await screen.findByRole('button', { name: 'Accès Synapse' }));
+        expect(within(screen.getByRole('dialog')).getByRole('status')).toHaveTextContent('Chargement des accès');
+        await act(async () => pending.resolve(new Response(JSON.stringify({ tokens: [row], nextCursor: tokenId }))));
+        expect(screen.getByText(row.name)).toBeInTheDocument();
+        fetcher.mockResolvedValueOnce(new Response(JSON.stringify({ tokens: [{ ...row, id: task.id, name: 'Autre accès' }] })));
+        fireEvent.click(screen.getByRole('button', { name: 'Afficher la suite' }));
+        expect(await screen.findByText('Autre accès')).toBeInTheDocument();
+        expect(fetcher.mock.calls[1]![0]).toContain(`cursor=${tokenId}`);
+        fireEvent.click(screen.getByRole('button', { name: `Révoquer ${row.name}` }));
+        expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'DELETE')).toHaveLength(0);
+        fireEvent.click(screen.getByRole('button', { name: 'Annuler la révocation' }));
+        fireEvent.click(screen.getByRole('button', { name: `Révoquer ${row.name}` }));
+        fetcher.mockResolvedValueOnce(new Response(null, { status: 204 }));
+        fireEvent.click(screen.getByRole('button', { name: 'Confirmer la révocation' }));
+        expect(await screen.findByText('Accès révoqué.')).toBeInTheDocument();
+        expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'DELETE')).toHaveLength(1);
+    });
+    it('displays a generic load error and supports retry without invented rows', async () => {
+        fetcher.mockRejectedValueOnce(new Error(secret));
+        render(<ProjectsView />);
+        fireEvent.click(await screen.findByRole('button', { name: 'Accès Synapse' }));
+        expect(await screen.findByRole('alert')).toHaveTextContent('Accès Synapse indisponible');
+        expect(document.body.innerHTML).not.toContain(secret);
+        expect(screen.queryByText('Aucun accès personnel pour ce projet.')).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'Réessayer la liste' }));
+        expect(await screen.findByText('Aucun accès personnel pour ce projet.')).toBeInTheDocument();
+    });
+    it('never retries an uncertain POST automatically or on repeated submission', async () => {
+        render(<ProjectsView />);
+        await open();
+        fetcher.mockRejectedValueOnce(new Error(secret));
+        submit();
+        expect(await screen.findByRole('alert')).toHaveTextContent(/création non confirmée/i);
+        fireEvent.submit(screen.getByRole('button', { name: 'Créer l’accès' }).closest('form')!);
+        expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+    });
+    it('preserves the secret through same-identity focus refresh and failed revalidation, while gating actions', async () => {
+        const view = render(<ProjectsView />);
+        await open(); submit();
+        await screen.findByText('Secret masqué');
+        await waitFor(() => expect(screen.getByRole('button', { name: 'Actualiser les accès' })).toBeEnabled());
+        const dialog = screen.getByRole('dialog');
+        const requests = fetcher.mock.calls.length;
+        mocks.workspaceLoading = true;
+        view.rerender(<ProjectsView />);
+        expect(screen.getByRole('dialog')).toBe(dialog);
+        expect(within(dialog).getByRole('status')).toHaveTextContent(/vérification/i);
+        expect(screen.getByRole('button', { name: 'Révéler le secret' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'Actualiser les accès' })).toBeDisabled();
+        fireEvent.click(screen.getByRole('button', { name: 'Actualiser les accès' }));
+        mocks.workspaceLoading = false;
+        mocks.workspaceError = 'Vérification impossible';
+        view.rerender(<ProjectsView />);
+        expect(screen.getByRole('dialog')).toBe(dialog);
+        expect(within(dialog).getByRole('alert')).toHaveTextContent(/vérification/i);
+        expect(screen.getByRole('button', { name: 'Révéler le secret' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'Accès Synapse' })).toBeDisabled();
+        fireEvent.click(within(dialog).getByRole('button', { name: 'Revérifier l’accès' }));
+        expect(mocks.refresh).toHaveBeenCalledOnce();
+        mocks.workspaceError = null;
+        view.rerender(<ProjectsView />);
+        expect(screen.getByRole('dialog')).toBe(dialog);
+        expect(fetcher).toHaveBeenCalledTimes(requests);
+        fireEvent.click(screen.getByRole('button', { name: 'Révéler le secret' }));
+        expect(screen.getByText(secret)).toBeInTheDocument();
+        expect(screen.getByLabelText('Nom de l’accès')).toHaveValue('Mon Synapse');
+    });
+    it('gates direct form submits during same-identity revalidation and retains the draft', async () => {
+        const view = render(<ProjectsView />);
+        await open();
+        fireEvent.change(screen.getByLabelText('Nom de l’accès'), { target: { value: 'Brouillon Synapse' } });
+        const form = screen.getByRole('button', { name: 'Créer l’accès' }).closest('form')!;
+        mocks.workspaceLoading = true;
+        view.rerender(<ProjectsView />);
+        expect(screen.getByLabelText('Nom de l’accès')).toHaveValue('Brouillon Synapse');
+        fireEvent.submit(form);
+        expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0);
+        mocks.workspaceLoading = false;
+        view.rerender(<ProjectsView />);
+        fireEvent.submit(form);
+        await screen.findByText('Secret masqué');
+        expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+    });
+    it('retains an open revoke confirmation across refresh but suspends the DELETE', async () => {
+        fetcher.mockResolvedValueOnce(new Response(JSON.stringify({ tokens: [row] })));
+        const view = render(<ProjectsView />);
+        fireEvent.click(await screen.findByRole('button', { name: 'Accès Synapse' }));
+        fireEvent.click(await screen.findByRole('button', { name: `Révoquer ${row.name}` }));
+        mocks.workspaceLoading = true;
+        view.rerender(<ProjectsView />);
+        expect(screen.getByRole('button', { name: 'Confirmer la révocation' })).toBeDisabled();
+        fireEvent.click(screen.getByRole('button', { name: 'Confirmer la révocation' }));
+        expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'DELETE')).toHaveLength(0);
+        mocks.workspaceLoading = false;
+        view.rerender(<ProjectsView />);
+        fetcher.mockResolvedValueOnce(new Response(null, { status: 204 }));
+        fireEvent.click(screen.getByRole('button', { name: 'Confirmer la révocation' }));
+        await screen.findByText('Accès révoqué.');
+        expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'DELETE')).toHaveLength(1);
+    });
+    it('preserves the new secret when two POST responses arrive in reverse order across close/reopen', async () => {
+        const pending = deferred<Response>();
+        render(<ProjectsView />);
+        await open();
+        fetcher.mockReturnValueOnce(pending.promise);
+        submit();
+        const oldResponse = issuance();
+        const read = vi.spyOn(oldResponse, 'json');
+        fireEvent.click(screen.getByRole('button', { name: 'Fermer' }));
+        await open();
+        const newerSecret = `ogp_${'c'.repeat(64)}`;
+        fetcher.mockResolvedValueOnce(new Response(JSON.stringify({ id: tokenId, token: newerSecret, workspace: mocks.workspaceId, projectId: project.id, scopes: ['projects:read'], expiresAt }), { status: 201 }));
+        submit();
+        fireEvent.click(await screen.findByRole('button', { name: 'Révéler le secret' }));
+        expect(screen.getByText(newerSecret)).toBeInTheDocument();
+        await act(async () => pending.resolve(oldResponse));
+        expect(read).not.toHaveBeenCalled();
+        expect(screen.getByText(newerSecret)).toBeInTheDocument();
+        expect(document.body.innerHTML).not.toContain(secret);
+    });
+    it('ignores an older GET after reopening and loading the current list', async () => {
+        const pending = deferred<Response>();
+        fetcher.mockReturnValueOnce(pending.promise);
+        render(<ProjectsView />);
+        fireEvent.click(await screen.findByRole('button', { name: 'Accès Synapse' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Fermer' }));
+        await open();
+        await act(async () => pending.resolve(new Response(JSON.stringify({ tokens: [row] }))));
+        expect(screen.queryByText(row.name)).not.toBeInTheDocument();
+        expect(screen.getByText('Aucun accès personnel pour ce projet.')).toBeInTheDocument();
+    });
+    it('keeps existing rows on a pagination error and never claims a failed revoke succeeded', async () => {
+        fetcher.mockResolvedValueOnce(new Response(JSON.stringify({ tokens: [row], nextCursor: tokenId })));
+        render(<ProjectsView />);
+        fireEvent.click(await screen.findByRole('button', { name: 'Accès Synapse' }));
+        await screen.findByText(row.name);
+        fetcher.mockRejectedValueOnce(new Error(secret));
+        fireEvent.click(screen.getByRole('button', { name: 'Afficher la suite' }));
+        await screen.findByRole('alert');
+        expect(screen.getByText(row.name)).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: `Révoquer ${row.name}` }));
+        fetcher.mockResolvedValueOnce(new Response('{}', { status: 403 }));
+        fireEvent.click(screen.getByRole('button', { name: 'Confirmer la révocation' }));
+        await waitFor(() => expect(screen.getByRole('button', { name: 'Confirmer la révocation' })).toBeEnabled());
+        expect(screen.queryByText('Accès révoqué.')).not.toBeInTheDocument();
+        expect(document.body.innerHTML).not.toContain(secret);
+    });
+    it('allows a verified viewer to issue read-only personal access', async () => {
+        mocks.role = 'viewer'; mocks.repo.getRole.mockResolvedValue('viewer');
+        render(<ProjectsView />);
+        await open(); submit();
+        expect(await screen.findByText('Secret masqué')).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Modifier le projet' })).not.toBeInTheDocument();
+    });
+});
 
 describe('ProjectsView', () => {
+    it('offers personal Synapse access in project detail only when explicitly enabled', async () => {
+        deepLink();
+        const { rerender } = render(<ProjectsView />);
+        await screen.findByRole('heading', { name: project.name });
+        expect(screen.queryByRole('button', { name: 'Accès Synapse' })).not.toBeInTheDocument();
+        vi.stubEnv('VITE_PRIVATE_PROJECTS_ENABLED', 'true');
+        rerender(<ProjectsView />);
+        expect(screen.getByRole('button', { name: 'Accès Synapse' })).toBeInTheDocument();
+    });
     it.each(['project', 'task'] as const)('preserves an uncertain %s draft and UUID during same-boundary revalidation', async kind => {
         if (kind === 'task') deepLink();
         const create = kind === 'project' ? mocks.repo.createProject : mocks.repo.createTask;

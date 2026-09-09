@@ -3,7 +3,8 @@ import { FolderKanban, Plus } from 'lucide-react';
 import { useWorkspaceContext } from '../../contexts/WorkspaceContext';
 import { useSession } from '../../hooks/useSession';
 import { useAppRoute } from '../../routing/useAppRoute';
-import { isProjectsEnabled } from '../../lib/projectsFeature';
+import { isProjectsEnabled, isPrivateProjectsEnabled } from '../../lib/projectsFeature';
+import { PrivateProjectAccess } from '../projects/PrivateProjectAccess';
 import { createProjectRepo, isProjectUuid, type ProjectRepo } from '../../services/projectRepo';
 import type { Project, ProjectTask, ProjectMember, ProjectTaskStatus, NewProject, NewTask } from '../../types/project';
 import type { WorkspaceRole } from '../../types/supabase';
@@ -65,6 +66,7 @@ function ProjectsWorkspace({ userId, accessToken, workspaceId, workspaceName, ro
     const [archive, setArchive] = useState<Archive | null>(null);
     const [showArchived, setShowArchived] = useState(false);
     const [busy, setBusy] = useState(false);
+    const [synapseOpen, setSynapseOpen] = useState(false);
     const lock = useRef(false);
 
     useEffect(() => {
@@ -169,6 +171,11 @@ function ProjectsWorkspace({ userId, accessToken, workspaceId, workspaceName, ro
                     <p className="mt-3 whitespace-pre-wrap break-words text-sm text-[var(--fg-3)]">{project.description || 'Aucune description.'}</p>
                     {canWrite && <div className="mt-4 flex flex-wrap gap-2"><Button variant="outline" disabled={busy} onClick={() => openEditor({ kind: 'project', id: project.id, original: project })}>Modifier le projet</Button><Button variant="outline" disabled={busy} onClick={() => openArchive({ kind: 'project', row: project })}>{project.archived_at ? 'Restaurer le projet' : 'Archiver le projet'}</Button></div>}
                 </Surface>
+                {isPrivateProjectsEnabled() && <div>
+                    <Button variant="outline" disabled={accessBlocked || busy || !!editor || !!archive} onClick={() => setSynapseOpen(true)}>Accès Synapse</Button>
+                    {synapseOpen && <PrivateProjectAccess ownerId={userId} accessToken={accessToken} workspaceId={workspaceId} projectId={project.id} projectName={project.name}
+                        accessChecking={accessChecking} accessError={accessError} onRecheck={onRecheck} onClose={() => setSynapseOpen(false)} />}
+                </div>}
                 <div className="flex flex-wrap items-center justify-between gap-3"><h3 className="font-semibold">Tâches</h3>{canWriteTasks && <Button disabled={busy} onClick={() => openEditor({ kind: 'task', id: crypto.randomUUID() })}><Plus size={16} aria-hidden="true" />Nouvelle tâche</Button>}</div>
                 {project.archived_at && <p className="text-sm text-[var(--fg-3)]">Restaurez le projet pour modifier ses tâches.</p>}
                 {!tasks.length ? <p className="text-sm text-[var(--fg-3)]">{loaded.tasks.length ? 'Aucune tâche active. Affichez les éléments archivés.' : 'Aucune tâche pour le moment.'}</p> : <ul className="space-y-3">{tasks.map(task => <li key={task.id}><Surface className="p-4"><div className="flex flex-wrap items-start gap-2"><h4 className="min-w-0 flex-1 break-words font-medium">{task.title}</h4><Pill>{statusLabels[task.status]}</Pill>{task.archived_at && <Pill>Archivée</Pill>}</div>
