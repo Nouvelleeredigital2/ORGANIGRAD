@@ -22,6 +22,9 @@ const SCOPES_FOR_ROLE: Record<string, readonly Permission[]> = {
         'human:reject',
         'node:reset',
         'workspace:admin',
+        'bots:read',
+        'bots:write',
+        'bots:export',
     ],
     admin: [
         'graph:read',
@@ -33,6 +36,9 @@ const SCOPES_FOR_ROLE: Record<string, readonly Permission[]> = {
         'human:reject',
         'node:reset',
         'workspace:admin',
+        'bots:read',
+        'bots:write',
+        'bots:export',
     ],
     member: [
         'graph:read',
@@ -43,8 +49,11 @@ const SCOPES_FOR_ROLE: Record<string, readonly Permission[]> = {
         'human:approve',
         'human:reject',
         'node:reset',
+        'bots:read',
+        'bots:write',
+        'bots:export',
     ],
-    viewer: ['graph:read', 'node:read', 'execution:read'],
+    viewer: ['graph:read', 'node:read', 'execution:read', 'bots:read'],
 };
 
 describe('permissions', () => {

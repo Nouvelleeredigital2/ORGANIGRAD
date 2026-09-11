@@ -94,6 +94,14 @@ describe.runIf(Boolean(TEST_DB_URL))('RPC workspace — sécurité multi-tenant'
     let wsA = '';
     let wsB = '';
 
+    it('scoped bot export key rejects non-members and non-admin members', async () => {
+        for (const uid of [ownerB, memberA, viewerA]) {
+            await expect(enTantQue(uid, async (tx) => {
+                await tx`select * from public.create_scoped_workspace_api_key(${wsA}::uuid, 'forbidden-export', array['bots:export'])`;
+            })).rejects.toThrow(/forbidden/);
+        }
+    });
+
     /** Exécute `fn` en endossant `uid`, dans une transaction isolée. */
     async function enTantQue<T>(uid: string, fn: (tx: Sql) => Promise<T>): Promise<T> {
         return sql.begin(async (tx) => {

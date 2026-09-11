@@ -76,6 +76,12 @@ jobs:
           cache: npm
           cache-dependency-path: orchestrator/package-lock.json
       - run: npm ci
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Conversion et installation des personas (sans réseau)
+        working-directory: .
+        run: python -B -m unittest discover -s scripts/bots -p 'test_*.py'
       - run: npm run typecheck
       - run: npm run test
       - run: npm run build

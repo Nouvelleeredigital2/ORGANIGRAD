@@ -32,6 +32,8 @@ export function ApiKeysView() {
     const [keys, setKeys] = useState<ApiKeyRow[]>([]);
     const [loading, setLoading] = useState(false);
     const [newKeyName, setNewKeyName] = useState('');
+    /** Scope technique additionnel pour le synchroniseur de bots vers Hermès. */
+    const [withBotsExport, setWithBotsExport] = useState(false);
     const [creating, setCreating] = useState(false);
     const [revealedKey, setRevealedKey] = useState<{ raw: string; name: string } | null>(null);
     const [error, setError] = useState<string | null>(null);
@@ -102,10 +104,20 @@ export function ApiKeysView() {
         ) return;
         setCreating(true);
         setError(null);
-        const { data, error: err } = await supabase.rpc('create_workspace_api_key', {
-            p_workspace_id: activeId,
-            p_name: newKeyName.trim(),
-        });
+        // Une clé de synchronisation Hermès porte en plus `bots:export` : seule
+        // façon d'appeler GET /api/bots/bundle depuis un service technique (le
+        // scope n'est jamais dans les scopes par défaut d'une clé — l'admin
+        // l'accorde explicitement ici).
+        const { data, error: err } = withBotsExport
+            ? await supabase.rpc('create_scoped_workspace_api_key', {
+                  p_workspace_id: activeId,
+                  p_name: newKeyName.trim(),
+                  p_scopes: ['graph:read', 'node:read', 'execution:read', 'bots:export'],
+              })
+            : await supabase.rpc('create_workspace_api_key', {
+                  p_workspace_id: activeId,
+                  p_name: newKeyName.trim(),
+              });
         setCreating(false);
         if (err) {
             setError(describeWorkspaceRpcError(err.message));
@@ -123,6 +135,7 @@ export function ApiKeysView() {
             );
         }
         setNewKeyName('');
+        setWithBotsExport(false);
         await refresh();
     };
 
@@ -233,21 +246,38 @@ export function ApiKeysView() {
 
                 {isAdmin && (
                     <Surface className="p-6">
-                        <form onSubmit={handleCreate} className="flex flex-col gap-3 sm:flex-row sm:items-end">
-                            <div className="flex-1">
-                                <FormField label="Nom de la clé">
-                                    <Input
-                                        value={newKeyName}
-                                        onChange={(e) => setNewKeyName(e.target.value)}
-                                        placeholder="Production agent · Rédacteur"
-                                        required
-                                    />
-                                </FormField>
+                        <form onSubmit={handleCreate} className="flex flex-col gap-3">
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                                <div className="flex-1">
+                                    <FormField label="Nom de la clé">
+                                        <Input
+                                            value={newKeyName}
+                                            onChange={(e) => setNewKeyName(e.target.value)}
+                                            placeholder="Production agent · Rédacteur"
+                                            required
+                                        />
+                                    </FormField>
+                                </div>
+                                <Button tone="blue" type="submit" disabled={creating || !newKeyName.trim()}>
+                                    <KeyIcon size={13} strokeWidth={1.6} />
+                                    Créer la clé
+                                </Button>
                             </div>
-                            <Button tone="blue" type="submit" disabled={creating || !newKeyName.trim()}>
-                                <KeyIcon size={13} strokeWidth={1.6} />
-                                Créer la clé
-                            </Button>
+                            <label className="flex items-start gap-2 text-[12px]" style={{ color: 'var(--fg-3)' }}>
+                                <input
+                                    type="checkbox"
+                                    checked={withBotsExport}
+                                    onChange={(e) => setWithBotsExport(e.target.checked)}
+                                    className="mt-0.5"
+                                />
+                                <span>
+                                    Clé de synchronisation Hermès — ajoute le scope{' '}
+                                    <code className="font-mono">bots:export</code> pour lire{' '}
+                                    <code className="font-mono">GET /api/bots/bundle</code> (prompts compilés
+                                    des bots, à installer sur le VPS). Aucun scope humain n'est jamais accordé
+                                    à une clé technique.
+                                </span>
+                            </label>
                         </form>
                     </Surface>
                 )}

@@ -16,7 +16,7 @@ import { usePermissions } from '../auth/usePermissions';
 import { useFeedback } from '../feedback/FeedbackContext';
 import { messageErreurUtilisateur } from '../utils/asyncGuard';
 
-export type AppView = 'orgchart' | 'dashboard' | 'orchestration' | 'projects' | 'members' | 'api-keys' | 'settings';
+export type AppView = 'orgchart' | 'dashboard' | 'orchestration' | 'bots' | 'projects' | 'members' | 'api-keys' | 'settings';
 
 export interface SelectedPoleState {
     key: string;

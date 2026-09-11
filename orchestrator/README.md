@@ -31,6 +31,39 @@ orchestrator/
 | `POST` | `/api/nodes/:id/reset` | 200, 404, 409 |
 | `GET`  | `/api/events` | 200 (text/event-stream) |
 
+> La table ci-dessus couvre le serveur de développement (`routes.ts`, in-memory).
+> Le serveur de production (`pgServer.ts`) expose en plus `/api/nodes` (CRUD),
+> `/api/integrations/link/import`, les routes `/api/projects/*` et les routes
+> `/api/bots*` ci-dessous.
+
+## Bots conversationnels (personas Hermès)
+
+Un bot est une fiche structurée (`bot_profiles`) — mission, méthode, limites,
+sources, modèle — dont le prompt système est **compilé côté serveur**
+(`src/domain/botProfile.ts`), jamais accepté tel quel depuis le client. Créable
+et paramétrable visuellement dans la vue *Bots* de la SPA.
+
+| Méthode | Route | Scope | Codes |
+|---|---|---|---|
+| `GET`    | `/api/bots` | `bots:read` | 200 |
+| `GET`    | `/api/bots/:id` | `bots:read` | 200, 404 |
+| `POST`   | `/api/bots` | `bots:write` | 201, 400 |
+| `PUT`    | `/api/bots/:id` | `bots:write` | 200, 400, 404, 409 |
+| `DELETE` | `/api/bots/:id` | `bots:write` | 204 |
+| `POST`   | `/api/bots/:id/link-node` | `bots:write` + `graph:write` | 200 |
+| `GET`    | `/api/bots/bundle` | `bots:export` | 200 |
+
+`link-node` crée/actualise le nœud `AGENT_IA` jumeau (même id) dans
+`hybrid_nodes`, pour que le bot apparaisse dans la vue Orchestration — sans
+copier son prompt dans le nœud (B3 : une seule source de vérité).
+
+`bundle` sert le paquet de synchronisation Hermès — un fichier par bot activé,
+avec son empreinte SHA-256 — dans le même format que produisait historiquement
+`hermes-veille/deployment/prepare_profiles.py`. Une clé technique dédiée porte
+ce scope (RPC `create_scoped_workspace_api_key`, jamais dans les scopes par
+défaut d'une clé) ; l'installation effective sur le VPS reste un geste humain
+distinct, non automatisé par cette route.
+
 ## Transport MCP (JSON-RPC 2.0)
 
 Route unique `POST /mcp` — Streamable HTTP. Auth identique aux routes `/api/*`
