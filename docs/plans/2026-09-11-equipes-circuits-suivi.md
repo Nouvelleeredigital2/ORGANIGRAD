@@ -127,6 +127,21 @@ contrôlés sont inchangés depuis la base. Ne pas annoncer une CI globale verte
 
 ## Critères de clôture (inchangés)
 
+### Avancée rattachement — 11 septembre
+
+Synapse PR #39 ajoute le rattachement explicite vérifié depuis OrganiGrad dans
+la vue Scopes et des autorisations de service temporaires/révocables limitées
+au transport de références. Contrats PR #10 : teams.2, consommé par Synapse ;
+OrganiGrad et LINK restent teams.1. Connexions personnelles non réutilisées
+pour les tâches programmées. Historique, isolation et révocation protégés.
+
+Développé et testé localement : contrats 204, Synapse backend 1852 et frontend
+618 tests ; nouveau cas d'expiration testé rouge/vert et 29 tests ciblés après
+correction. Build passant, SQL testé dans PGlite. Aucun déploiement ni migration
+distante. Détails : Synapse docs/PROJECT-REFERENCE-BINDINGS.md.
+Restent consommateurs LINK/Orvion, exécution des étapes, décisions à deux canaux,
+appels natifs Orvion/Engine et recette réelle du projet pilote.
+
 Créer un nouveau bot et retrouver son identité dans LINK ; isoler deux projets ;
 programmer une veille sans doublon ; décider depuis les deux canaux ; conserver
 les versions dans Orvion ; produire une image Engine ; corriger puis valider le
