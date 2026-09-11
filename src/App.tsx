@@ -28,6 +28,7 @@ const OrchestrationView = lazy(() =>
 const BotsView = lazy(() =>
     import('./components/views/BotsView').then((m) => ({ default: m.BotsView })),
 );
+const CircuitsView = lazy(() => import('./components/views/CircuitsView').then(m=>({default:m.CircuitsView})));
 const ProjectsView = lazy(() =>
     import('./components/views/ProjectsView').then((m) => ({ default: m.ProjectsView })),
 );
@@ -371,6 +372,8 @@ function AppContent() {
                             <OrchestrationView rawAgents={rawAgents || []} />
                         ) : activeView === 'bots' ? (
                             <BotsView />
+                        ) : activeView === 'circuits' ? (
+                            <CircuitsView />
                         ) : activeView === 'projects' && isProjectsEnabled() ? (
                             <ProjectsView />
                         ) : activeView === 'members' ? (

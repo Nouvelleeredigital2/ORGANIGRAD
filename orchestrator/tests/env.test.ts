@@ -2,6 +2,10 @@ import { describe, it, expect } from 'vitest';
 import { loadEnv, EnvValidationError } from '../src/config/env.js';
 
 describe('loadEnv (validation des variables d\'environnement)', () => {
+    it('circuits : désactivés par défaut, activation exige les projets authentifiés', () => {
+        expect(loadEnv({ORCHESTRATOR_ALLOW_MEMORY:'1'}).circuitsEnabled).toBe(false);
+        expect(()=>loadEnv({ORCHESTRATOR_ALLOW_MEMORY:'1',CIRCUITS_ENABLED:'true'})).toThrow(/CIRCUITS_ENABLED/);
+    });
     it('mode memory sans SUPABASE_DB_URL — uniquement sur opt-in explicite', () => {
         const env = loadEnv({ ORCHESTRATOR_ALLOW_MEMORY: '1' });
         expect(env.mode).toBe('memory');

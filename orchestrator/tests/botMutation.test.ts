@@ -13,11 +13,17 @@ const VALID = {
 };
 
 describe('validateBotMutation — validation du corps de mutation de bot', () => {
+    it('validates HTTPS portraits without fetching the URL', () => {
+        expect(validateBotMutation({ ...VALID, avatarUrl: 'https://images.example.org/a.png' })).toMatchObject({ avatarUrl: 'https://images.example.org/a.png' });
+        for (const avatarUrl of ['javascript:alert(1)', 'data:image/png;base64,AA', 'http://example.org/a.png', 'https://user:secret@example.org/a.png', 'https://', 42]) {
+            expect(() => validateBotMutation({ ...VALID, avatarUrl })).toThrow(BotValidationError);
+        }
+    });
     it('accepte un corps minimal valide et pose les défauts', () => {
         const result = validateBotMutation(VALID);
         expect(result.id).toBe(VALID.id);
         expect(result.runtimeId).toBe('anita.instagram.bot');
-        expect(result.enabled).toBe(true);
+        expect(result.enabled).toBeUndefined();
         expect(result.sources).toEqual([]);
         expect(result.brand).toBeNull();
     });
@@ -98,6 +104,15 @@ function fullProfile(overrides: Partial<BotProfile> = {}): BotProfile {
 }
 
 describe('compileBotPrompt — compilation déterministe', () => {
+    it('uses configured actors rather than a hardcoded approver or mandatory channel', () => {
+        const prompt = compileBotPrompt(fullProfile());
+        expect(prompt).not.toContain('Laurent choisit');
+        expect(prompt).not.toContain('jamais dans cette conversation');
+        expect(prompt).toContain('LINK, Telegram ou OrganiGrad');
+        expect(prompt).toContain('validation finale est humaine par defaut');
+        expect(prompt).toContain('confirmation reelle');
+        expect(prompt).toContain('pret a publier');
+    });
     it('est pure : mêmes champs, même texte, même empreinte', () => {
         const a = compileBotPrompt(fullProfile());
         const b = compileBotPrompt(fullProfile());

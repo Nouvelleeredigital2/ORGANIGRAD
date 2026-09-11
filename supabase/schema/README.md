@@ -81,3 +81,29 @@ qualifier séparément avant toute activation. Aucun déploiement n'est autoris�
 fonctions de rôles, `touch_updated_at`, les clés API et Auth déjà provisionnés.
 Il ne remplace pas le miroir historique ; aucune migration ancienne ne doit
 être rejouée. Ce report local n'atteste aucune application en production.
+
+`baseline_bot_portraits_2026-09-11.sql` reporte exactement la migration additive
+`20260911143000_bot_portraits.sql`, après le complément des bots. Le portrait
+est une URL HTTPS facultative ; ce report ne signifie pas que la migration est
+déployée. Les identifiants et prompts existants restent inchangés.
+
+`baseline_bot_draft_activation_2026-09-11.sql` reporte la migration additive
+`20260911162000_bot_draft_activation.sql`. Elle conserve les bots déjà activés,
+crée les nouvelles fiches en brouillon et interdit leur activation sans futur
+flux de vérification réel. Aucun contournement d'activation n'est prévu pour
+les imports ; les identifiants historiques sont conservés. Ce report reste local.
+
+`baseline_circuit_attempts_2026-09-11.sql` reporte exactement
+`20260911165000_circuit_attempts.sql`. Ce protocole interne conserve uniquement
+les empreintes des requêtes, les réservations, les jetons de fencing et les
+reçus de tâches Engine. Il ne confère aucune autorisation d'exécution d'étape,
+ne contacte pas Engine et n'avance pas les circuits. Aucun accès navigateur
+ou REST n'est accordé ; le raccordement et la qualification restent à faire.
+
+`baseline_circuits_2026-09-11.sql` et `baseline_circuit_schedules_2026-09-11.sql`
+reportent les migrations locales `20260911150000_circuits.sql` et
+`20260911160000_circuit_schedules.sql`. Ordre : projets → circuits → horaires.
+Les tables sont fermées aux rôles navigateur. L'API circuits exige une session
+humaine ; le planificateur préparé exige un grant de service dédié au projet.
+Aucun worker n'est branché au démarrage et aucun circuit n'est activé par cette
+préparation. Les miroirs ne constituent pas une preuve d'application distante.

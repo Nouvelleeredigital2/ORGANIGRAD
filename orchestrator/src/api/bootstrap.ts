@@ -38,6 +38,7 @@ export async function startOrchestrator() {
         const app = buildPgServer({
             sql,
             projectsEnabled: env.projectsEnabled,
+            circuitsEnabled: env.circuitsEnabled,
             privateProjectsEnabled: env.privateProjectsEnabled,
             privateProjectsIssuer: env.privateProjectsIssuer,
             privateProjectsVerifyUserToken: env.privateProjectsEnabled ? createSupabaseJwtVerifier({

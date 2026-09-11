@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { emptyBotProfile, validateBotProfile } from './botProfile';
 
 describe('validateBotProfile', () => {
+    it('creates a draft requiring activation verification', () => {
+        expect(emptyBotProfile('00000000-0000-4000-8000-000000000001').enabled).toBe(false);
+    });
     const valid = () => ({
         ...emptyBotProfile('00000000-0000-4000-8000-000000000001', 'redacteur'),
         runtimeId: 'anita.instagram.bot',
@@ -13,6 +16,13 @@ describe('validateBotProfile', () => {
 
     it('accepte une fiche minimale valide', () => {
         expect(validateBotProfile(valid())).toEqual([]);
+    });
+
+    it('accepts an optional HTTPS portrait and rejects executable, insecure or credentialed URLs', () => {
+        expect(validateBotProfile({ ...valid(), avatarUrl: 'https://images.example.org/hannah.png' })).toEqual([]);
+        for (const avatarUrl of ['javascript:alert(1)', 'data:image/png;base64,AA', 'http://example.org/a.png', 'https://user:secret@example.org/a.png', 'https://', 'https://example.org/' + 'x'.repeat(2048)]) {
+            expect(validateBotProfile({ ...valid(), avatarUrl })).not.toHaveLength(0);
+        }
     });
 
     it('exige un nom affiché', () => {

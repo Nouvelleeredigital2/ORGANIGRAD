@@ -10,6 +10,7 @@ import { NodeNotFoundError, OptimisticConcurrencyError } from '../state/pgGraphS
 import { PgBotStore, BotNotFoundError, BotOptimisticConcurrencyError, BotValidationError, validateBotMutation } from '../state/pgBotStore.js';
 import { buildAuthHook } from './auth.js';
 import { isProjectReadRoute, registerProjectRoutes } from './projectRoutes.js';
+import { registerCircuitRoutes } from './circuitRoutes.js';
 import { isPrivateProjectPath, isPrivateProjectRoute, registerPrivateProjectRoutes } from './privateProjectRoutes.js';
 import { verifySupabaseJwt } from './userAuth.js';
 import type { UserTokenVerifier } from './userAuth.js';
@@ -47,6 +48,8 @@ export interface PgServerDeps {
     sql: Sql;
     /** Product project reads are opt-in; bootstrap owns deployment activation. */
     projectsEnabled?: boolean;
+    /** Circuit APIs stay absent until the additive SQL and project bindings are qualified. */
+    circuitsEnabled?: boolean;
     /** Independent opt-in; no legacy authentication or graph authority is delegated. */
     privateProjectsEnabled?: boolean;
     privateProjectsIssuer?: string;
@@ -206,6 +209,7 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
     });
 
     if (deps.projectsEnabled === true) registerProjectRoutes(app, deps);
+    if (deps.circuitsEnabled === true) registerCircuitRoutes(app, { ...deps, appUrl: deps.notifierOptions?.appUrl });
     if (deps.privateProjectsEnabled === true) registerPrivateProjectRoutes(app, {
         sql: deps.sql,
         issuer: deps.privateProjectsIssuer ?? '',
@@ -554,10 +558,11 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
     app.post<{ Body: unknown }>('/api/bots', async (req, reply) => {
         try {
             assertScope(req.scopes, SCOPES.botsWrite);
+            assertScope(req.scopes, SCOPES.graphWrite);
             const body = validateBotMutation(req.body);
             if (body.updated_at) throw new BotValidationError('updated_at', 'Une création ne prend pas de version ; utilisez PUT pour modifier.');
             const store = new PgBotStore(deps.sql, req.workspaceId!);
-            const bot = await store.upsert(body);
+            const bot = await store.createWithNode(body);
             recordAudit(req, 'bots:create', bot.id, 'success');
             return reply.code(201).send({ bot });
         } catch (err) {
@@ -570,10 +575,11 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
     app.put<{ Params: { id: string }; Body: unknown }>('/api/bots/:id', async (req, reply) => {
         try {
             assertScope(req.scopes, SCOPES.botsWrite);
+            assertScope(req.scopes, SCOPES.graphWrite);
             const body = validateBotMutation({ ...(req.body as object), id: req.params.id });
             if (!body.updated_at) throw new BotValidationError('updated_at', 'La version chargée est requise pour modifier un bot.');
             const store = new PgBotStore(deps.sql, req.workspaceId!);
-            const bot = await store.upsert(body);
+            const bot = await store.updateWithNode(body);
             recordAudit(req, 'bots:update', bot.id, 'success');
             return { bot };
         } catch (err) {

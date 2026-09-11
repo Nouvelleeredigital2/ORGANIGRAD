@@ -13,6 +13,7 @@ import { validPrivateIssuer, validPrivateOrigin } from '../api/privateProjectRou
 export interface OrchestratorEnv {
     mode: OrchestratorMode;
     projectsEnabled: boolean;
+    circuitsEnabled: boolean;
     privateProjectsEnabled: boolean;
     privateProjectsIssuer?: string;
     port: number;
@@ -147,6 +148,11 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): OrchestratorEn
         }
     }
 
+    const circuitsRaw=source.CIRCUITS_ENABLED?.trim() || 'false';
+    const circuitsEnabled=circuitsRaw==='true';
+    if(!['true','false'].includes(circuitsRaw))issues.push('CIRCUITS_ENABLED doit valoir true ou false');
+    if(circuitsEnabled && (!projectsEnabled || mode!=='pg' || !source.APP_URL?.startsWith('https://')))issues.push('CIRCUITS_ENABLED exige les projets authentifiés, Postgres et APP_URL HTTPS');
+
     if (issues.length > 0) {
         throw new EnvValidationError(issues);
     }
@@ -154,6 +160,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): OrchestratorEn
     return {
         mode,
         projectsEnabled,
+        circuitsEnabled,
         privateProjectsEnabled,
         privateProjectsIssuer,
         port,
