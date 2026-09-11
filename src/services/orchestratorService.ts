@@ -13,7 +13,7 @@
 
 import type { HybridNode, NodeStatus, McpConfig, NotificationChannels } from '../types/hybridNode';
 import type { BotProfile } from '../types/botProfile';
-import type { CircuitDecision, CircuitDefinition } from '@apps2026/contracts';
+import { CircuitScheduleSchema, type CircuitDecision, type CircuitDefinition, type CircuitSchedule } from '@apps2026/contracts';
 import type { CircuitOptions, CircuitRun, StoredCircuit } from '../types/circuit';
 
 /**
@@ -304,6 +304,11 @@ export class OrchestratorClient {
         return (await this.circuitRequest<{circuits:StoredCircuit[]}>('/circuits')).circuits;
     }
     async fetchCircuitOptions():Promise<CircuitOptions> { return this.circuitRequest('/circuits/options'); }
+    async previewCircuitSchedule(schedule:CircuitSchedule):Promise<string[]> {
+        const result=await this.circuitRequest<{occurrences:unknown}>('/circuits/preview-schedule',CircuitScheduleSchema.parse(schedule),'POST');
+        if(!Array.isArray(result.occurrences)||!result.occurrences.length||result.occurrences.length>10||result.occurrences.some(value=>typeof value!=='string'||!/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(value)||!Number.isFinite(Date.parse(value))))throw new Error('SCHEDULE_PREVIEW_INVALID');
+        return result.occurrences;
+    }
     async fetchCircuitRuns():Promise<CircuitRun[]> { return (await this.circuitRequest<{runs:CircuitRun[]}>('/circuit-runs')).runs; }
     async decideCircuitRun(id:string,decision:CircuitDecision):Promise<CircuitRun> {
         return (await this.circuitRequest<{run:CircuitRun}>(`/circuit-runs/${encodeURIComponent(id)}/decisions`,decision,'POST')).run;

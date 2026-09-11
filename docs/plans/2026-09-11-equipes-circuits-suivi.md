@@ -56,6 +56,10 @@ défaut, exception bot explicite par administrateur. Projet partagé obligatoire
 - Planificateur SQL préparé : curseur verrouillé, occurrence unique, grant
   projet révocable, retard enregistré sans rattrapage automatique. Non branché
   dans bootstrap ; interface d'autorisation et activation encore à construire.
+- Aperçu des prochaines dates raccordé à l'API dans l'éditeur, en français et
+  dans le fuseau choisi. Modification de l'horaire : ancien aperçu immédiatement
+  retiré, réponses tardives ignorées. Dix tests ciblés, typecheck et lint ciblé
+  passants après cette dernière modification ; revue indépendante sans défaut.
 - Orvion worktree : API `/api/editorial/boards/:boardId`, binding immuable,
   dossiers idempotents et versions append-only, vue de lecture. 10 tests
   SQL/HTTP après corrections de revue. Authentification humaine seulement.
@@ -73,7 +77,7 @@ défaut, exception bot explicite par administrateur. Projet partagé obligatoire
 |---|---|---|
 | Contrats | 201 tests, typecheck, build | Paquet pilote vendored |
 | OrganiGrad | 451 tests interface ; 595 backend, 63 ignorés ; 20 Python | Aucun parcours distant |
-| LINK | 890 tests, 18 ignorés ; 102 tests de compatibilité après mise à jour du contrat ; 5 tests de route après ajout du contrôle Origin | Un premier passage concurrent avait deux timeouts, absents à la relance avec deux workers |
+| LINK | Dernier contrôle pre-push : 891 tests, 18 ignorés ; 84 E2E ; typecheck, lint et build passants | Banc local isolé, aucun échange Telegram réel |
 | Orvion | 241 tests backend ; 10 tests SQL/HTTP éditoriaux et test UI ciblé | Deux échecs client préexistants de mocks boardsService ; lint global préexistant en échec |
 | Synapse | 449 tests backend et 334 frontend, typechecks | Fonctionnalités non activées à distance |
 
@@ -95,14 +99,31 @@ pas une recette interapplications.
 4. Exécuteur de production LLM, contrôles qualité et rattachement Engine.
 5. Commandes LINK/Telegram, identités vérifiées, groupes privés, décisions
    simultanées et reçus réseau perdus. Ne pas envoyer un JWT LINK à OrganiGrad.
-6. Worker unique activé, rattrapage explicite des horaires manqués, aperçu des
-   prochaines occurrences dans l'interface ; concurrence sur PostgreSQL connecté.
+6. Worker unique activé, rattrapage explicite des horaires manqués et tests de
+   concurrence des nouveaux modules sur PostgreSQL connecté.
 7. Qualification des accès, migrations manquantes uniquement, déploiements,
    recette réelle et bascule des 14 historiques sans doubles programmations.
 
 Le refus Supabase OrganiGrad bloque les opérations distantes concernées.
 L'implémentation locale reste possible. Aucun de ces sous-lots n'est une
 livraison de bout en bout ; les 14 bots ne sont pas notés 10/10 par ces tests.
+
+## PR et intégration
+
+- Contrats : https://github.com/Nouvelleeredigital2/apps2026-contracts/pull/10
+- OrganiGrad : https://github.com/Nouvelleeredigital2/ORGANIGRAD/pull/25
+- LINK : https://github.com/Nouvelleeredigital2/LINK/pull/48
+- Orvion : https://github.com/Nouvelleeredigital2/ATELIER_ORVION/pull/99
+- Synapse : https://github.com/Nouvelleeredigital2/NED-AI-SYNAPSE/pull/39
+  (empilée sur review/dossiers-base-20260911, snapshot 68e7d07 non intégré à main).
+
+Toutes sont en brouillon. Aucun déploiement. CI OrganiGrad au commit 86cc02d :
+orchestrateur, frontend, E2E Chromium, sécurité SQL PostgreSQL et hygiène dépôt
+passants ; E2E Supabase connectée non exécutée (déclenchement manuel).
+CI Orvion 34608307212 : lint serveur (12 erreurs, 1013 avertissements), lint
+client (18 erreurs, 19 avertissements), installation shared bloquée par absence
+de lockfile. Aucune erreur éditoriale citée ; les fichiers et workflow concernés
+contrôlés sont inchangés depuis la base. Ne pas annoncer une CI globale verte.
 
 ## Critères de clôture (inchangés)
 

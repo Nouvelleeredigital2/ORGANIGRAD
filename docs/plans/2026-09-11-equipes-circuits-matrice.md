@@ -52,3 +52,28 @@ personnelles en lecture seule ne deviennent pas des autorisations de service.
 Cette matrice ne clôture pas le lot 0 : les divergences entre sources pilotes,
 contrats et services doivent encore être rapprochées par une qualification
 connectée. Elle donne la base locale et les inconnues explicites pour le faire.
+
+## Consolidation postérieure au relevé initial
+
+Le contrat `1.6.0-teams.1` réunit désormais `pilot.6` (circuits) et le chantier
+`dossiers.1` (ScopeContext). 201 tests passent. Les nouveaux worktrees OrganiGrad,
+LINK et Synapse consomment exactement ce tarball ; les autres sessions ne sont
+pas modifiées. PR contrats #10, commit de consolidation 1ea2d96.
+Empreinte SHA-256 vérifiée identique dans les quatre copies vendored (frontend
+et backend OrganiGrad, LINK, Synapse) :
+`ba54b8814eb19d0e627266100ea2bcc1de00839054807258b26c36d90523e1db`.
+
+Synapse : nouveau worktree `.worktrees/equipes-circuits-20260911` sur 68e7d07,
+correctif 6377dbd. La branche distante `review/dossiers-base-20260911` conserve
+ce snapshot pour la PR empilée #39. Cette création de branche ne fusionne pas
+le pilote dans main et ne déploie aucun service.
+
+Les 14 fiches sources conservent 14 UUID et 14 runtimeId distincts : cinq
+veilleurs, sept rédacteurs, un designer et un gardien. `profiles.json` est
+inchangé ; seule la compilation de relecture a été régénérée avec les règles
+de canal et validation mises à jour. Ce comptage n'est pas une évaluation LLM.
+
+Nouvelle lecture Supabase après ouverture des PR : `get_project_url` pour
+`xucmfdggetwxmpquqjvj` renvoie encore « You do not have permission to perform
+this action ». Aucune référence retournée, aucune mutation distante autorisée
+par cette tentative. Restauration des droits du compte connecté demandée.
