@@ -16,7 +16,7 @@ vi.mock('../../hooks/useOrchestratorBridge', () => ({
 }));
 
 const permissionsMock = vi.hoisted(() => ({
-    can: vi.fn(() => true),
+    can: vi.fn((permission: string) => Boolean(permission)),
     role: null as WorkspaceRole | null,
     isLocalMode: true,
     isAdmin: true,
@@ -54,6 +54,7 @@ describe('BotsView', () => {
     beforeEach(() => {
         bridgeMock.connectionState = 'local';
         bridgeMock.client = null;
+        permissionsMock.can.mockImplementation(() => true);
     });
 
     it("invite à configurer l'orchestrateur quand aucun n'est connecté", () => {
@@ -75,5 +76,14 @@ describe('BotsView', () => {
         render(<BotsView />);
         await waitFor(() => expect(screen.getByText(/Aucun bot pour ce workspace/i)).toBeInTheDocument());
         expect(screen.getByRole('button', { name: /Créer le premier bot/i })).toBeInTheDocument();
+    });
+
+    it('allows member editing but hides admin-only deletion', async () => {
+        bridgeMock.connectionState = 'connected';
+        bridgeMock.client = { fetchBots: vi.fn(async () => [BOT]) };
+        permissionsMock.can.mockImplementation((permission) => permission !== 'workspace:admin');
+        render(<BotsView />);
+        await waitFor(() => expect(screen.getByRole('button', { name: 'Éditer Anita' })).toBeInTheDocument());
+        expect(screen.queryByRole('button', { name: 'Supprimer Anita' })).not.toBeInTheDocument();
     });
 });

@@ -168,7 +168,7 @@ export class PgBotStore {
     ) {}
 
     private rowToProfile(r: DbRow): BotProfile {
-        return {
+        const profile: BotProfile = {
             id: r.id,
             updated_at: r.updated_at_text ?? r.updated_at,
             runtimeId: r.runtime_id,
@@ -192,6 +192,11 @@ export class PgBotStore {
             compiledPrompt: r.compiled_prompt,
             compiledSha256: r.compiled_sha256,
         };
+        // RLS allows members to edit structured fields directly. Stored derived
+        // columns are only a cache, never an authority for API reads or exports.
+        profile.compiledPrompt = compileBotPrompt(profile);
+        profile.compiledSha256 = sha256Hex(profile.compiledPrompt);
+        return profile;
     }
 
     async list(): Promise<BotProfile[]> {
@@ -247,9 +252,25 @@ export class PgBotStore {
         const compiledPrompt = compileBotPrompt(draft);
         const compiledSha256 = sha256Hex(compiledPrompt);
 
-        const versionPredicate = input.updated_at
-            ? this.sql`and public.bot_profiles.updated_at::text = ${input.updated_at}`
-            : this.sql``;
+        if (input.updated_at) {
+            const rows = await this.sql<DbRow[]>`
+                update public.bot_profiles set
+                    runtime_id = ${draft.runtimeId}, file_name = ${draft.fileName},
+                    display_name = ${draft.displayName}, family = ${draft.family},
+                    brand = ${draft.brand}, network = ${draft.network}, telegram_username = ${draft.telegramUsername},
+                    mission = ${draft.mission}, personality = ${draft.personality}, research = ${draft.research},
+                    watch = ${draft.watch}, deliverables = ${draft.deliverables}, method = ${draft.method},
+                    limits = ${draft.limits}, useful_context = ${draft.usefulContext},
+                    sources = ${this.sql.json(draft.sources as unknown as JsonValue)},
+                    model = ${this.sql.json(draft.model as unknown as JsonValue)}, enabled = ${draft.enabled},
+                    compiled_prompt = ${compiledPrompt}, compiled_sha256 = ${compiledSha256}
+                where id = ${draft.id} and workspace_id = ${this.workspaceId}
+                    and updated_at::text = ${input.updated_at}
+                returning *, updated_at::text as updated_at_text
+            `;
+            if (!rows[0]) throw new BotOptimisticConcurrencyError(input.id, input.updated_at);
+            return this.rowToProfile(rows[0]);
+        }
 
         const rows = await this.sql<DbRow[]>`
             insert into public.bot_profiles
@@ -263,34 +284,12 @@ export class PgBotStore {
                  ${draft.deliverables}, ${draft.method}, ${draft.limits}, ${draft.usefulContext},
                  ${this.sql.json(draft.sources as unknown as JsonValue)}, ${this.sql.json(draft.model as unknown as JsonValue)}, ${draft.enabled},
                  ${compiledPrompt}, ${compiledSha256})
-            on conflict (id) do update set
-                runtime_id         = excluded.runtime_id,
-                file_name          = excluded.file_name,
-                display_name       = excluded.display_name,
-                family             = excluded.family,
-                brand              = excluded.brand,
-                network            = excluded.network,
-                telegram_username  = excluded.telegram_username,
-                mission            = excluded.mission,
-                personality        = excluded.personality,
-                research           = excluded.research,
-                watch              = excluded.watch,
-                deliverables       = excluded.deliverables,
-                method             = excluded.method,
-                limits             = excluded.limits,
-                useful_context     = excluded.useful_context,
-                sources            = excluded.sources,
-                model              = excluded.model,
-                enabled            = excluded.enabled,
-                compiled_prompt    = excluded.compiled_prompt,
-                compiled_sha256    = excluded.compiled_sha256
-            where public.bot_profiles.workspace_id = ${this.workspaceId}${versionPredicate}
+            on conflict (id) do nothing
             returning *, updated_at::text as updated_at_text
         `;
         const row = rows[0];
         if (!row) {
-            if (input.updated_at) throw new BotOptimisticConcurrencyError(input.id, input.updated_at);
-            throw new BotNotFoundError(input.id);
+            throw new BotOptimisticConcurrencyError(input.id);
         }
         return this.rowToProfile(row);
     }

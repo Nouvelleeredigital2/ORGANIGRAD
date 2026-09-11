@@ -72,3 +72,12 @@ Le test PGlite `orchestrator/tests/privateProjects.test.ts` vérifie son identit
 avec la migration et la réapplication de celle-ci. Le rôle SQL réellement chargé,
 ses droits de lecture Auth, le schéma Auth et sa politique de session restent à
 qualifier séparément avant toute activation. Aucun déploiement n'est autorisé ici.
+
+## Report local des bots — 11 septembre 2026
+
+`baseline_bot_profiles_2026-09-11.sql` est le complément additif exact de
+`../migrations/20260911120000_bot_profiles.sql`, vérifié par
+`orchestrator/tests/botRpcSecurity.test.ts`. Il suppose les workspaces, les
+fonctions de rôles, `touch_updated_at`, les clés API et Auth déjà provisionnés.
+Il ne remplace pas le miroir historique ; aucune migration ancienne ne doit
+être rejouée. Ce report local n'atteste aucune application en production.

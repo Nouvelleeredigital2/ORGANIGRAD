@@ -8,6 +8,7 @@
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createHmac } from 'node:crypto';
+import { sha256Hex } from '../src/domain/botProfile.js';
 
 const JWT_SECRET = 'jwt-secret-test-bots';
 const FUTURE = Math.floor(Date.now() / 1000) + 3600;
@@ -64,7 +65,7 @@ function makeSql(role: string, opts: { insertRow?: typeof BOT_ROW | null } = {})
         }
         if (q.includes('delete from public.bot_profiles')) return Promise.resolve([]);
         if (q.includes('exists(') || q.includes('exists (')) return Promise.resolve([{ exists: false }]);
-        if (q.includes('insert into public.hybrid_nodes')) {
+        if (q.includes('insert into public.hybrid_nodes') || q.includes('from public.hybrid_nodes')) {
             return Promise.resolve([
                 {
                     id: BOT_ROW.id,
@@ -187,10 +188,30 @@ describe('/api/bots', () => {
         expect(res.json().error).toBe('INSUFFICIENT_SCOPE');
     });
 
-    it('DELETE /api/bots/:id — un member peut supprimer', async () => {
+    it('DELETE /api/bots/:id — un member ne peut pas supprimer', async () => {
         await build('member');
         const res = await inject('DELETE', `/api/bots/${VALID_BODY.id}`, MEMBER_JWT);
+        expect(res.statusCode).toBe(403);
+    });
+
+    it('DELETE /api/bots/:id — un admin peut supprimer', async () => {
+        await build('admin');
+        const res = await inject('DELETE', `/api/bots/${VALID_BODY.id}`, MEMBER_JWT);
         expect(res.statusCode).toBe(204);
+    });
+
+    it('PUT requires the loaded version, POST cannot be used to update', async () => {
+        await build('member');
+        const put = await inject('PUT', `/api/bots/${VALID_BODY.id}`, MEMBER_JWT, VALID_BODY);
+        expect(put.statusCode).toBe(400);
+        const post = await inject('POST', '/api/bots', MEMBER_JWT, { ...VALID_BODY, updated_at: BOT_ROW.updated_at });
+        expect(post.statusCode).toBe(400);
+    });
+
+    it('POST collision returns 409 instead of replacing the existing bot', async () => {
+        await build('member', { insertRow: null });
+        const res = await inject('POST', '/api/bots', MEMBER_JWT, VALID_BODY);
+        expect(res.statusCode).toBe(409);
     });
 
     it('GET /api/bots/bundle — accessible à un member (scope bots:export accordé aux humains)', async () => {
@@ -200,8 +221,11 @@ describe('/api/bots', () => {
         expect(res.json().files).toHaveProperty('anita.instagram.bot.txt');
         expect(res.json().files['anita.instagram.bot.txt']).toMatchObject({
             agent: 'anita.instagram.bot',
-            sha256: 'a'.repeat(64),
         });
+        const file = res.json().files['anita.instagram.bot.txt'];
+        expect(file.content).toContain('Adapter un sujet.');
+        expect(file.content).not.toBe(BOT_ROW.compiled_prompt);
+        expect(file.sha256).toBe(sha256Hex(file.content));
     });
 
     it('POST /api/bots/:id/link-node — crée le nœud AGENT_IA jumeau', async () => {
@@ -209,5 +233,22 @@ describe('/api/bots', () => {
         const res = await inject('POST', `/api/bots/${VALID_BODY.id}/link-node`, MEMBER_JWT);
         expect(res.statusCode).toBe(200);
         expect(res.json().node).toMatchObject({ id: VALID_BODY.id, type: 'AGENT_IA', nom: 'Anita' });
+    });
+
+    it('link-node preserves an existing node, including a concurrent insertion', async () => {
+        const sql = await build('member');
+        const mock = sql as unknown as ReturnType<typeof vi.fn>;
+        const previous = mock.getMockImplementation()! as (strings: TemplateStringsArray) => unknown;
+        mock.mockImplementation((strings: TemplateStringsArray) => {
+            const q = strings.join(' ').toLowerCase();
+            if (q.includes('insert into public.hybrid_nodes')) return Promise.resolve([]);
+            return previous(strings);
+        });
+        const res = await inject('POST', `/api/bots/${VALID_BODY.id}/link-node`, MEMBER_JWT);
+        expect(res.statusCode).toBe(200);
+        expect(res.json().created).toBe(false);
+        const writes = mock.mock.calls.map((c) => c[0].join(' ').toLowerCase()).filter((q) => q.includes('hybrid_nodes'));
+        expect(writes.some((q) => q.includes('on conflict (id) do nothing'))).toBe(true);
+        expect(writes.some((q) => /do update|update public.hybrid_nodes/.test(q))).toBe(false);
     });
 });

@@ -555,6 +555,7 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
         try {
             assertScope(req.scopes, SCOPES.botsWrite);
             const body = validateBotMutation(req.body);
+            if (body.updated_at) throw new BotValidationError('updated_at', 'Une création ne prend pas de version ; utilisez PUT pour modifier.');
             const store = new PgBotStore(deps.sql, req.workspaceId!);
             const bot = await store.upsert(body);
             recordAudit(req, 'bots:create', bot.id, 'success');
@@ -570,6 +571,7 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
         try {
             assertScope(req.scopes, SCOPES.botsWrite);
             const body = validateBotMutation({ ...(req.body as object), id: req.params.id });
+            if (!body.updated_at) throw new BotValidationError('updated_at', 'La version chargée est requise pour modifier un bot.');
             const store = new PgBotStore(deps.sql, req.workspaceId!);
             const bot = await store.upsert(body);
             recordAudit(req, 'bots:update', bot.id, 'success');
@@ -584,6 +586,7 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
     app.delete<{ Params: { id: string } }>('/api/bots/:id', async (req, reply) => {
         try {
             assertScope(req.scopes, SCOPES.botsWrite);
+            assertScope(req.scopes, SCOPES.workspaceAdmin);
             const store = new PgBotStore(deps.sql, req.workspaceId!);
             await store.remove(req.params.id);
             recordAudit(req, 'bots:delete', req.params.id, 'success');
@@ -605,21 +608,22 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
             const botStore = new PgBotStore(deps.sql, req.workspaceId!);
             const bot = await botStore.get(req.params.id);
             const graphStore = storeFor(req.workspaceId!, req.apiKeyId, req.userId);
-            const existing = await graphStore.has(bot.id);
-            const node: HybridNode & { updated_at?: string } = {
-                id: bot.id,
-                type: 'AGENT_IA',
-                nom: bot.displayName,
-                roleTitre: bot.brand ? `${bot.family} · ${bot.brand}` : bot.family,
-                parentID: null,
-                gradeId: 'Agent',
-                skills: [bot.network, bot.family].filter((s): s is string => Boolean(s)),
-                status: 'IDLE',
-            };
-            const saved = await graphStore.upsertNode(node);
-            await deps.sql`update public.hybrid_nodes set external_app = 'organigrad-bots' where id = ${bot.id} and workspace_id = ${req.workspaceId!}`;
+            // Linking an existing node must not erase its hierarchy, runtime
+            // configuration or import ownership. DO NOTHING also protects a
+            // concurrent creation between this request and another editor.
+            const inserted = await deps.sql<{ id: string }[]>`
+                insert into public.hybrid_nodes
+                    (id, workspace_id, type, nom, role_titre, parent_id, grade_id, skills, status, external_app)
+                values (${bot.id}, ${req.workspaceId!}, 'AGENT_IA', ${bot.displayName},
+                    ${bot.brand ? `${bot.family} · ${bot.brand}` : bot.family}, null, 'Agent',
+                    ${deps.sql.array([bot.network, bot.family].filter((s): s is string => Boolean(s)))},
+                    'IDLE', 'organigrad-bots')
+                on conflict (id) do nothing
+                returning id
+            `;
+            const saved = await graphStore.get(bot.id);
             recordAudit(req, 'bots:link_node', bot.id, 'success');
-            return { node: toPublicNodeDTO(saved), created: !existing };
+            return { node: toPublicNodeDTO(saved), created: inserted.length > 0 };
         } catch (err) {
             recordAudit(req, 'bots:link_node', req.params.id, auditResultOf(err));
             return handleError(reply, err);

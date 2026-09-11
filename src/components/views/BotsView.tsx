@@ -27,6 +27,7 @@ export function BotsView() {
     const { can } = usePermissions();
     const feedback = useFeedback();
     const peutEcrire = can('bots:write');
+    const peutSupprimer = peutEcrire && can('workspace:admin');
     const peutExporter = can('bots:export');
 
     const [bots, setBots] = useState<BotProfile[]>([]);
@@ -291,7 +292,7 @@ export function BotsView() {
                                                         >
                                                             <Pencil size={14} strokeWidth={1.8} />
                                                         </button>
-                                                        <button
+                                                        {peutSupprimer && <button
                                                             type="button"
                                                             onClick={() => void handleDelete(bot)}
                                                             disabled={busyId === bot.id}
@@ -300,7 +301,7 @@ export function BotsView() {
                                                             className="rounded-full p-1.5 text-slate-400 transition hover:bg-rose-50 hover:text-rose-600 disabled:opacity-40"
                                                         >
                                                             <Trash2 size={14} strokeWidth={1.8} />
-                                                        </button>
+                                                        </button>}
                                                     </>
                                                 )}
                                             </div>
