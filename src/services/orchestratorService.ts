@@ -12,6 +12,7 @@
  */
 
 import type { HybridNode, NodeStatus, McpConfig, NotificationChannels } from '../types/hybridNode';
+import type { BotProfile } from '../types/botProfile';
 
 /**
  * Vue PUBLIQUE d'un nœud renvoyée par `GET /api/graph` (cf. DTO côté
@@ -43,6 +44,35 @@ export interface LinkImportResult {
     updated: number;
     skipped: number;
     total: number;
+}
+
+/** Corps envoyé à POST /api/bots ou PUT /api/bots/:id — voir `validateBotMutation` côté orchestrateur. */
+export interface BotMutationPayload {
+    id: string;
+    updated_at?: string;
+    runtimeId: string;
+    fileName: string;
+    displayName: string;
+    family: BotProfile['family'];
+    brand?: string | null;
+    network?: string | null;
+    telegramUsername?: string | null;
+    mission?: string;
+    personality?: string;
+    research?: string;
+    watch?: string;
+    deliverables?: string;
+    method?: string;
+    limits?: string;
+    usefulContext?: string;
+    sources?: BotProfile['sources'];
+    model?: BotProfile['model'];
+    enabled?: boolean;
+}
+
+/** Paquet de synchronisation Hermès — GET /api/bots/bundle. */
+export interface BotBundle {
+    files: Record<string, { agent: string; content: string; sha256: string }>;
 }
 
 export interface SseStatusEvent {
@@ -246,6 +276,75 @@ export class OrchestratorClient {
         return (await res.json()) as LinkImportResult;
     }
 
+    // ── Bots conversationnels (personas Hermès) ──────────────────────────
+    // Édition traitée comme une action humaine (session vérifiée), au même
+    // titre que l'édition d'un nœud — cf. upsertNode ci-dessus.
+
+    async fetchBots(): Promise<BotProfile[]> {
+        const headers = await this.humanHeaders();
+        const res = await this.fetchImpl(`${this.baseUrl}/bots`, { headers });
+        if (!res.ok) {
+            const detail = await res.json().catch(() => ({}));
+            throw new OrchestratorClientError(`HTTP_${res.status}`, res.status, detail);
+        }
+        const body = (await res.json()) as { bots: BotProfile[] };
+        return body.bots;
+    }
+
+    async upsertBot(bot: BotMutationPayload): Promise<BotProfile> {
+        const headers = await this.humanHeaders();
+        const isCreate = !bot.updated_at;
+        const method = isCreate ? 'POST' : 'PUT';
+        const url = isCreate ? `${this.baseUrl}/bots` : `${this.baseUrl}/bots/${bot.id}`;
+        const res = await this.fetchImpl(url, {
+            method,
+            headers: { 'content-type': 'application/json', ...headers },
+            body: JSON.stringify(bot),
+        });
+        if (!res.ok) {
+            const detail = await res.json().catch(() => ({}));
+            if (res.status === 409 && (detail as { error?: unknown }).error === 'CONCURRENT_WRITE') {
+                throw new OrchestratorConflictError(bot.id, bot.updated_at, detail);
+            }
+            throw new OrchestratorClientError(`HTTP_${res.status}`, res.status, detail);
+        }
+        const body = (await res.json()) as { bot: BotProfile };
+        return body.bot;
+    }
+
+    async removeBot(id: string): Promise<void> {
+        const headers = await this.humanHeaders();
+        const res = await this.fetchImpl(`${this.baseUrl}/bots/${id}`, { method: 'DELETE', headers });
+        if (res.status === 404) return; // déjà absent — idempotent
+        if (!res.ok) throw new OrchestratorClientError(`HTTP_${res.status}`, res.status);
+    }
+
+    /** Crée/actualise le nœud AGENT_IA jumeau du bot, pour le voir dans la vue Orchestration. */
+    async linkBotNode(id: string): Promise<OrchestratorGraphNode> {
+        const headers = await this.humanHeaders();
+        const res = await this.fetchImpl(`${this.baseUrl}/bots/${id}/link-node`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', ...headers },
+            body: '{}',
+        });
+        if (!res.ok) {
+            const detail = await res.json().catch(() => ({}));
+            throw new OrchestratorClientError(`HTTP_${res.status}`, res.status, detail);
+        }
+        const body = (await res.json()) as { node: OrchestratorGraphNode };
+        return body.node;
+    }
+
+    /** Paquet de synchronisation Hermès (prompts compilés + empreintes) — scope bots:export. */
+    async fetchBotBundle(): Promise<BotBundle> {
+        const headers = await this.humanHeaders();
+        const res = await this.fetchImpl(`${this.baseUrl}/bots/bundle`, { headers });
+        if (!res.ok) {
+            const detail = await res.json().catch(() => ({}));
+            throw new OrchestratorClientError(`HTTP_${res.status}`, res.status, detail);
+        }
+        return (await res.json()) as BotBundle;
+    }
 
     /**
      * `res.status !== 404` traitait TOUTE réponse non-404 comme « existe » —

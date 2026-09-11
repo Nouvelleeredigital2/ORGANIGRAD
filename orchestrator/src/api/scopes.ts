@@ -20,6 +20,16 @@ export const SCOPES = {
     humanReject: 'human:reject',
     nodeReset: 'node:reset',
     workspaceAdmin: 'workspace:admin',
+    /** Consulter/éditer les fiches de bots (mission, méthode, sources, prompt compilé). */
+    botsRead: 'bots:read',
+    botsWrite: 'bots:write',
+    /**
+     * Récupérer le paquet de synchronisation Hermès (`GET /api/bots/bundle`) :
+     * tous les prompts compilés + empreintes, prêts à installer sur le VPS.
+     * Jamais dans `DEFAULT_API_KEY_SCOPES` — un admin le pose explicitement
+     * via `create_scoped_workspace_api_key` pour la clé du synchroniseur.
+     */
+    botsExport: 'bots:export',
 } as const;
 
 export type Scope = (typeof SCOPES)[keyof typeof SCOPES];
@@ -63,9 +73,12 @@ export function scopesForRole(role: string): Scope[] {
                 SCOPES.humanApprove,
                 SCOPES.humanReject,
                 SCOPES.nodeReset,
+                SCOPES.botsRead,
+                SCOPES.botsWrite,
+                SCOPES.botsExport,
             ];
         case 'viewer':
-            return [SCOPES.graphRead, SCOPES.nodeRead, SCOPES.executionRead];
+            return [SCOPES.graphRead, SCOPES.nodeRead, SCOPES.executionRead, SCOPES.botsRead];
         default:
             return [];
     }

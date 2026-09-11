@@ -29,11 +29,14 @@ export type Permission =
     | 'human:reject'
     | 'node:reset'
     | 'workspace:admin'
+    | 'bots:read'
+    | 'bots:write'
+    | 'bots:export'
     // — propres à la SPA, dérivées de workspace:admin
     | 'members:manage'
     | 'apikeys:manage';
 
-const READ_ONLY: readonly Permission[] = ['graph:read', 'node:read', 'execution:read'];
+const READ_ONLY: readonly Permission[] = ['graph:read', 'node:read', 'execution:read', 'bots:read'];
 
 /** Tout sauf les permissions d'administration du workspace. */
 const MEMBER: readonly Permission[] = [
@@ -43,6 +46,8 @@ const MEMBER: readonly Permission[] = [
     'human:approve',
     'human:reject',
     'node:reset',
+    'bots:write',
+    'bots:export',
 ];
 
 const ADMIN: readonly Permission[] = [...MEMBER, 'workspace:admin', 'members:manage', 'apikeys:manage'];

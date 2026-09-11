@@ -165,6 +165,8 @@ Deux identités distinctes :
 | `node:run` | exécuter un nœud |
 | `human:approve` / `human:reject` / `node:reset` | validation **humaine** |
 | `workspace:admin` | administration |
+| `bots:read` / `bots:write` | consulter/éditer les fiches de bots |
+| `bots:export` | lire `/api/bots/bundle` (paquet de synchronisation Hermès) — jamais dans les scopes par défaut d'une clé, posé explicitement via `create_scoped_workspace_api_key` |
 
 > Une clé technique **ne reçoit jamais** les scopes humains (`human:*`, `node:reset`,
 > `workspace:admin`) : un agent ne peut donc pas contourner la validation humaine.

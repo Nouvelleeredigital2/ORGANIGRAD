@@ -7,6 +7,7 @@ import { OrchestrationEngine } from '../orchestration/engine.js';
 import { createSynapseProducer } from '../synapse/producer.js';
 import { IllegalTransitionError } from '../domain/stateMachine.js';
 import { NodeNotFoundError, OptimisticConcurrencyError } from '../state/pgGraphStore.js';
+import { PgBotStore, BotNotFoundError, BotOptimisticConcurrencyError, BotValidationError, validateBotMutation } from '../state/pgBotStore.js';
 import { buildAuthHook } from './auth.js';
 import { isProjectReadRoute, registerProjectRoutes } from './projectRoutes.js';
 import { isPrivateProjectPath, isPrivateProjectRoute, registerPrivateProjectRoutes } from './privateProjectRoutes.js';
@@ -501,6 +502,130 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
         }
     });
 
+    // ─────────────────────────────────────────────────────────────────────
+    // Bots conversationnels (personas Hermès) — création/édition visuelle
+    // dans Organigrad. Un bot est une fiche structurée (`bot_profiles`) qui
+    // compile son propre prompt système ; il n'apparaît PAS automatiquement
+    // dans `hybrid_nodes` — voir POST /api/bots/:id/link-node pour l'y
+    // représenter comme un nœud AGENT_IA visible dans l'Orchestration.
+    // ─────────────────────────────────────────────────────────────────────
+
+    // --- GET /api/bots -------------------------------------------------------
+    app.get('/api/bots', async (req, reply) => {
+        try {
+            assertScope(req.scopes, SCOPES.botsRead);
+            const store = new PgBotStore(deps.sql, req.workspaceId!);
+            const bots = await store.list();
+            return { bots };
+        } catch (err) {
+            return handleError(reply, err);
+        }
+    });
+
+    // --- GET /api/bots/bundle — paquet de synchronisation Hermès -------------
+    // Route déclarée AVANT /api/bots/:id pour que Fastify ne route jamais
+    // 'bundle' vers le paramètre :id.
+    app.get('/api/bots/bundle', async (req, reply) => {
+        try {
+            assertScope(req.scopes, SCOPES.botsExport);
+            const store = new PgBotStore(deps.sql, req.workspaceId!);
+            const bundle = await store.bundle();
+            recordAudit(req, 'bots:export', null, 'success');
+            return bundle;
+        } catch (err) {
+            recordAudit(req, 'bots:export', null, auditResultOf(err));
+            return handleError(reply, err);
+        }
+    });
+
+    // --- GET /api/bots/:id -----------------------------------------------
+    app.get<{ Params: { id: string } }>('/api/bots/:id', async (req, reply) => {
+        try {
+            assertScope(req.scopes, SCOPES.botsRead);
+            const store = new PgBotStore(deps.sql, req.workspaceId!);
+            const bot = await store.get(req.params.id);
+            return { bot };
+        } catch (err) {
+            return handleError(reply, err);
+        }
+    });
+
+    // --- POST /api/bots — création (le prompt est recalculé côté serveur) ----
+    app.post<{ Body: unknown }>('/api/bots', async (req, reply) => {
+        try {
+            assertScope(req.scopes, SCOPES.botsWrite);
+            const body = validateBotMutation(req.body);
+            const store = new PgBotStore(deps.sql, req.workspaceId!);
+            const bot = await store.upsert(body);
+            recordAudit(req, 'bots:create', bot.id, 'success');
+            return reply.code(201).send({ bot });
+        } catch (err) {
+            recordAudit(req, 'bots:create', null, auditResultOf(err));
+            return handleError(reply, err);
+        }
+    });
+
+    // --- PUT /api/bots/:id — mise à jour ---------------------------------
+    app.put<{ Params: { id: string }; Body: unknown }>('/api/bots/:id', async (req, reply) => {
+        try {
+            assertScope(req.scopes, SCOPES.botsWrite);
+            const body = validateBotMutation({ ...(req.body as object), id: req.params.id });
+            const store = new PgBotStore(deps.sql, req.workspaceId!);
+            const bot = await store.upsert(body);
+            recordAudit(req, 'bots:update', bot.id, 'success');
+            return { bot };
+        } catch (err) {
+            recordAudit(req, 'bots:update', req.params.id, auditResultOf(err));
+            return handleError(reply, err);
+        }
+    });
+
+    // --- DELETE /api/bots/:id ---------------------------------------------
+    app.delete<{ Params: { id: string } }>('/api/bots/:id', async (req, reply) => {
+        try {
+            assertScope(req.scopes, SCOPES.botsWrite);
+            const store = new PgBotStore(deps.sql, req.workspaceId!);
+            await store.remove(req.params.id);
+            recordAudit(req, 'bots:delete', req.params.id, 'success');
+            return reply.code(204).send();
+        } catch (err) {
+            recordAudit(req, 'bots:delete', req.params.id, auditResultOf(err));
+            return handleError(reply, err);
+        }
+    });
+
+    // --- POST /api/bots/:id/link-node — représente le bot dans l'organigramme -
+    // Crée/actualise le nœud AGENT_IA jumeau (même id) dans hybrid_nodes, pour
+    // que le bot soit visible et exécutable depuis la vue Orchestration. Sans
+    // copie de prompt dans le nœud : celui-ci reste dans bot_profiles (B3).
+    app.post<{ Params: { id: string } }>('/api/bots/:id/link-node', async (req, reply) => {
+        try {
+            assertScope(req.scopes, SCOPES.botsWrite);
+            assertScope(req.scopes, SCOPES.graphWrite);
+            const botStore = new PgBotStore(deps.sql, req.workspaceId!);
+            const bot = await botStore.get(req.params.id);
+            const graphStore = storeFor(req.workspaceId!, req.apiKeyId, req.userId);
+            const existing = await graphStore.has(bot.id);
+            const node: HybridNode & { updated_at?: string } = {
+                id: bot.id,
+                type: 'AGENT_IA',
+                nom: bot.displayName,
+                roleTitre: bot.brand ? `${bot.family} · ${bot.brand}` : bot.family,
+                parentID: null,
+                gradeId: 'Agent',
+                skills: [bot.network, bot.family].filter((s): s is string => Boolean(s)),
+                status: 'IDLE',
+            };
+            const saved = await graphStore.upsertNode(node);
+            await deps.sql`update public.hybrid_nodes set external_app = 'organigrad-bots' where id = ${bot.id} and workspace_id = ${req.workspaceId!}`;
+            recordAudit(req, 'bots:link_node', bot.id, 'success');
+            return { node: toPublicNodeDTO(saved), created: !existing };
+        } catch (err) {
+            recordAudit(req, 'bots:link_node', req.params.id, auditResultOf(err));
+            return handleError(reply, err);
+        }
+    });
+
     // --- POST /api/nodes/:id/run -------------------------------------------
     app.post<{ Params: { id: string } }>('/api/nodes/:id/run', async (req, reply) => {
         try {
@@ -731,6 +856,20 @@ function handleError(reply: import('fastify').FastifyReply, err: unknown) {
     }
     if (err instanceof IllegalTransitionError) {
         return reply.code(409).send({ error: 'ILLEGAL_TRANSITION', from: err.from, to: err.to });
+    }
+    if (err instanceof BotValidationError) {
+        return reply.code(400).send({ error: 'VALIDATION_ERROR', field: err.field, message: err.message });
+    }
+    if (err instanceof BotNotFoundError) {
+        return reply.code(404).send({ error: 'BOT_NOT_FOUND', botId: err.botId });
+    }
+    if (err instanceof BotOptimisticConcurrencyError) {
+        return reply.code(409).send({
+            error: 'CONCURRENT_WRITE',
+            botId: err.botId,
+            expectedUpdatedAt: err.expectedUpdatedAt,
+            message: 'Le bot a été modifié depuis son chargement. Rechargez-le avant de réessayer.',
+        });
     }
     // Un 500 = `err.message` brut peut divulguer des détails internes (erreurs
     // SQL du driver `postgres`, chemins de fichiers, etc.) à l'appelant. Le

@@ -325,6 +325,16 @@ export type Database = {
                     created_at: string;
                 }>;
             };
+            /** Clé technique à scopes explicites (20260911120000) — jamais de scope humain. */
+            create_scoped_workspace_api_key: {
+                Args: { p_name: string; p_workspace_id: string; p_scopes: string[] };
+                Returns: Array<{
+                    id: string;
+                    raw_key: string;
+                    key_prefix: string;
+                    created_at: string;
+                }>;
+            };
             invite_workspace_member: {
                 Args: { p_workspace_id: string; p_email: string; p_role?: WorkspaceRole };
                 Returns: Array<{ id: string; token: string; expires_at: string }>;
