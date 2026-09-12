@@ -1,9 +1,10 @@
 import { useMemo } from 'react';
 import { Lock, AlertCircle, Play, Mail, Trash2, Pencil, ChevronUp, ChevronDown } from 'lucide-react';
-import type { HybridNode } from '../types/hybridNode';
+import type { HybridNode, SourceObservation } from '../types/hybridNode';
 import { ARCHETYPE, STATUS, TONE_CLASSES } from '../design/tokens';
 import { Button, IconButton, Pill } from '../design/ui';
 import { cx } from '../design/cx';
+import { estFrais, formatRelatif } from '../utils/tempsRelatif';
 
 /**
  * HybridNodeCard — carte universelle des 3 archétypes.
@@ -116,6 +117,72 @@ function StatusBadge({ status }: { status: HybridNodeCardProps['node']['status']
             {s.icon === 'alert' && <AlertCircle size={11} strokeWidth={1.8} />}
             {s.label}
         </span>
+    );
+}
+
+/**
+ * Présence rapportée par l'application source (ex. LINK) — DISTINCTE du statut
+ * d'exécution affiché par `StatusBadge`. Un bot peut être « en ligne » chez
+ * LINK et `IDLE` dans Organigrad : les deux sont vrais, et c'est précisément
+ * l'absence de cette nuance qui faisait passer 20 bots actifs pour des fiches
+ * mortes.
+ *
+ * La date du relevé est toujours affichée, et la pastille ne prend sa couleur
+ * vive que si l'observation est fraîche : au-delà, on montre un fait daté, pas
+ * un état courant.
+ */
+function PresenceBadge({ observation }: { observation: SourceObservation }) {
+    const { presence, observedAt, cadence } = observation;
+    if (!presence) return null;
+
+    const frais = estFrais(observedAt);
+    const releve = formatRelatif(observedAt);
+    const enLigne = presence.toLowerCase() === 'online';
+    const libelle = enLigne ? 'En ligne' : presence;
+
+    // Vert seulement sur une observation fraîche ET positive ; sinon le ton
+    // neutre du design system, qui se lit comme un fait daté.
+    const tone = TONE_CLASSES[frais && enLigne ? 'green' : 'slate'];
+
+    return (
+        <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span
+                className={cx(
+                    'inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium ring-1',
+                    tone.soft,
+                    tone.text,
+                    tone.ring,
+                )}
+                title={
+                    releve
+                        ? `Présence rapportée par la source, relevée ${releve}`
+                        : 'Présence rapportée par la source, date de relevé inconnue'
+                }
+            >
+                <span
+                    className="inline-flex h-1.5 w-1.5 rounded-full"
+                    style={{ background: frais && enLigne ? 'var(--system-green)' : 'var(--fg-4)' }}
+                />
+                {libelle}
+            </span>
+
+            {/* Sans la date, la pastille se lirait comme un état temps réel. */}
+            {releve && (
+                <span className="text-[11px]" style={{ color: 'var(--fg-4)' }}>
+                    relevé {releve}
+                </span>
+            )}
+
+            {cadence && (
+                <span
+                    className="truncate text-[11px]"
+                    style={{ color: 'var(--fg-4)' }}
+                    title={`Cadence : ${cadence}`}
+                >
+                    · {cadence}
+                </span>
+            )}
+        </div>
     );
 }
 
@@ -237,6 +304,9 @@ export default function HybridNodeCard({
 
             <div className="mt-4">
                 <StatusBadge status={node.status} />
+                {node.sourceObservation && (
+                    <PresenceBadge observation={node.sourceObservation} />
+                )}
             </div>
 
             {/* Un champ chiffré a une valeur `undefined` côté SPA : sans cet
