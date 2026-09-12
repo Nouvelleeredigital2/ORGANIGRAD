@@ -99,20 +99,31 @@ it('updates only owned node identity atomically and preserves externally managed
         await db.query(`update public.hybrid_nodes set parent_id=$1,grade_id='Lead',skills=array['custom'],status='RUNNING',system_prompt='Keep prompt',mcp_config='{"mode":"keep"}',notification_channels='{"email":true}'`, [workspace]);
         const readNode = async () => (await db.query<Record<string, unknown>>('select * from public.hybrid_nodes')).rows[0];
         const before = await readNode();
-        profile = await store.updateWithNode({ ...input, updated_at: profile.updated_at, displayName: 'Hannah 4', brand: 'Nature', avatarUrl: 'https://images.example.org/new.png' });
+        let mise = await store.updateWithNode({ ...input, updated_at: profile.updated_at, displayName: 'Hannah 4', brand: 'Nature', avatarUrl: 'https://images.example.org/new.png' });
+        profile = mise.bot;
+        // Nœud possédé par Organigrad : il suit la fiche, et le dit.
+        expect(mise.nodeSync).toEqual({ synchronized: true });
         expect(await readNode()).toEqual({ ...before, nom: 'Hannah 4', role_titre: 'veilleur · Nature', avatar_url: 'https://images.example.org/new.png' });
         const beforeFailure = await store.get(input.id);
         await expect(store.updateWithNode({ ...input, updated_at: profile.updated_at, displayName: 'Rejected identity' })).rejects.toThrow();
         expect(await store.get(input.id)).toEqual(beforeFailure);
+        // Nœud qu'Organigrad ne possède pas : il n'est pas réécrit — et la
+        // désynchronisation est SIGNALÉE au lieu d'être tue. Le premier cas est
+        // celui des 14 bots migrés, dont les nœuds portent `external_app = 'link'`.
         for (const ownership of [
-            { workspace, type: 'AGENT_IA', owner: 'link' },
-            { workspace: '00000000-0000-4000-8000-000000000012', type: 'AGENT_IA', owner: 'organigrad-bots' },
-            { workspace, type: 'HUMAIN', owner: 'organigrad-bots' },
+            { workspace, type: 'AGENT_IA', owner: 'link', attendu: 'link' },
+            { workspace: '00000000-0000-4000-8000-000000000012', type: 'AGENT_IA', owner: 'organigrad-bots', attendu: undefined },
+            { workspace, type: 'HUMAIN', owner: 'organigrad-bots', attendu: undefined },
         ]) {
             await db.query('update public.hybrid_nodes set workspace_id=$1,type=$2,external_app=$3', [ownership.workspace, ownership.type, ownership.owner]);
             const externalBefore = await readNode();
-            profile = await store.updateWithNode({ ...input, updated_at: profile.updated_at, displayName: 'New identity' });
+            mise = await store.updateWithNode({ ...input, updated_at: profile.updated_at, displayName: 'New identity' });
+            profile = mise.bot;
             expect(await readNode()).toEqual(externalBefore);
+            expect(mise.nodeSync.synchronized).toBe(false);
+            expect(mise.nodeSync.ownedBy).toBe(ownership.attendu);
+            // La fiche, elle, appartient bien à Organigrad et reste modifiable.
+            expect(profile.displayName).toBe('New identity');
         }
     } finally { await db.close(); }
 }, 30000);

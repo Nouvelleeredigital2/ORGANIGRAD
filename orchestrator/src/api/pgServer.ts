@@ -579,9 +579,18 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
             const body = validateBotMutation({ ...(req.body as object), id: req.params.id });
             if (!body.updated_at) throw new BotValidationError('updated_at', 'La version chargée est requise pour modifier un bot.');
             const store = new PgBotStore(deps.sql, req.workspaceId!);
-            const bot = await store.updateWithNode(body);
+            const { bot, nodeSync } = await store.updateWithNode(body);
+            // Le nœud d'un bot encore possédé par une autre application n'est pas
+            // réécrit. La fiche, elle, l'est : la divergence doit donc être dite,
+            // pas laissée à deviner par l'appelant.
+            if (!nodeSync.synchronized) {
+                req.log.warn(
+                    { botId: bot.id, ownedBy: nodeSync.ownedBy },
+                    'bots.update.noeud-non-synchronise',
+                );
+            }
             recordAudit(req, 'bots:update', bot.id, 'success');
-            return { bot };
+            return { bot, nodeSync };
         } catch (err) {
             recordAudit(req, 'bots:update', req.params.id, auditResultOf(err));
             return handleError(reply, err);

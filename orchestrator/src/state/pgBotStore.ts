@@ -26,6 +26,23 @@ export class BotValidationError extends Error {
     }
 }
 
+/**
+ * Sort de `updateWithNode` : la fiche appartient à Organigrad et est toujours
+ * écrite ; le nœud d'organigramme qui la reflète ne l'est que si Organigrad le
+ * possède. `synchronized: false` dit que les deux ont divergé, au lieu de le
+ * taire — `ownedBy` nomme l'application propriétaire (`'link'` pour les bots
+ * migrés), et est absent quand le nœud n'existe plus du tout.
+ */
+export interface BotNodeSync {
+    synchronized: boolean;
+    ownedBy?: string;
+}
+
+export interface BotUpdateResult {
+    bot: BotProfile;
+    nodeSync: BotNodeSync;
+}
+
 interface DbRow {
     id: string;
     workspace_id: string;
@@ -260,7 +277,7 @@ export class PgBotStore {
     }
 
     /** Synchronize identity only; hierarchy, execution and external ownership stay intact. */
-    async updateWithNode(input: BotMutationInput): Promise<BotProfile> {
+    async updateWithNode(input: BotMutationInput): Promise<BotUpdateResult> {
         if (!input.updated_at) throw new BotValidationError('updated_at', 'La version chargée est requise.');
         const result = await this.sql.begin(async transaction => {
             const sql = transaction as unknown as Sql;
@@ -268,17 +285,35 @@ export class PgBotStore {
             const previous = await store.get(input.id);
             if (!previous.enabled && input.enabled === true) throw new BotValidationError('enabled', 'Activation en attente de vérification des connexions et dépendances.');
             const bot = await store.upsert(input);
-            await sql`
+            // `external_app` borne volontairement l'écriture aux nœuds qu'Organigrad
+            // possède : les bots importés de LINK gardent `'link'`, et leur annuaire
+            // reste la référence de l'identité tant que la bascule n'est pas faite.
+            const synchronise = await sql`
                 update public.hybrid_nodes set
                     nom = ${bot.displayName},
                     role_titre = ${bot.brand ? `${bot.family} · ${bot.brand}` : bot.family},
                     avatar_url = ${bot.avatarUrl ?? null}
                 where id = ${bot.id} and workspace_id = ${this.workspaceId}
                     and type = 'AGENT_IA' and external_app = 'organigrad-bots'
+                returning id
             `;
-            return bot;
+            if (synchronise.length > 0) return { bot, nodeSync: { synchronized: true } };
+            // Zéro ligne touchée n'est PAS anodin : sans ce relevé, la fiche partirait
+            // à jour et le nœud resterait tel quel, en silence. Cas réel des 14 bots
+            // migrés, dont les nœuds portent `external_app = 'link'`.
+            const proprietaire = await sql<{ external_app: string | null }[]>`
+                select external_app from public.hybrid_nodes
+                where id = ${bot.id} and workspace_id = ${this.workspaceId} and type = 'AGENT_IA'
+            `;
+            return {
+                bot,
+                nodeSync: {
+                    synchronized: false,
+                    ...(proprietaire[0] ? { ownedBy: proprietaire[0].external_app ?? 'organigrad' } : {}),
+                },
+            };
         });
-        return result as BotProfile;
+        return result as BotUpdateResult;
     }
 
     /**
