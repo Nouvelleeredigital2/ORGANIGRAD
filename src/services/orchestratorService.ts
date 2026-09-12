@@ -332,6 +332,9 @@ export class OrchestratorClient {
         return result.occurrences;
     }
     async fetchCircuitRuns():Promise<CircuitRun[]> { return (await this.circuitRequest<{runs:CircuitRun[]}>('/circuit-runs')).runs; }
+    async startCircuitRun(circuitId:string,idempotencyKey:string):Promise<CircuitRun> {
+        return (await this.circuitRequest<{run:CircuitRun}>(`/circuits/${encodeURIComponent(circuitId)}/runs`,{idempotencyKey},'POST')).run;
+    }
     async decideCircuitRun(id:string,decision:CircuitDecision):Promise<CircuitRun> {
         return (await this.circuitRequest<{run:CircuitRun}>(`/circuit-runs/${encodeURIComponent(id)}/decisions`,decision,'POST')).run;
     }
