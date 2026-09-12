@@ -318,6 +318,10 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
         role: string;
         channel: string | null;
         enabled: boolean;
+        /** Présence rapportée par LINK (ex. 'online'). Observation, pas état. */
+        presence?: string | null;
+        /** Cadence déclarée (ex. 'à la demande (gate 3)'). Informatif. */
+        cadence?: string | null;
     }
     app.post('/api/integrations/link/import', async (req, reply) => {
         try {
@@ -375,8 +379,18 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
                         status: 'IDLE',
                     };
                     await txStore.upsertNode(node);
+                    // `external_app` et l'observation de la source sont posés ICI,
+                    // hors de `upsertNode` : ce sont des métadonnées d'import, et
+                    // les tenir à l'écart du `on conflict do update` générique est
+                    // ce qui fait qu'une édition du nœud depuis la SPA ne les
+                    // efface pas. `presence_observed_at` date le relevé — une
+                    // présence non datée serait affichée comme courante à tort.
                     await tx`
-                        update public.hybrid_nodes set external_app = 'link'
+                        update public.hybrid_nodes
+                           set external_app = 'link',
+                               presence = ${agent.presence ?? null},
+                               presence_observed_at = ${agent.presence ? new Date() : null},
+                               cadence = ${agent.cadence ?? null}
                          where id = ${agent.id} and workspace_id = ${workspaceId}
                     `;
                     if (existed) updated += 1;
