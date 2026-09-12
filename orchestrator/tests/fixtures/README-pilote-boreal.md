@@ -1,5 +1,14 @@
 # TEST FICTIF — Atelier Boréal
 
+Actualisation : Claude a importé le jeu le 12 septembre, 20:30–20:34 UTC. Projet
+réel `38ceb582-a40c-450d-9ec3-957fd8e69aa5`, tableau Orvion
+`c804a9bf-630b-45af-82f8-ddd461945784`, deux dossiers et douze artefacts.
+Voir `output/RECU-IMPORT-TEST-FICTIF-ATELIER-BOREAL.md` dans l'espace de travail
+racine pour les correspondances complètes. Ne pas réimporter ces objets.
+La fixture reste volontairement locale ; ses UUID ne sont pas les identifiants
+distants. Le refus mentionné ci-dessous concernait la session Codex de rédaction,
+pas le connecteur de Claude. Le rattachement LINK reste à réaliser.
+
 Jeu local autorisé par l'utilisateur pour tester le circuit éditorial. Aucun objet
 n'a été créé dans Supabase : get_project_url OrganiGrad est refusé dans cette session.
 Le JSON est une fixture, pas un export de ressources distantes déjà créées.
