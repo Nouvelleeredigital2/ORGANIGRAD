@@ -24,6 +24,13 @@ it('SQL : une occurrence unique, retard signalé, grant révoqué et pause respe
   // A draft is never started, even if a cursor was prepared.
   expect(await scheduler.tick('2026-09-14T05:00:30Z')).toEqual([]);
   await db.query('update team_circuits set enabled=true where id=$1',[circuit.id]);
+  // A grant cannot outlive the current authority of its grantor.
+  await db.exec("update workspace_members set role='viewer'");
+  expect(await scheduler.tick('2026-09-14T05:00:30Z')).toEqual([]);
+  expect(await store.runs()).toHaveLength(0);
+  await db.exec('delete from workspace_members');
+  expect(await scheduler.tick('2026-09-14T05:00:30Z')).toEqual([]);
+  await db.query('insert into workspace_members values($1,$1,$2)',[ws,'owner']);
   expect(await scheduler.tick('2026-09-14T05:00:30Z')).toMatchObject([{status:'started'}]);
   expect(await scheduler.tick('2026-09-14T05:00:30Z')).toEqual([]);
   expect((await store.runs())).toHaveLength(1);

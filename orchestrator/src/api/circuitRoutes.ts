@@ -3,6 +3,7 @@ import type { Sql } from 'postgres';
 import { z } from 'zod';
 import { CircuitDefinitionSchema, CircuitDecisionSchema, CircuitScheduleSchema } from '@apps2026/contracts';
 import { PgCircuitStore } from '../state/pgCircuitStore.js';
+import { PgCircuitScheduling } from '../state/pgCircuitScheduling.js';
 import { CircuitError, nextOccurrences } from '../orchestration/circuits.js';
 import { hasScope, scopesForRole, type Scope } from './scopes.js';
 
@@ -67,6 +68,21 @@ export function registerCircuitRoutes(app:FastifyInstance,deps:{sql:Sql;appUrl?:
   await authorize(req,'graph:read');
   const schedule=CircuitScheduleSchema.parse(req.body);
   return {occurrences:nextOccurrences(schedule,new Date().toISOString())};
+ }));
+ app.post('/api/circuits/:id/schedule-authorization',route(async req=>{
+  const auth=await authorize(req,'workspace:admin');
+  const authorization=await new PgCircuitScheduling(deps.sql,req.workspaceId!).configure(id((req.params as {id:string}).id),req.body,auth.actorId);
+  return {authorization};
+ }));
+ app.get('/api/circuits/:id/schedule-authorization',route(async req=>{
+  const auth=await authorize(req,'workspace:admin');
+  return {authorization:await new PgCircuitScheduling(deps.sql,req.workspaceId!).read(id((req.params as {id:string}).id),auth.actorId)};
+ }));
+ app.delete('/api/circuits/:id/schedule-authorization/:grantId',route(async(req,reply)=>{
+  const auth=await authorize(req,'workspace:admin');
+  const params=req.params as {id:string;grantId:string};
+  await new PgCircuitScheduling(deps.sql,req.workspaceId!).revoke(id(params.id),id(params.grantId),auth.actorId);
+  return reply.code(204).send();
  }));
  app.post('/api/circuits/:id/runs',route(async(req,reply)=>{
   const auth=await authorize(req,'node:run');const body=req.body as {idempotencyKey?:unknown};

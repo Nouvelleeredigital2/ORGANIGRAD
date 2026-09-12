@@ -43,3 +43,35 @@ La programmation et les décisions multi-canaux restent à raccorder.
 5. Recette manuelle, programmation pilote, puis bascule des anciennes veilles.
 
 La livraison globale n'est pas terminée ; aucune qualité persona 10/10 établie.
+
+## Tranche suivante — autorisations de programmation
+
+Le planificateur vérifie et verrouille désormais l'appartenance actuelle du
+responsable ayant accordé le droit (owner/admin). Le test SQL démontrait une
+exécution après passage en viewer avant correction ; il vérifie aussi la sortie
+du workspace. Le grant seul ne suffit plus.
+
+Routes humaines, protégées par workspace:admin et une seconde vérification SQL :
+
+- GET `/api/circuits/:id/schedule-authorization` : autorisation configurée ou null.
+- POST sur la même route : `{idempotencyKey,expectedVersion,expiresAt}` ; durée
+  positive jusqu'à 30 jours, échéance postérieure à la prochaine occurrence.
+- DELETE `/api/circuits/:id/schedule-authorization/:grantId` : révocation,
+  réponse 204, répétable sans recréation ni suppression d'historique.
+
+Une demande rejouée ne renouvelle pas son expiration. Un nouveau droit remplace
+l'ancien dans une transaction, le révoque et conserve le curseur des occurrences
+en attente. L'API ne modifie pas enabled et n'active aucun worker. Aucune migration
+nouvelle n'est nécessaire : réutilisation des tables préparées le 11 septembre.
+
+La vue Circuits expose ces opérations aux administrateurs, pour les circuits
+possédant un horaire. Durée UI explicite de 14 jours ; renouvellement manuel.
+Les retries réseau conservent l'identifiant et le corps de la demande. La réponse
+204 de révocation est traitée sans tenter de lire du JSON. L'interface distingue
+l'autorisation configurée et l'exécution effective.
+
+Vérification de cette tranche : **474 tests frontend et 609 tests backend
+passants**, 63 backend ignorés. Lint sans avertissement ; builds réussis. Tests
+SQL/HTTP locaux (PGlite) pour configuration, droits, révocation, retries et
+conservation du curseur. Tests UI pour autorisation/révocation et réponse perdue.
+Pas de recette Supabase distante ni de déploiement ; Claude garde les migrations.

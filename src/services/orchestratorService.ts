@@ -14,7 +14,7 @@
 import type { HybridNode, NodeStatus, McpConfig, NotificationChannels } from '../types/hybridNode';
 import type { BotProfile } from '../types/botProfile';
 import { CircuitScheduleSchema, type CircuitDecision, type CircuitDefinition, type CircuitSchedule } from '@apps2026/contracts';
-import type { CircuitOptions, CircuitRun, StoredCircuit } from '../types/circuit';
+import type { CircuitOptions, CircuitRun, StoredCircuit, ScheduleAuthorization } from '../types/circuit';
 
 /**
  * Vue PUBLIQUE d'un nœud renvoyée par `GET /api/graph` (cf. DTO côté
@@ -298,10 +298,20 @@ export class OrchestratorClient {
         const headers=await this.humanHeaders();
         const res=await this.fetchImpl(`${this.baseUrl}${path}`,{method,headers:{...headers,'Content-Type':'application/json'},cache:'no-store',redirect:'error',signal:delaiMaximal(10000),...(body===undefined?{}:{body:JSON.stringify(body)})});
         if(!res.ok)throw new OrchestratorClientError(`HTTP_${res.status}`,res.status,await res.json().catch(()=>({})));
+        if(res.status===204)return undefined as T;
         return res.json() as Promise<T>;
     }
     async fetchCircuits():Promise<StoredCircuit[]> {
         return (await this.circuitRequest<{circuits:StoredCircuit[]}>('/circuits')).circuits;
+    }
+    async fetchCircuitSchedule(id:string):Promise<ScheduleAuthorization|null> {
+        return (await this.circuitRequest<{authorization:ScheduleAuthorization|null}>(`/circuits/${encodeURIComponent(id)}/schedule-authorization`)).authorization;
+    }
+    async authorizeCircuitSchedule(id:string,input:{idempotencyKey:string;expectedVersion:number;expiresAt:string}):Promise<ScheduleAuthorization> {
+        return (await this.circuitRequest<{authorization:ScheduleAuthorization}>(`/circuits/${encodeURIComponent(id)}/schedule-authorization`,input,'POST')).authorization;
+    }
+    async revokeCircuitSchedule(id:string,grantId:string):Promise<void> {
+        await this.circuitRequest(`/circuits/${encodeURIComponent(id)}/schedule-authorization/${encodeURIComponent(grantId)}`,undefined,'DELETE');
     }
     async fetchCircuitOptions():Promise<CircuitOptions> { return this.circuitRequest('/circuits/options'); }
     async previewCircuitSchedule(schedule:CircuitSchedule):Promise<string[]> {
