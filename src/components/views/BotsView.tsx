@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Bot, Link2, Loader2, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import type { BotProfile } from '../../types/botProfile';
 import { BotPortrait } from '../bots/BotPortrait';
 import { BOT_FAMILIES, BOT_FAMILY_LABEL, emptyBotProfile } from '../../types/botProfile';
 import { BotEditor } from '../bots/BotEditor';
+import { ReviewedBotsImport } from '../bots/ReviewedBotsImport';
 import { Button, Pill, Surface } from '../../design/ui';
 import { useOrchestratorBridge } from '../../hooks/useOrchestratorBridge';
 import { usePermissions } from '../../auth/usePermissions';
@@ -42,23 +43,28 @@ export function BotsView() {
     const [bundleLoading, setBundleLoading] = useState(false);
 
     const client = bridge.client;
+    const activeClient = useRef(client);
 
-    const reload = useCallback(async () => {
+    const reload = useCallback(async (showLoading = true) => {
         if (!client) return;
-        setLoadState('loading');
+        if (showLoading) setLoadState('loading');
         setLoadError(null);
         try {
             const list = await client.fetchBots();
+            if (activeClient.current !== client) return;
             setBots(list);
             setLoadState('ready');
         } catch (err) {
+            if (activeClient.current !== client) return;
             setLoadError(messageErreurUtilisateur(err));
             setLoadState('error');
         }
     }, [client]);
 
     useEffect(() => {
+        activeClient.current = client;
         if (client) void reload();
+        return () => { activeClient.current = null; };
     }, [client, reload]);
 
     const byFamily = useMemo(() => {
@@ -227,6 +233,8 @@ export function BotsView() {
                         )}
                     </div>
                 </div>
+
+                {peutEcrire && client && loadState === 'ready' && <ReviewedBotsImport client={client} onComplete={() => reload(false)} />}
 
                 {loadError && (
                     <Surface className="p-4" style={{ boxShadow: 'inset 0 0 0 1px rgba(255,59,48,0.25)' }}>
