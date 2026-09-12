@@ -110,3 +110,24 @@ backend ignorés**. Lint frontend et builds frontend/backend réussis. Recette
 SQL PGlite + HTTP Fastify et tests composants React ; aucun accès distant utilisé,
 aucune migration nouvelle ou historique modifiée, aucun déploiement de cette branche.
 Les blocages et raccordements de la section « Suites du plan » restent ouverts.
+
+## Préparation du raccordement Engine — 12 septembre, 19 h
+
+Trois défauts révélés par les tests d'intégration ont été corrigés :
+
+- Le dispatcher acceptait 20 000 caractères alors que le client Engine en
+  accepte 2 000. Un validateur partagé refuse désormais le prompt avant toute
+  réservation ou marque d'envoi ; le choix « automatic » est également refusé.
+- Le hash persistant contient maintenant l'origine qualifiée du client Engine,
+  le moteur et le prompt. Changer de serveur ne peut pas réutiliser le reçu d'un
+  autre serveur. Aucun secret n'entre dans cette empreinte. Les anciennes
+  empreintes éventuelles sont refusées, jamais converties en autorisation de renvoi.
+- Le client prépare l'envoi par un contrôle GET de disponibilité, avant la
+  réservation SQL. La fonction obtenue capture la demande exacte et n'effectue
+  ensuite que le POST, après la marque persistante. Une indisponibilité avant
+  envoi ne laisse plus une tentative « dispatched » qui bloquerait la reprise.
+
+Preuve : 33 tests ciblés client/dispatcher/registre SQL réussis, puis **619 tests
+backend passants, 63 ignorés**, build backend réussi. Un scénario PGlite utilise
+le vrai client HTTP avec transport simulé : indisponible, disponible, une seule
+soumission. Aucune image réelle générée ni migration distante exécutée.

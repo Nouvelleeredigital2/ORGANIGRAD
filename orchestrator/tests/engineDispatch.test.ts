@@ -5,7 +5,8 @@ import { CircuitAttemptError } from '../src/state/pgCircuitAttempts.js';
 
 const key = {runId:'11111111-1111-4111-8111-111111111111', runVersion:1, stepId:'image'};
 const input = {engineId:'flux', prompt:'Illustration du sujet validé'};
-const digest = createHash('sha256').update(JSON.stringify([input.engineId,input.prompt])).digest('hex');
+const qualifiedOrigin='https://engine.example.org';
+const digest = createHash('sha256').update(JSON.stringify([qualifiedOrigin,input.engineId,input.prompt])).digest('hex');
 const jobId = '22222222-2222-4222-8222-222222222222';
 function fixture() {
  const order:string[]=[];
@@ -17,11 +18,25 @@ function fixture() {
   recordAcceptedJob:vi.fn().mockImplementation(async()=>{order.push('receipt');return {...receipt,status:'accepted',jobId};}),
   recoverExpired:vi.fn().mockResolvedValue({...receipt,status:'uncertain'}),
  };
- const engine = {submitOnce:vi.fn().mockImplementation(async()=>{order.push('submit');return {jobId,status:'queued',pipeline:['flux']};})};
+ const submitOnce=vi.fn().mockImplementation(async()=>{order.push('submit');return {jobId,status:'queued',pipeline:['flux']};});
+ const engine = {qualifiedOrigin,submitOnce,prepareImage:vi.fn().mockImplementation(async()=>submitOnce)};
  const authorize=vi.fn().mockImplementation(async()=>{order.push('authorize');});
  return {order,receipt,attempts,engine,authorize};
 }
 describe('persistent Engine dispatch',()=>{
+ it('rejects an oversized prompt before reserving or dispatching',async()=>{
+  const f=fixture();
+  await expect(dispatchEngineStep(key,{...input,prompt:'x'.repeat(2001)},f)).rejects.toThrow('INVALID_INPUT');
+  expect(f.attempts.reserve).not.toHaveBeenCalled();
+  expect(f.engine.submitOnce).not.toHaveBeenCalled();
+ });
+ it('does not reuse a receipt from a different Engine origin',async()=>{
+  const f=fixture();
+  f.attempts.getReceipt.mockResolvedValue({...f.receipt,status:'accepted',jobId});
+  const engine={...f.engine,qualifiedOrigin:'https://another-engine.example.org'};
+  await expect(dispatchEngineStep(key,input,{...f,engine})).rejects.toThrow('PAYLOAD_CONFLICT');
+  expect(engine.submitOnce).not.toHaveBeenCalled();
+ });
  it('persists dispatch before submitting and the receipt before returning',async()=>{
   const f=fixture();
   expect(await dispatchEngineStep(key,input,f)).toEqual({jobId,reused:false});
