@@ -6,6 +6,8 @@ export interface CircuitOptions {
  workers:Array<{id:string;name:string}>;
 }
 export interface StoredCircuit { id:string; version:number; definition:CircuitDefinition; enabled:boolean; }
+export interface ScheduleAuthorization {grantId:string;nextDueAt:string;expiresAt:string;enabled:boolean}
+export interface ScheduleOccurrence {id:string;scheduledFor:string;definitionVersion:number;status:'started'|'missed';runId:string|null;recoveredRunId:string|null}
 export interface CircuitRun {
  id:string; definition:CircuitDefinition; definitionVersion:number; version:number;
  status:'ready'|'waiting_approval'|'paused'|'cancelled'|'ready_to_publish'|'blocked';

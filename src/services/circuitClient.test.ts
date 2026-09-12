@@ -1,5 +1,12 @@
 import { it,expect,vi } from 'vitest';
 import { OrchestratorClient } from './orchestratorService';
+it('révoque une autorisation avec la session humaine et accepte le reçu vide 204',async()=>{
+ const fetcher=vi.fn().mockResolvedValue(new Response(null,{status:204}));
+ const client=new OrchestratorClient({fetchImpl:fetcher,getUserAuth:async()=>({token:'session',workspaceId:'workspace'})});
+ await expect(client.revokeCircuitSchedule('circuit','grant')).resolves.toBeUndefined();
+ expect(fetcher.mock.calls[0]![0]).toContain('/circuits/circuit/schedule-authorization/grant');
+ expect(fetcher.mock.calls[0]![1]).toMatchObject({method:'DELETE',headers:{authorization:'Bearer session','x-workspace-id':'workspace'}});
+});
 it('charge les circuits avec la session et le workspace courants',async()=>{
  const fetcher=vi.fn().mockResolvedValue(new Response(JSON.stringify({circuits:[]})));
  const client=new OrchestratorClient({fetchImpl:fetcher,getUserAuth:async()=>({token:'test-session',workspaceId:'test-workspace'})});

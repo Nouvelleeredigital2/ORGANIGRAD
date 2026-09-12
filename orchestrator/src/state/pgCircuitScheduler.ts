@@ -9,21 +9,25 @@ interface DueCircuit {
 }
 export interface ScheduleReceipt { id:string; circuitId:string; scheduledFor:string; status:'started'|'missed'; runId:string|null }
 /** Persist one occurrence per circuit per tick. Safe across processes and restarts.
- * Deliberately not bootstrapped until executor and project activation are qualified. */
+ * Empty project allowlist disables all scheduling, including direct callers. */
 export class PgCircuitScheduler {
- constructor(private readonly sql:Sql) {}
+ constructor(private readonly sql:Sql,private readonly projectIds:readonly string[]=[]) {}
  async tick(now:string):Promise<ScheduleReceipt[]> {
   const time=Date.parse(now);
   if(!Number.isFinite(time))throw new CircuitError('INVALID_SCHEDULER_TIME',400);
+  if(!this.projectIds.length)return [];
   return await this.sql.begin(async tx=>{
-   // Lock grant and project too: revocation/archive cannot race an accepted start.
+   // Lock grant, project and grantor membership: revocation/archive or a role
+   // downgrade cannot race an accepted start.
    const rows=await tx<DueCircuit[]>`select c.id,c.workspace_id,c.version,c.definition,s.next_due_at,s.grant_id,g.granted_by
     from public.circuit_schedule_cursors s join public.team_circuits c on c.id=s.circuit_id and c.workspace_id=s.workspace_id
     join public.projects p on p.id=c.project_id and p.workspace_id=c.workspace_id
     join public.circuit_service_grants g on g.id=s.grant_id and g.workspace_id=c.workspace_id and g.project_id=c.project_id
+    join public.workspace_members m on m.workspace_id=g.workspace_id and m.user_id=g.granted_by and m.role in ('owner','admin')
     where c.enabled=true and p.archived_at is null and g.revoked_at is null and g.expires_at>${now}::timestamptz
+    and c.project_id in (select jsonb_array_elements_text(${JSON.stringify(this.projectIds)}::jsonb)::uuid)
     and g.action='schedule:create' and s.next_due_at<=${now}::timestamptz
-    order by s.next_due_at limit 25 for update of s,c,g,p skip locked`;
+    order by s.next_due_at limit 25 for update of s,c,g,p,m skip locked`;
    const receipts:ScheduleReceipt[]=[];
    for(const row of rows) {
     const schedule=row.definition.schedule;

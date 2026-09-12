@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import { BotsView } from './BotsView';
 import type { BotProfile } from '../../types/botProfile';
 import type { WorkspaceRole } from '../../auth/permissions';
@@ -87,5 +87,18 @@ describe('BotsView', () => {
         render(<BotsView />);
         await waitFor(() => expect(screen.getByRole('button', { name: 'Éditer Anita' })).toBeInTheDocument());
         expect(screen.queryByRole('button', { name: 'Supprimer Anita' })).not.toBeInTheDocument();
+    });
+
+    it('ignores an old workspace response after the new workspace has loaded', async()=>{
+        let finish!: (bots:BotProfile[])=>void;
+        bridgeMock.connectionState='connected';
+        bridgeMock.client={fetchBots:()=>new Promise(resolve=>{finish=resolve;})};
+        const view=render(<BotsView/>);
+        bridgeMock.client={fetchBots:async()=>[{...BOT,displayName:'Bot workspace B'}]};
+        view.rerender(<BotsView/>);
+        await screen.findByText('Bot workspace B');
+        await act(async()=>{finish([BOT]);});
+        await waitFor(()=>expect(screen.queryByText('Anita')).not.toBeInTheDocument());
+        expect(screen.getByText('Bot workspace B')).toBeInTheDocument();
     });
 });

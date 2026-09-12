@@ -122,3 +122,83 @@ describe('HybridNodeCard', () => {
         expect(screen.getByText(/Logiciel/)).toBeInTheDocument();
     });
 });
+
+/**
+ * Risque couvert : re-fabriquer l'écran qu'on vient de corriger.
+ *
+ * Vingt bots en ligne s'affichaient tous « En repos », parce que l'import
+ * jetait la présence rapportée par LINK. La présence ne remplace PAS le statut
+ * d'exécution : les deux coexistent sur la carte. Et comme l'import est manuel,
+ * un relevé ancien ne doit jamais être présenté comme l'état courant.
+ */
+describe('HybridNodeCard — présence rapportée par la source', () => {
+    const bot: HybridNode = {
+        ...baseNode,
+        id: 'bot-1',
+        type: 'AGENT_IA',
+        nom: 'marc.fbdesign.bot',
+        roleTitre: 'Directeur artistique Facebook',
+        status: 'IDLE',
+    };
+
+    it('affiche « En ligne » À CÔTÉ du statut, sans le remplacer', () => {
+        render(
+            <HybridNodeCard
+                node={{
+                    ...bot,
+                    sourceObservation: {
+                        presence: 'online',
+                        observedAt: new Date(Date.now() - 5 * 60_000).toISOString(),
+                        cadence: 'à la demande (gate 3)',
+                    },
+                }}
+            />,
+        );
+
+        expect(screen.getByText('En ligne')).toBeInTheDocument();
+        // Le statut d'exécution Organigrad reste affiché : les deux sont vrais.
+        expect(screen.getByText('En repos')).toBeInTheDocument();
+        expect(screen.getByText(/relevé il y a 5 min/)).toBeInTheDocument();
+        expect(screen.getByText(/gate 3/)).toBeInTheDocument();
+    });
+
+    it("date toujours le relevé, même frais — sans quoi la pastille se lit comme du temps réel", () => {
+        render(
+            <HybridNodeCard
+                node={{
+                    ...bot,
+                    sourceObservation: {
+                        presence: 'online',
+                        observedAt: new Date().toISOString(),
+                    },
+                }}
+            />,
+        );
+        expect(screen.getByText(/relevé/)).toBeInTheDocument();
+    });
+
+    it('montre une observation périmée comme un fait daté, pas comme un état courant', () => {
+        render(
+            <HybridNodeCard
+                node={{
+                    ...bot,
+                    sourceObservation: {
+                        presence: 'online',
+                        observedAt: new Date(Date.now() - 3 * 86_400_000).toISOString(),
+                    },
+                }}
+            />,
+        );
+
+        const badge = screen.getByText('En ligne');
+        expect(screen.getByText(/relevé il y a 3 j/)).toBeInTheDocument();
+        // Ton neutre : la couleur vive affirmerait une présence actuelle.
+        expect(badge.className).not.toMatch(/green|52,199,89/);
+    });
+
+    it("n'affiche aucun badge pour un nœud natif sans observation", () => {
+        render(<HybridNodeCard node={bot} />);
+        expect(screen.queryByText('En ligne')).not.toBeInTheDocument();
+        expect(screen.queryByText(/relevé/)).not.toBeInTheDocument();
+    });
+});

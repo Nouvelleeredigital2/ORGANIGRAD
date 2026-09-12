@@ -86,6 +86,9 @@ const baseRow: Row = {
     avatar_url: null,
     external_app: null,
     status: 'IDLE',
+    presence: null,
+    presence_observed_at: null,
+    cadence: null,
     created_at: '2026-01-01T00:00:00.000Z',
     updated_at: '2026-01-01T00:00:00.000Z',
 };
@@ -166,6 +169,56 @@ describe('nodeToInsert — omission = conservation', () => {
         expect(payload.system_prompt).toBe('Clair.');
         expect('mcp_config' in payload).toBe(true);
         expect('notification_channels' in payload).toBe(true);
+    });
+
+    /**
+     * Risque couvert : effacement silencieux de l'observation de la source.
+     *
+     * `presence` n'est écrit que par l'import LINK. Si la charge d'écriture de
+     * la SPA la portait — même à `null` — le simple fait d'ouvrir une fiche et
+     * d'enregistrer remettrait les bots à « présence inconnue », et l'écran
+     * redeviendrait celui qu'on vient de corriger. Le test vérifie l'absence
+     * des trois colonnes, pas seulement leur valeur.
+     */
+    it("n'écrit jamais les colonnes d'observation externe", () => {
+        const observe: HybridNode = {
+            ...encryptedNode,
+            encrypted: undefined,
+            sourceObservation: {
+                presence: 'online',
+                observedAt: '2026-09-12T09:00:00.000Z',
+                cadence: 'à la demande (gate 3)',
+            },
+        };
+        const payload = nodeToInsert(observe, 'ws1') as Record<string, unknown>;
+
+        expect('presence' in payload).toBe(false);
+        expect('presence_observed_at' in payload).toBe(false);
+        expect('cadence' in payload).toBe(false);
+    });
+});
+
+describe("rowToNode — observation de la source", () => {
+    it('projette présence, date de relevé et cadence', () => {
+        const node = rowToNode({
+            ...baseRow,
+            presence: 'online',
+            presence_observed_at: '2026-09-12T09:00:00.000Z',
+            cadence: 'hebdo lundi 8h00',
+        });
+
+        expect(node.sourceObservation).toEqual({
+            presence: 'online',
+            observedAt: '2026-09-12T09:00:00.000Z',
+            cadence: 'hebdo lundi 8h00',
+        });
+        // L'observation ne déteint pas sur l'état d'exécution Organigrad.
+        expect(node.status).toBe('IDLE');
+    });
+
+    it("laisse le champ absent pour un nœud natif, plutôt qu'un objet vide", () => {
+        // Un objet vide serait « truthy » et ferait afficher un badge vide.
+        expect(rowToNode(baseRow).sourceObservation).toBeUndefined();
     });
 });
 

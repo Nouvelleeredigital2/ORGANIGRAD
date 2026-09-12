@@ -1,14 +1,64 @@
 import { PGlite } from '@electric-sql/pglite';
 import { readFileSync } from 'node:fs';
 import type { Sql } from 'postgres';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { PgCircuitAttempts } from '../src/state/pgCircuitAttempts.js';
+import { dispatchEngineStep } from '../src/orchestration/engineDispatch.js';
+import { createEngineTaskClient } from '../src/integrations/engineTaskClient.js';
 
 const workspace = '11111111-1111-4111-8111-111111111111';
 const runId = '22222222-2222-4222-8222-222222222222';
 const jobId = '33333333-3333-4333-8333-333333333333';
 const key = { runId, runVersion: 1, stepId: 'image' };
 const input = { ...key, payloadSha256: 'a'.repeat(64) };
+
+it('can retry when Engine was unavailable without recording a possibly sent job',async()=>{
+ const {db,store}=await fixture();
+ try {
+  let available=false;
+  const fetchImpl=vi.fn(async (_url:unknown,options?:RequestInit)=>{
+   if(options?.method==='POST')return Response.json({jobId,status:'queued',pipeline:['flux']});
+   return Response.json({engines:[{id:'flux',status:available?'available':'unavailable',enabled:true,tasks:['generate-image']}]});
+  });
+  const engine=createEngineTaskClient({baseUrl:'https://engine.example.org',qualifiedOrigin:'https://engine.example.org',apiKey:'test-only',fetchImpl});
+  const deps={attempts:store,engine,authorize:async()=>{}};
+  const production={engineId:'flux',prompt:'Un jardin illustré'};
+  await expect(dispatchEngineStep(key,production,deps)).rejects.toThrow('ENGINE_UNAVAILABLE');
+  await expect(store.getReceipt(key)).rejects.toThrow('ATTEMPT_NOT_FOUND');
+  available=true;
+  expect(await dispatchEngineStep(key,production,deps)).toEqual({jobId,reused:false});
+  expect(fetchImpl.mock.calls.filter(call=>call[1]?.method==='POST')).toHaveLength(1);
+ }finally{await db.close();}
+},30000);
+
+it('dispatches through the SQL ledger and reuses the receipt with a new process store', async () => {
+    const { db, store, sql } = await fixture();
+    try {
+        const production = { engineId: 'flux', prompt: 'Un jardin illustré' };
+        const submitOnce = vi.fn(async () => {
+            expect((await store.getReceipt(key)).status).toBe('dispatched');
+            return {jobId,status:'queued' as const,pipeline:['flux']};
+        });
+        const deps = {attempts:store,engine:{qualifiedOrigin:'https://engine.example.org',prepareImage:async()=>submitOnce},authorize:async()=>{}};
+        expect(await dispatchEngineStep(key,production,deps)).toEqual({jobId,reused:false});
+        expect(await dispatchEngineStep(key,production,{...deps,attempts:new PgCircuitAttempts(sql,workspace)})).toEqual({jobId,reused:true});
+        expect(submitOnce).toHaveBeenCalledTimes(1);
+    } finally {await db.close();}
+},30000);
+
+it('keeps the SQL barrier after an Engine response is lost and the lease expires', async () => {
+    const { db, store, sql } = await fixture();
+    try {
+        const production = { engineId: 'flux', prompt: 'Un jardin illustré' };
+        const submitOnce = vi.fn(async ():Promise<never> => {throw new Error('DELIVERY_UNCERTAIN');});
+        const deps = {attempts:store,engine:{qualifiedOrigin:'https://engine.example.org',prepareImage:async()=>submitOnce},authorize:async()=>{}};
+        await expect(dispatchEngineStep(key,production,deps)).rejects.toThrow('DELIVERY_UNCERTAIN');
+        await db.exec("update public.circuit_step_attempts set lease_until=clock_timestamp()-interval '1 second'");
+        await expect(dispatchEngineStep(key,production,{...deps,attempts:new PgCircuitAttempts(sql,workspace)})).rejects.toThrow('DELIVERY_UNRESOLVED');
+        expect((await store.getReceipt(key)).status).toBe('uncertain');
+        expect(submitOnce).toHaveBeenCalledTimes(1);
+    } finally {await db.close();}
+},30000);
 
 it('accepte un identifiant d’étape de 128 caractères conformément au contrat', async () => {
     const { db, store } = await fixture();

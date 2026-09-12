@@ -16,7 +16,7 @@ it('SQL : une occurrence unique, retard signalé, grant révoqué et pause respe
    return Object.assign(tag,{json:JSON.stringify,begin:(fn:(sql:unknown)=>unknown)=>db.transaction(tx=>Promise.resolve(fn(adapter(tx))))});
   }
   const sql=adapter(db) as unknown as Sql;
-  const store=new PgCircuitStore(sql,ws),scheduler=new PgCircuitScheduler(sql);
+  const store=new PgCircuitStore(sql,ws),scheduler=new PgCircuitScheduler(sql,[project]);
   const definition=CircuitDefinitionSchema.parse({name:'Lundi',project:{projectId:project,workspaceId:ws,sourceApp:'organigrad',canonicalUrl:'https://example.org/p'},schedule:{weekday:1,hour:7,minute:0,timeZone:'Europe/Paris'},steps:[{id:'watch',kind:'watch',assigneeId:ws,instructions:'Veille'},{id:'final',kind:'approval',assigneeId:ws,instructions:'Valider'}]});
   const circuit=await store.saveDefinition(definition,ws);
   await db.query('insert into circuit_service_grants(id,workspace_id,project_id,granted_by,expires_at) values($1,$2,$3,$2,$4)',[ws,ws,project,'2027-01-01']);
@@ -24,6 +24,17 @@ it('SQL : une occurrence unique, retard signalé, grant révoqué et pause respe
   // A draft is never started, even if a cursor was prepared.
   expect(await scheduler.tick('2026-09-14T05:00:30Z')).toEqual([]);
   await db.query('update team_circuits set enabled=true where id=$1',[circuit.id]);
+  // A rollout cannot create occurrences or advance cursors outside its projects.
+  expect(await new PgCircuitScheduler(sql,[]).tick('2026-09-14T05:00:30Z')).toEqual([]);
+  expect(await new PgCircuitScheduler(sql,[ws]).tick('2026-09-14T05:00:30Z')).toEqual([]);
+  expect(await store.runs()).toHaveLength(0);
+  // A grant cannot outlive the current authority of its grantor.
+  await db.exec("update workspace_members set role='viewer'");
+  expect(await scheduler.tick('2026-09-14T05:00:30Z')).toEqual([]);
+  expect(await store.runs()).toHaveLength(0);
+  await db.exec('delete from workspace_members');
+  expect(await scheduler.tick('2026-09-14T05:00:30Z')).toEqual([]);
+  await db.query('insert into workspace_members values($1,$1,$2)',[ws,'owner']);
   expect(await scheduler.tick('2026-09-14T05:00:30Z')).toMatchObject([{status:'started'}]);
   expect(await scheduler.tick('2026-09-14T05:00:30Z')).toEqual([]);
   expect((await store.runs())).toHaveLength(1);

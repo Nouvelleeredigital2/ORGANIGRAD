@@ -2,6 +2,15 @@ import { describe, it, expect } from 'vitest';
 import { loadEnv, EnvValidationError } from '../src/config/env.js';
 
 describe('loadEnv (validation des variables d\'environnement)', () => {
+    it('scheduler requires an explicit project allowlist and authenticated circuits', () => {
+        expect(loadEnv({ORCHESTRATOR_ALLOW_MEMORY:'1'}).circuitSchedulerEnabled).toBe(false);
+        const base={SUPABASE_DB_URL:'postgresql://localhost/test',SUPABASE_JWT_SECRET:'test',PROJECTS_ENABLED:'true',CIRCUITS_ENABLED:'true',APP_URL:'https://example.org',CIRCUIT_SCHEDULER_ENABLED:'true'};
+        expect(()=>loadEnv(base)).toThrow(/CIRCUIT_SCHEDULER_PROJECT_IDS/);
+        expect(()=>loadEnv({...base,CIRCUIT_SCHEDULER_PROJECT_IDS:'*'})).toThrow(/CIRCUIT_SCHEDULER_PROJECT_IDS/);
+        const id='22222222-2222-4222-8222-222222222222';
+        expect(loadEnv({...base,CIRCUIT_SCHEDULER_PROJECT_IDS:id}).circuitSchedulerProjectIds).toEqual([id]);
+        expect(()=>loadEnv({...base,CIRCUITS_ENABLED:'false',CIRCUIT_SCHEDULER_PROJECT_IDS:id})).toThrow(/CIRCUIT_SCHEDULER_ENABLED/);
+    });
     it('circuits : désactivés par défaut, activation exige les projets authentifiés', () => {
         expect(loadEnv({ORCHESTRATOR_ALLOW_MEMORY:'1'}).circuitsEnabled).toBe(false);
         expect(()=>loadEnv({ORCHESTRATOR_ALLOW_MEMORY:'1',CIRCUITS_ENABLED:'true'})).toThrow(/CIRCUITS_ENABLED/);

@@ -6,6 +6,7 @@ import type {
     NodeStatus,
     McpConfig,
     NotificationChannels,
+    SourceObservation,
 } from '../types/hybridNode';
 import type { Database } from '../types/supabase';
 import { hybridNodeStore } from './hybridNodeStore';
@@ -65,6 +66,8 @@ export function rowToNode(row: Row): HybridNode {
     const mcpEncrypted = isEncrypted(row.mcp_config);
     const notifEncrypted = isEncrypted(row.notification_channels);
 
+    const observation = observationDe(row);
+
     const encrypted: HybridNode['encrypted'] =
         promptEncrypted || mcpEncrypted || notifEncrypted
             ? {
@@ -90,7 +93,22 @@ export function rowToNode(row: Row): HybridNode {
             : ((row.notification_channels as NotificationChannels | null) ?? undefined),
         avatarUrl: row.avatar_url ?? undefined,
         status: row.status as NodeStatus,
+        ...(observation ? { sourceObservation: observation } : {}),
         ...(encrypted ? { encrypted } : {}),
+    };
+}
+
+/**
+ * Projette les colonnes d'observation externe, ou `undefined` si la ligne n'en
+ * porte aucune (nœud natif). Symétrique de `sourceObservationOf` côté
+ * orchestrateur — les deux copies du mapping doivent rester alignées.
+ */
+function observationDe(row: Row): SourceObservation | undefined {
+    if (!row.presence && !row.presence_observed_at && !row.cadence) return undefined;
+    return {
+        ...(row.presence ? { presence: row.presence } : {}),
+        ...(row.presence_observed_at ? { observedAt: row.presence_observed_at } : {}),
+        ...(row.cadence ? { cadence: row.cadence } : {}),
     };
 }
 

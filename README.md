@@ -70,7 +70,7 @@ npm run preview   # prévisualisation du build
 cd orchestrator
 npm run dev       # tsx watch (mode in-memory si SUPABASE_DB_URL absent)
 npm run build     # tsc
-npm start         # node dist/api/bootstrap.js
+npm start         # node dist/src/api/bootstrap.js (rootDir=".")
 ```
 
 Sans `SUPABASE_DB_URL`, l'orchestrateur tourne **in-memory** (dev/tests, sans auth).

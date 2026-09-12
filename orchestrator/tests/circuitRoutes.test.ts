@@ -3,6 +3,27 @@ import { it,expect } from 'vitest';
 import type { Sql } from 'postgres';
 import { registerCircuitRoutes } from '../src/api/circuitRoutes.js';
 const id='11111111-1111-4111-8111-111111111111';
+it('refuse la lecture et le rattrapage sans administrateur humain',async()=>{
+ for(const role of [null,'member']) {
+  const app=Fastify();
+  app.addHook('onRequest',async req=>{req.workspaceId=id;if(role)req.userId=id;});
+  registerCircuitRoutes(app,{sql:(async()=>[{role}]) as unknown as Sql});
+  expect((await app.inject({url:`/api/circuits/${id}/occurrences`})).statusCode).toBe(role?403:401);
+  expect((await app.inject({method:'POST',url:`/api/circuits/${id}/occurrences/${id}/recover`,payload:{}})).statusCode).toBe(role?403:401);
+  await app.close();
+ }
+});
+it('réserve les autorisations de programmation aux administrateurs humains',async()=>{
+ for(const role of [null,'member']) {
+  const app=Fastify();let reads=0;
+  app.addHook('onRequest',async req=>{req.workspaceId=id;if(role)req.userId=id;});
+  registerCircuitRoutes(app,{sql:(async()=>{reads++;return [{role}];}) as unknown as Sql});
+  const response=await app.inject({method:'POST',url:`/api/circuits/${id}/schedule-authorization`,payload:{idempotencyKey:id,expectedVersion:1,expiresAt:'2026-10-01T00:00:00Z'}});
+  expect(response.statusCode).toBe(role?403:401);
+  if(!role)expect(reads).toBe(0);
+  await app.close();
+ }
+});
 it('refuse une clé technique avant toute lecture SQL',async()=>{
  const app=Fastify();let calls=0;
  app.addHook('onRequest',async req=>{req.workspaceId=id;req.scopes=['graph:read'];});

@@ -29,7 +29,11 @@ export class PgCircuitStore {
     if(!previous[0])throw new CircuitError('STALE_CIRCUIT');
     const rows=await tx<StoredCircuit[]>`update public.team_circuits set definition=${tx.json(definition)},version=version+1,updated_at=clock_timestamp() where id=${id} and workspace_id=${this.workspaceId} and project_id=${definition.project.projectId} and version=${expectedVersion} returning id,version,definition,enabled`;
     if(!rows[0])throw new CircuitError('STALE_CIRCUIT');
-    if(JSON.stringify(previous[0].definition.schedule)!==JSON.stringify(definition.schedule)) {
+    const oldSchedule=previous[0].definition.schedule??undefined,newSchedule=definition.schedule??undefined;
+    const scheduleChanged=oldSchedule===undefined || newSchedule===undefined
+     ? oldSchedule!==newSchedule
+     : oldSchedule.weekday!==newSchedule.weekday || oldSchedule.hour!==newSchedule.hour || oldSchedule.minute!==newSchedule.minute || oldSchedule.timeZone!==newSchedule.timeZone;
+    if(scheduleChanged) {
      if(!definition.schedule)await tx`delete from public.circuit_schedule_cursors where circuit_id=${id} and workspace_id=${this.workspaceId}`;
      else {
       const clock=await tx<{now:Date}[]>`select clock_timestamp() as now`;
