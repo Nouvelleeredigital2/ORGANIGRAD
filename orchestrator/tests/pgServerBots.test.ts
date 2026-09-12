@@ -57,6 +57,7 @@ function makeSql(role: string, opts: { insertRow?: typeof BOT_ROW | null } = {})
         if (q.includes('insert into public.bot_profiles')) {
             return Promise.resolve(opts.insertRow === null ? [] : [opts.insertRow ?? BOT_ROW]);
         }
+        if (q.includes('update public.bot_profiles')) return Promise.resolve([BOT_ROW]);
         if (q.includes('from public.bot_profiles') && q.includes('order by')) {
             return Promise.resolve([BOT_ROW]);
         }
@@ -96,6 +97,7 @@ function makeSql(role: string, opts: { insertRow?: typeof BOT_ROW | null } = {})
     // PgGraphStore.upsertNode (appelé par POST /api/bots/:id/link-node) type
     // les compétences via `sql.array(...)`.
     (fn as unknown as { array: (v: unknown) => unknown }).array = (v: unknown) => v;
+    Object.assign(fn, { begin: vi.fn(async (callback: (sql: unknown) => unknown) => callback(fn)) });
     return { sql: fn as unknown as import('postgres').Sql, jsonCalls };
 }
 
@@ -188,6 +190,15 @@ describe('/api/bots', () => {
         expect(res.json().error).toBe('INSUFFICIENT_SCOPE');
     });
 
+    it('creates the graph node in the bot creation transaction', async () => {
+        const sql = await build('member');
+        const res = await inject('POST', '/api/bots', MEMBER_JWT, VALID_BODY);
+        expect(res.statusCode).toBe(201);
+        expect(sql.begin).toHaveBeenCalledOnce();
+        const queries = (sql as unknown as ReturnType<typeof vi.fn>).mock.calls.map(call => String(call[0]));
+        expect(queries.some(query => query.includes('insert into public.hybrid_nodes'))).toBe(true);
+    });
+
     it('DELETE /api/bots/:id — un member ne peut pas supprimer', async () => {
         await build('member');
         const res = await inject('DELETE', `/api/bots/${VALID_BODY.id}`, MEMBER_JWT);
@@ -206,6 +217,15 @@ describe('/api/bots', () => {
         expect(put.statusCode).toBe(400);
         const post = await inject('POST', '/api/bots', MEMBER_JWT, { ...VALID_BODY, updated_at: BOT_ROW.updated_at });
         expect(post.statusCode).toBe(400);
+    });
+
+    it('updates the owned node identity in the persona update transaction', async () => {
+        const sql = await build('member');
+        const res = await inject('PUT', `/api/bots/${VALID_BODY.id}`, MEMBER_JWT, { ...VALID_BODY, updated_at: BOT_ROW.updated_at });
+        expect(res.statusCode).toBe(200);
+        expect(sql.begin).toHaveBeenCalledOnce();
+        const queries = (sql as unknown as ReturnType<typeof vi.fn>).mock.calls.map(call => String(call[0]));
+        expect(queries.some(query => query.includes('update public.hybrid_nodes') && query.includes("external_app = 'organigrad-bots'"))).toBe(true);
     });
 
     it('POST collision returns 409 instead of replacing the existing bot', async () => {

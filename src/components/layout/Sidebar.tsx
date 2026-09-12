@@ -224,6 +224,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     <NavItem icon={<LayoutDashboard size={17} strokeWidth={1.6} />} label="Tableau de bord" active={activeView === 'dashboard'} onClick={() => setActiveView('dashboard')} />
                     <NavItem icon={<Workflow size={17} strokeWidth={1.6} />} label="Orchestration" active={activeView === 'orchestration'} onClick={() => setActiveView('orchestration')} />
                     <NavItem icon={<Bot size={17} strokeWidth={1.6} />} label="Bots" active={activeView === 'bots'} onClick={() => setActiveView('bots')} />
+                    <NavItem icon={<Workflow size={17} strokeWidth={1.6} />} label="Circuits" active={activeView === 'circuits'} onClick={() => setActiveView('circuits')} />
                     {isProjectsEnabled() && <NavItem icon={<FolderKanban size={17} strokeWidth={1.6} />} label="Projets" active={activeView === 'projects'} onClick={() => setActiveView('projects')} />}
                     <NavItem icon={<UsersRound size={17} strokeWidth={1.6} />} label="Membres" active={activeView === 'members'} onClick={() => setActiveView('members')} />
                     <NavItem icon={<Key size={17} strokeWidth={1.6} />} label="Clés API" active={activeView === 'api-keys'} onClick={() => setActiveView('api-keys')} />

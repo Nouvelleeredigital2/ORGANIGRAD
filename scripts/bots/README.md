@@ -17,12 +17,23 @@ chargée est xucmfdggetwxmpquqjvj mais get_project_url refuse les droits. Aucune
 migration, aucun import et aucune installation des nouveaux prompts n'ont eu lieu.
 
 `import_profiles.py --profiles <json> --sha256 <empreinte> --api-url <https://hote/api>
---workspace <uuid>` est sans réseau par défaut. Ajouter `--apply --link-nodes`
+--workspace <uuid> --drafts` est sans réseau par défaut. Ajouter `--apply --link-nodes`
 après qualification, avec ORGANIGRAD_IMPORT_TOKEN dans l'environnement sécurisé.
-Toute fiche existante différente bloque avant les premières écritures. Le reçu
+`--drafts` vérifie d'abord l'empreinte du fichier original, puis demande uniquement
+des créations avec `enabled: false`. Le fichier relu n'est pas réécrit. Sans cette
+option, un fichier demandant `enabled: true` est refusé localement avant tout appel.
+Les fiches déjà présentes ne sont jamais modifiées : leur état d'activation actuel
+est conservé, tous les autres champs et leurs UUID historiques doivent correspondre.
+Une collision d'identifiant ou de runtime bloque avant la première écriture.
+Le reçu conserve le mode brouillon, l'empreinte du fichier source, l'UUID attendu,
+l'UUID reçu et les erreurs partielles sans écraser l'identité attendue. Il
 est enregistré avant chaque demande et après chaque étape : consulter ce reçu
 et l'API après une interruption avant de relancer. Les créations réussies ne
 sont pas supprimées si une liaison ultérieure échoue.
+
+Importer un brouillon n'active aucun bot. La vérification des dépendances et
+l'activation réelle restent un raccordement distinct ; aucun contournement
+d'activation n'est fourni à cet importateur.
 
 Dans le conteneur Hermès qualifié, sous UID 10000, utiliser sync_profiles.py en
 mode `plan`, avec --url (HTTPS /api/bots/bundle), --plan et --runtime-sha256.

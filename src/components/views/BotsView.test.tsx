@@ -31,6 +31,7 @@ const BOT: BotProfile = {
     runtimeId: 'anita.instagram.bot',
     fileName: 'anita.instagram.bot.txt',
     displayName: 'Anita',
+    avatarUrl: 'https://images.example.org/anita.png',
     family: 'redacteur',
     brand: 'Nature & Tech',
     network: 'instagram',
@@ -68,6 +69,7 @@ describe('BotsView', () => {
         render(<BotsView />);
         await waitFor(() => expect(screen.getByText('Anita')).toBeInTheDocument());
         expect(screen.getByText('Rédacteur')).toBeInTheDocument();
+        expect(screen.getByRole('img', { name: 'Portrait de Anita' })).toHaveAttribute('src', BOT.avatarUrl);
     });
 
     it("affiche l'état vide avec une invitation à créer le premier bot", async () => {

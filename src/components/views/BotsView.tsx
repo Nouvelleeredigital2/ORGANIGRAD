@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Bot, Link2, Loader2, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import type { BotProfile } from '../../types/botProfile';
+import { BotPortrait } from '../bots/BotPortrait';
 import { BOT_FAMILIES, BOT_FAMILY_LABEL, emptyBotProfile } from '../../types/botProfile';
 import { BotEditor } from '../bots/BotEditor';
 import { Button, Pill, Surface } from '../../design/ui';
@@ -85,6 +86,7 @@ export function BotsView() {
                 runtimeId: draft.runtimeId,
                 fileName: draft.fileName,
                 displayName: draft.displayName,
+                avatarUrl: draft.avatarUrl,
                 family: draft.family,
                 brand: draft.brand,
                 network: draft.network,
@@ -251,6 +253,7 @@ export function BotsView() {
                                 {(byFamily.get(family) ?? []).map((bot) => (
                                     <Surface key={bot.id} className="flex flex-col gap-3 p-4">
                                         <div className="flex items-start justify-between gap-2">
+                                            <BotPortrait name={bot.displayName} url={bot.avatarUrl} />
                                             <div className="min-w-0">
                                                 <p className="truncate text-[15px] font-semibold" style={{ color: 'var(--fg-1)' }}>
                                                     {bot.displayName}
@@ -260,7 +263,7 @@ export function BotsView() {
                                                 </p>
                                             </div>
                                             <Pill tone={bot.enabled ? 'green' : 'slate'}>
-                                                {bot.enabled ? 'Actif' : 'Désactivé'}
+                                                {bot.enabled ? 'Activé' : 'Brouillon'}
                                             </Pill>
                                         </div>
                                         <p className="line-clamp-2 text-[12px]" style={{ color: 'var(--fg-3)' }}>

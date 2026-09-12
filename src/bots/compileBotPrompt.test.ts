@@ -17,6 +17,16 @@ function profile(overrides: Partial<BotProfile> = {}): BotProfile {
 }
 
 describe('compileBotPrompt (aperçu client)', () => {
+    it('uses configured workflow actors and verified decisions across channels', () => {
+        const prompt = compileBotPrompt(profile());
+        expect(prompt).not.toContain('Laurent choisit');
+        expect(prompt).not.toContain('jamais dans cette conversation');
+        expect(prompt).toContain('LINK, Telegram ou OrganiGrad');
+        expect(prompt).toContain('validation finale est humaine par defaut');
+        expect(prompt).toContain('confirmation reelle');
+        expect(prompt).toContain('pret a publier');
+        expect(prompt).toContain('pas une personne');
+    });
     it('est déterministe', () => {
         expect(compileBotPrompt(profile())).toBe(compileBotPrompt(profile()));
     });

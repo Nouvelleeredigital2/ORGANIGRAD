@@ -13,6 +13,8 @@
 
 import type { HybridNode, NodeStatus, McpConfig, NotificationChannels } from '../types/hybridNode';
 import type { BotProfile } from '../types/botProfile';
+import { CircuitScheduleSchema, type CircuitDecision, type CircuitDefinition, type CircuitSchedule } from '@apps2026/contracts';
+import type { CircuitOptions, CircuitRun, StoredCircuit } from '../types/circuit';
 
 /**
  * Vue PUBLIQUE d'un nœud renvoyée par `GET /api/graph` (cf. DTO côté
@@ -53,6 +55,7 @@ export interface BotMutationPayload {
     runtimeId: string;
     fileName: string;
     displayName: string;
+    avatarUrl?: string | null;
     family: BotProfile['family'];
     brand?: string | null;
     network?: string | null;
@@ -289,6 +292,32 @@ export class OrchestratorClient {
         }
         const body = (await res.json()) as { bots: BotProfile[] };
         return body.bots;
+    }
+
+    private async circuitRequest<T>(path: string, body?: unknown, method='GET'): Promise<T> {
+        const headers=await this.humanHeaders();
+        const res=await this.fetchImpl(`${this.baseUrl}${path}`,{method,headers:{...headers,'Content-Type':'application/json'},cache:'no-store',redirect:'error',signal:delaiMaximal(10000),...(body===undefined?{}:{body:JSON.stringify(body)})});
+        if(!res.ok)throw new OrchestratorClientError(`HTTP_${res.status}`,res.status,await res.json().catch(()=>({})));
+        return res.json() as Promise<T>;
+    }
+    async fetchCircuits():Promise<StoredCircuit[]> {
+        return (await this.circuitRequest<{circuits:StoredCircuit[]}>('/circuits')).circuits;
+    }
+    async fetchCircuitOptions():Promise<CircuitOptions> { return this.circuitRequest('/circuits/options'); }
+    async previewCircuitSchedule(schedule:CircuitSchedule):Promise<string[]> {
+        const result=await this.circuitRequest<{occurrences:unknown}>('/circuits/preview-schedule',CircuitScheduleSchema.parse(schedule),'POST');
+        if(!Array.isArray(result.occurrences)||!result.occurrences.length||result.occurrences.length>10||result.occurrences.some(value=>typeof value!=='string'||!/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(value)||!Number.isFinite(Date.parse(value))))throw new Error('SCHEDULE_PREVIEW_INVALID');
+        return result.occurrences;
+    }
+    async fetchCircuitRuns():Promise<CircuitRun[]> { return (await this.circuitRequest<{runs:CircuitRun[]}>('/circuit-runs')).runs; }
+    async decideCircuitRun(id:string,decision:CircuitDecision):Promise<CircuitRun> {
+        return (await this.circuitRequest<{run:CircuitRun}>(`/circuit-runs/${encodeURIComponent(id)}/decisions`,decision,'POST')).run;
+    }
+    async controlCircuitRun(id:string,input:{action:'pause'|'resume'|'cancel';expectedVersion:number;idempotencyKey:string}):Promise<CircuitRun> {
+        return (await this.circuitRequest<{run:CircuitRun}>(`/circuit-runs/${encodeURIComponent(id)}/control`,input,'POST')).run;
+    }
+    async saveCircuit(definition:CircuitDefinition,existing?:StoredCircuit):Promise<StoredCircuit> {
+        return (await this.circuitRequest<{circuit:StoredCircuit}>(existing?`/circuits/${encodeURIComponent(existing.id)}`:'/circuits',{definition,...(existing?{expectedVersion:existing.version}:{})},existing?'PUT':'POST')).circuit;
     }
 
     async upsertBot(bot: BotMutationPayload): Promise<BotProfile> {
