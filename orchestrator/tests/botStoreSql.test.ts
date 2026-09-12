@@ -25,6 +25,7 @@ it('prevents creation collisions, stale edits and resurrection after deletion in
         await db.exec(readFileSync(new URL('../../supabase/migrations/20260911120000_bot_profiles.sql', import.meta.url), 'utf8'));
         await db.exec(readFileSync(new URL('../../supabase/migrations/20260911143000_bot_portraits.sql', import.meta.url), 'utf8'));
         await db.exec(readFileSync(new URL('../../supabase/migrations/20260911143000_bot_portraits.sql', import.meta.url), 'utf8'));
+        await db.exec(readFileSync(new URL('../../supabase/migrations/20260912152335_bot_portraits_correctif_conforme_depot.sql', import.meta.url), 'utf8'));
         const tag = async (strings: TemplateStringsArray, ...values: unknown[]) => {
             const query = strings.reduce((text, part, i) => text + (i ? `$${i}` : '') + part, '');
             return (await db.query(query, values)).rows;
@@ -38,6 +39,8 @@ it('prevents creation collisions, stale edits and resurrection after deletion in
         });
         const created = await store.upsert(input);
         expect(created.avatarUrl).toBe(input.avatarUrl);
+        await expect(db.query('update public.bot_profiles set avatar_url=$1 where id=$2', ['http://images.example.org/insecure.png', input.id]))
+            .rejects.toThrow('bot_profiles_avatar_url_check');
         await expect(store.upsert({ ...input, mission: 'Collision' })).rejects.toBeInstanceOf(BotOptimisticConcurrencyError);
         expect((await store.get(input.id)).mission).toBe('Initial mission');
         const updated = await store.upsert({ ...input, updated_at: created.updated_at, mission: 'Edited mission' });
