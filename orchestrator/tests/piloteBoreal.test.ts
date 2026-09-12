@@ -6,7 +6,7 @@ import { startExecution, completeStep, decideStep } from '../src/orchestration/c
 it('le projet fictif parcourt sélection, production, correction et validation sans mélanger deux dossiers',()=>{
  const human=fixture.members[4]!.id;
  const definition=CircuitDefinitionSchema.parse({name:fixture.project.name,project:fixture.project.ref,
-  schedule:((({enabled,...schedule})=>schedule)(fixture.schedule)),
+  schedule:{timeZone:fixture.schedule.timeZone,weekday:fixture.schedule.weekday,hour:fixture.schedule.hour,minute:fixture.schedule.minute},
   steps:[
    {id:'watch',kind:'watch',assigneeId:fixture.members[0]!.id,instructions:'Veille fictive'},
    {id:'select',kind:'selection',assigneeId:human,instructions:'Choisir',correctionStepId:'watch'},

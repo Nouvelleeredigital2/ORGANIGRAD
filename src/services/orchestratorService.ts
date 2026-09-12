@@ -160,6 +160,10 @@ export class OrchestratorClient {
         return this.apiKey ? { authorization: `Bearer ${this.apiKey}` } : {};
     }
 
+    private async connectionHeaders(): Promise<Record<string, string>> {
+        return this.apiKey ? this.authHeaders() : this.humanHeaders();
+    }
+
     /**
      * En-têtes pour une action HUMAINE : session utilisateur (JWT + workspace) si
      * disponible, sinon repli sur la clé API (qui, sans scope humain, sera refusée
@@ -186,7 +190,8 @@ export class OrchestratorClient {
         try {
             const res = await this.fetchImpl(`${this.baseUrl}/graph`, {
                 method: 'GET',
-                headers: { accept: 'application/json', ...this.authHeaders() },
+                headers: { accept: 'application/json', ...await this.connectionHeaders() },
+                redirect: 'error',
                 signal: delaiMaximal(timeoutMs),
             });
             return res.ok;
@@ -198,7 +203,8 @@ export class OrchestratorClient {
 
     async fetchGraph(): Promise<OrchestratorGraphNode[]> {
         const res = await this.fetchImpl(`${this.baseUrl}/graph`, {
-            headers: this.authHeaders(),
+            headers: await this.connectionHeaders(),
+            redirect: 'error',
         });
         if (!res.ok) throw new Error(`GET /graph → ${res.status}`);
         const body = (await res.json()) as { nodes: OrchestratorGraphNode[] };
@@ -417,7 +423,7 @@ export class OrchestratorClient {
         // actions humaines (session utilisateur vérifiée requise par l'orchestrateur).
         const headers =
             action === 'run' || action === 'run-flow'
-                ? this.authHeaders()
+                ? await this.connectionHeaders()
                 : await this.humanHeaders();
         const res = await this.fetchImpl(`${this.baseUrl}/nodes/${id}/${action}`, {
             method: 'POST',
@@ -439,7 +445,7 @@ export class OrchestratorClient {
     private async fetchSseTicket(): Promise<string> {
         const res = await this.fetchImpl(`${this.baseUrl}/events/ticket`, {
             method: 'POST',
-            headers: { 'content-type': 'application/json', ...this.authHeaders() },
+            headers: { 'content-type': 'application/json', ...await this.connectionHeaders() },
             body: '{}',
         });
         if (!res.ok) throw new OrchestratorClientError(`TICKET_${res.status}`, res.status);
