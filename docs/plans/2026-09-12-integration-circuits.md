@@ -131,3 +131,26 @@ Preuve : 33 tests ciblés client/dispatcher/registre SQL réussis, puis **619 te
 backend passants, 63 ignorés**, build backend réussi. Un scénario PGlite utilise
 le vrai client HTTP avec transport simulé : indisponible, disponible, une seule
 soumission. Aucune image réelle générée ni migration distante exécutée.
+
+## Reprise du 12 septembre — worker de programmation
+
+Le bootstrap Postgres branche désormais le scheduler sur le cycle de vie Fastify.
+`CIRCUIT_SCHEDULER_ENABLED=true` exige les circuits authentifiés et
+`CIRCUIT_SCHEDULER_PROJECT_IDS` (UUID explicites, séparés par des virgules).
+Sans activation, aucun worker ne démarre. Sans liste, un appel direct au scheduler
+ne traite aucun projet. La liste filtre le SQL avant verrouillage et création des
+occurrences ; les grants, droits du grantor et archives restent vérifiés.
+
+Le worker interroge toutes les 15 secondes après la fin du passage précédent,
+reprend après une erreur sans journaliser de secrets et attend sa transaction à
+la fermeture de Fastify. Les verrous et reçus SQL existants protègent entre processus.
+
+Vérification locale : 622 tests backend réussis, 63 ignorés ; typecheck et build
+réussis. Le test SQL exerce aussi les projets exclus. Le worker reste désactivé en
+production : il crée des exécutions persistantes mais ne remplace pas l'exécuteur
+de production, la projection LINK ni les autorisations Orvion encore à raccorder.
+
+Corrections Claude vérifiées : LINK 0057 intégrée à la branche d'intégration,
+926 tests réussis / 18 ignorés et typecheck ; Orvion public, 12 tests SQL/routes
+réussis. Les lectures MCP LINK et Orvion sont refusées dans cette session. Aucun
+changement de canal pour contourner ce refus, aucune migration ni activation distante.

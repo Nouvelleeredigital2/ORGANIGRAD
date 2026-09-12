@@ -25,7 +25,7 @@ it('recovers a missed occurrence once with its original definition and preserves
   await scheduling.configure(circuit.id,{idempotencyKey:grant,expectedVersion:1,expiresAt:new Date(Date.now()+14*86400000).toISOString()},ws);
   await db.query('update team_circuits set enabled=true where id=$1',[circuit.id]);
   await db.query("update circuit_schedule_cursors set next_due_at='2026-01-05T06:00:00Z'");
-  const [missed]=await new PgCircuitScheduler(sql).tick(new Date().toISOString());
+  const [missed]=await new PgCircuitScheduler(sql,[project]).tick(new Date().toISOString());
   expect(missed?.status).toBe('missed');
   const occurrenceId=missed!.id;
   const cursorBeforeEdit=(await db.query('select next_due_at from circuit_schedule_cursors')).rows;
@@ -53,7 +53,7 @@ it('recovers a missed occurrence once with its original definition and preserves
    expect(recovered.json().run.id).toBe(run.id);
    expect((await app.inject({method:'POST',url:`${url}/${occurrenceId}/recover`,payload:{definition:{}}})).statusCode).toBe(400);
   }finally{await app.close();}
-  const [second]=await new PgCircuitScheduler(sql).tick(new Date().toISOString());
+  const [second]=await new PgCircuitScheduler(sql,[project]).tick(new Date().toISOString());
   await store.start(circuit.id,second!.id,ws);
   await expect(scheduling.catchUp(circuit.id,second!.id,ws)).rejects.toThrow('IDEMPOTENCY_CONFLICT');
   expect((await scheduling.occurrences(circuit.id,ws)).find(item=>item.id===second!.id)?.recoveredRunId).toBeNull();

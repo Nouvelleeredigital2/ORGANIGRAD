@@ -14,6 +14,8 @@ export interface OrchestratorEnv {
     mode: OrchestratorMode;
     projectsEnabled: boolean;
     circuitsEnabled: boolean;
+    circuitSchedulerEnabled: boolean;
+    circuitSchedulerProjectIds: string[];
     privateProjectsEnabled: boolean;
     privateProjectsIssuer?: string;
     port: number;
@@ -153,6 +155,13 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): OrchestratorEn
     if(!['true','false'].includes(circuitsRaw))issues.push('CIRCUITS_ENABLED doit valoir true ou false');
     if(circuitsEnabled && (!projectsEnabled || mode!=='pg' || !source.APP_URL?.startsWith('https://')))issues.push('CIRCUITS_ENABLED exige les projets authentifiés, Postgres et APP_URL HTTPS');
 
+    const schedulerRaw=source.CIRCUIT_SCHEDULER_ENABLED?.trim() || 'false';
+    const circuitSchedulerEnabled=schedulerRaw==='true';
+    const circuitSchedulerProjectIds=[...new Set((source.CIRCUIT_SCHEDULER_PROJECT_IDS??'').split(',').map(id=>id.trim().toLowerCase()).filter(Boolean))];
+    if(!['true','false'].includes(schedulerRaw))issues.push('CIRCUIT_SCHEDULER_ENABLED doit valoir true ou false');
+    if(circuitSchedulerEnabled&&!circuitsEnabled)issues.push('CIRCUIT_SCHEDULER_ENABLED exige CIRCUITS_ENABLED');
+    if(circuitSchedulerProjectIds.some(id=>! /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id)) || (circuitSchedulerEnabled&&!circuitSchedulerProjectIds.length))issues.push('CIRCUIT_SCHEDULER_PROJECT_IDS exige une liste explicite de UUID de projets');
+
     if (issues.length > 0) {
         throw new EnvValidationError(issues);
     }
@@ -161,6 +170,8 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): OrchestratorEn
         mode,
         projectsEnabled,
         circuitsEnabled,
+        circuitSchedulerEnabled,
+        circuitSchedulerProjectIds,
         privateProjectsEnabled,
         privateProjectsIssuer,
         port,
