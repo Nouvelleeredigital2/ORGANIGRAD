@@ -1,12 +1,14 @@
 import type { Sql, TransactionSql } from 'postgres';
+import { randomUUID } from 'node:crypto';
 import { CircuitDefinitionSchema } from '@apps2026/contracts';
-import { CircuitError, nextOccurrences } from '../orchestration/circuits.js';
+import { CircuitError, nextOccurrences, startExecution, type CircuitExecution } from '../orchestration/circuits.js';
 import { z } from 'zod';
 
 export const ScheduleAuthorizationSchema=z.object({
  idempotencyKey:z.string().uuid(),expectedVersion:z.number().int().positive(),expiresAt:z.string().datetime(),
 }).strict();
 export interface ScheduleAuthorization {grantId:string;nextDueAt:string;expiresAt:string;enabled:boolean}
+export interface ScheduleOccurrence {id:string;scheduledFor:string;definitionVersion:number;status:'started'|'missed';runId:string|null;recoveredRunId:string|null}
 interface Grant {id:string;project_id:string;granted_by:string;expires_at:Date;revoked_at:Date|null}
 /** Native schedule:create grants only. No personal connection or external token. */
 export class PgCircuitScheduling {
@@ -14,6 +16,49 @@ export class PgCircuitScheduling {
  private async admin(tx:TransactionSql,actorId:string) {
   const rows=await tx<{role:string}[]>`select role from public.workspace_members where workspace_id=${this.workspaceId} and user_id=${actorId} for share`;
   if(!['owner','admin'].includes(rows[0]?.role??''))throw new CircuitError('FORBIDDEN',403);
+ }
+ async occurrences(circuitId:string,actorId:string):Promise<ScheduleOccurrence[]> {
+  return await this.sql.begin(async tx=>{
+   await this.admin(tx,actorId);
+   const circuits=await tx`select id from public.team_circuits where id=${circuitId} and workspace_id=${this.workspaceId}`;
+   if(!circuits[0])throw new CircuitError('CIRCUIT_NOT_FOUND',404);
+   const rows=await tx<{id:string;scheduled_for:Date;definition_version:number;status:'started'|'missed';run_id:string|null;recovered_run_id:string|null}[]>`
+    select o.id,o.scheduled_for,o.definition_version,o.status,o.run_id,r.id as recovered_run_id
+    from public.circuit_schedule_occurrences o left join public.circuit_executions r
+    on r.workspace_id=o.workspace_id and r.circuit_id=o.circuit_id and r.idempotency_key=o.id
+    and r.state->'scheduleOrigin'->>'occurrenceId'=o.id::text
+    where o.circuit_id=${circuitId} and o.workspace_id=${this.workspaceId}
+    order by o.scheduled_for desc limit 100`;
+   return rows.map(row=>({id:row.id,scheduledFor:new Date(row.scheduled_for).toISOString(),definitionVersion:row.definition_version,status:row.status,runId:row.run_id,recoveredRunId:row.recovered_run_id}));
+  }) as unknown as ScheduleOccurrence[];
+ }
+ /** Explicit human recovery: immutable missed receipt, original snapshot, one run.
+  * Does not renew a service grant or enable automatic scheduling. */
+ async catchUp(circuitId:string,occurrenceId:string,actorId:string):Promise<CircuitExecution> {
+  return await this.sql.begin(async tx=>{
+   await this.admin(tx,actorId);
+   const circuits=await tx<{project_id:string}[]>`select c.project_id from public.team_circuits c
+    join public.projects p on p.id=c.project_id and p.workspace_id=c.workspace_id
+    where c.id=${circuitId} and c.workspace_id=${this.workspaceId} and p.archived_at is null for share of c,p`;
+   if(!circuits[0])throw new CircuitError('CIRCUIT_NOT_FOUND',404);
+   const rows=await tx<{definition:unknown;definition_version:number;status:string;scheduled_for:Date}[]>`
+    select definition,definition_version,status,scheduled_for from public.circuit_schedule_occurrences
+    where id=${occurrenceId} and circuit_id=${circuitId} and workspace_id=${this.workspaceId} for update`;
+   const occurrence=rows[0];if(!occurrence)throw new CircuitError('OCCURRENCE_NOT_FOUND',404);
+   if(occurrence.status!=='missed')throw new CircuitError('OCCURRENCE_NOT_MISSED');
+   const definition=CircuitDefinitionSchema.parse(occurrence.definition);
+   if(definition.project.workspaceId!==this.workspaceId || definition.project.projectId!==circuits[0].project_id || definition.project.sourceApp!=='organigrad')throw new CircuitError('PROJECT_BINDING_REQUIRED',400);
+   const run=startExecution(randomUUID(),definition,occurrence.definition_version);
+   run.scheduleOrigin={occurrenceId,scheduledFor:new Date(occurrence.scheduled_for).toISOString(),recoveredBy:actorId};
+   await tx`insert into public.circuit_executions(id,workspace_id,circuit_id,idempotency_key,created_by,version,state)
+    values(${run.id},${this.workspaceId},${circuitId},${occurrenceId},${actorId},${run.version},${tx.json(run as unknown as Record<string,never>)})
+    on conflict(workspace_id,idempotency_key) do nothing`;
+   const saved=await tx<{circuit_id:string;state:CircuitExecution}[]>`select circuit_id,state from public.circuit_executions
+    where workspace_id=${this.workspaceId} and idempotency_key=${occurrenceId}`;
+   const result=saved[0];
+   if(!result || result.circuit_id!==circuitId || result.state.scheduleOrigin?.occurrenceId!==occurrenceId)throw new CircuitError('IDEMPOTENCY_CONFLICT');
+   return result.state;
+  }) as unknown as CircuitExecution;
  }
  async read(circuitId:string,actorId:string):Promise<ScheduleAuthorization|null> {
   return await this.sql.begin(async tx=>{

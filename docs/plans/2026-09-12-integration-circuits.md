@@ -75,3 +75,38 @@ passants**, 63 backend ignorés. Lint sans avertissement ; builds réussis. Test
 SQL/HTTP locaux (PGlite) pour configuration, droits, révocation, retries et
 conservation du curseur. Tests UI pour autorisation/révocation et réponse perdue.
 Pas de recette Supabase distante ni de déploiement ; Claude garde les migrations.
+
+## Rattrapage et préparation de livraison — 12 septembre, suite
+
+Les correctifs de conditionnement b233a67/e464d29 du candidat de livraison ont
+été repris en fd4995b/4647de2 : dépendances vendor présentes dans les images,
+installation depuis le lockfile, entrée dist/src/api/bootstrap.js et paramètres
+publics du frontend explicites. Le moteur Docker local n'a pas répondu ; aucun
+build Docker ni démarrage de nouvelle image ne sont certifiés par cette reprise.
+
+L'historique de programmation est maintenant consultable dans Circuits, y compris
+après retrait de son horaire. Deux routes humaines workspace:admin :
+
+- GET `/api/circuits/:id/occurrences` : les 100 dernières occurrences, état initial
+  et identifiant du dossier éventuellement créé par un rattrapage.
+- POST `/api/circuits/:id/occurrences/:occurrenceId/recover`, corps vide : création
+  manuelle depuis la définition et la version figées dans l'occurrence manquée.
+
+Le reçu « missed » est conservé intact. Le dossier enregistre scheduleOrigin
+(occurrence, date prévue, administrateur responsable). Le verrou SQL de
+l'occurrence et la contrainte d'idempotence existante empêchent deux dossiers.
+Une réponse perdue se rejoue ; une collision avec une commande manuelle étrangère
+est refusée. Les projets archivés et membres révoqués ne permettent pas la reprise.
+Aucun droit de service n'est renouvelé ni worker activé par cette opération.
+Le dossier créé attend encore le raccordement de l'exécuteur.
+
+Une régression révélée par cette recette a aussi été corrigée : comparer les
+horaires par JSON.stringify réinitialisait parfois le curseur lors d'un simple
+renommage, à cause de l'ordre des clés JSONB. Comparaison désormais par champs,
+avec conservation de la prochaine occurrence, y compris lorsqu'elle est en retard.
+
+Preuve sur cette tranche : **476 tests frontend, 616 backend passants ; 63 tests
+backend ignorés**. Lint frontend et builds frontend/backend réussis. Recette
+SQL PGlite + HTTP Fastify et tests composants React ; aucun accès distant utilisé,
+aucune migration nouvelle ou historique modifiée, aucun déploiement de cette branche.
+Les blocages et raccordements de la section « Suites du plan » restent ouverts.

@@ -74,6 +74,16 @@ export function registerCircuitRoutes(app:FastifyInstance,deps:{sql:Sql;appUrl?:
   const authorization=await new PgCircuitScheduling(deps.sql,req.workspaceId!).configure(id((req.params as {id:string}).id),req.body,auth.actorId);
   return {authorization};
  }));
+ app.get('/api/circuits/:id/occurrences',route(async req=>{
+  const auth=await authorize(req,'workspace:admin');
+  return {occurrences:await new PgCircuitScheduling(deps.sql,req.workspaceId!).occurrences(id((req.params as {id:string}).id),auth.actorId)};
+ }));
+ app.post('/api/circuits/:id/occurrences/:occurrenceId/recover',route(async req=>{
+  const auth=await authorize(req,'workspace:admin');
+  const params=req.params as {id:string;occurrenceId:string};
+  if(req.body!==undefined)z.object({}).strict().parse(req.body);
+  return {run:await new PgCircuitScheduling(deps.sql,req.workspaceId!).catchUp(id(params.id),id(params.occurrenceId),auth.actorId)};
+ }));
  app.get('/api/circuits/:id/schedule-authorization',route(async req=>{
   const auth=await authorize(req,'workspace:admin');
   return {authorization:await new PgCircuitScheduling(deps.sql,req.workspaceId!).read(id((req.params as {id:string}).id),auth.actorId)};

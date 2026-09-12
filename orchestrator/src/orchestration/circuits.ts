@@ -8,6 +8,7 @@ export class CircuitError extends Error {
 export type ExecutionStatus = 'ready' | 'waiting_approval' | 'paused' | 'cancelled' | 'ready_to_publish' | 'blocked';
 export interface CircuitExecution {
     id: string;
+    scheduleOrigin?: { occurrenceId: string; scheduledFor: string; recoveredBy: string };
     definition: CircuitDefinition;
     definitionVersion: number;
     version: number;

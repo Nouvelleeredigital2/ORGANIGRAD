@@ -14,7 +14,7 @@
 import type { HybridNode, NodeStatus, McpConfig, NotificationChannels } from '../types/hybridNode';
 import type { BotProfile } from '../types/botProfile';
 import { CircuitScheduleSchema, type CircuitDecision, type CircuitDefinition, type CircuitSchedule } from '@apps2026/contracts';
-import type { CircuitOptions, CircuitRun, StoredCircuit, ScheduleAuthorization } from '../types/circuit';
+import type { CircuitOptions, CircuitRun, StoredCircuit, ScheduleAuthorization, ScheduleOccurrence } from '../types/circuit';
 
 /**
  * Vue PUBLIQUE d'un nœud renvoyée par `GET /api/graph` (cf. DTO côté
@@ -306,6 +306,12 @@ export class OrchestratorClient {
     }
     async fetchCircuitSchedule(id:string):Promise<ScheduleAuthorization|null> {
         return (await this.circuitRequest<{authorization:ScheduleAuthorization|null}>(`/circuits/${encodeURIComponent(id)}/schedule-authorization`)).authorization;
+    }
+    async fetchCircuitOccurrences(id:string):Promise<ScheduleOccurrence[]> {
+        return (await this.circuitRequest<{occurrences:ScheduleOccurrence[]}>(`/circuits/${encodeURIComponent(id)}/occurrences`)).occurrences;
+    }
+    async recoverCircuitOccurrence(id:string,occurrenceId:string):Promise<CircuitRun> {
+        return (await this.circuitRequest<{run:CircuitRun}>(`/circuits/${encodeURIComponent(id)}/occurrences/${encodeURIComponent(occurrenceId)}/recover`,{},'POST')).run;
     }
     async authorizeCircuitSchedule(id:string,input:{idempotencyKey:string;expectedVersion:number;expiresAt:string}):Promise<ScheduleAuthorization> {
         return (await this.circuitRequest<{authorization:ScheduleAuthorization}>(`/circuits/${encodeURIComponent(id)}/schedule-authorization`,input,'POST')).authorization;
