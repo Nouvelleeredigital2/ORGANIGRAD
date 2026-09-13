@@ -157,6 +157,7 @@ function ProjectsWorkspace({ userId, accessToken, workspaceId, workspaceName, ro
             <div><div className="flex items-center gap-2"><FolderKanban size={22} aria-hidden="true" /><h1 className="text-2xl font-semibold tracking-tight">Projets</h1></div><p className="mt-1 text-sm text-[var(--fg-3)]">{workspaceName}</p></div>
             <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={busy} onClick={onReload}>Actualiser</Button>{canWrite && <Button disabled={busy} onClick={() => openEditor({ kind: 'project', id: crypto.randomUUID() })}><Plus size={16} aria-hidden="true" />Nouveau projet</Button>}</div>
         </header>
+        <p className="mb-5 max-w-2xl text-sm text-[var(--fg-3)]">Créez et gérez les projets de cet espace. Dans Synapse, associez ensuite ce même projet aux applications de votre équipe.</p>
         {!editor && !archive && accessNotice}
         {!canWrite && !accessBlocked && <p className="mb-4 text-sm">Lecture seule — vous pouvez consulter les projets et leurs tâches.</p>}
         {notice && <p role="status" className="mb-4 text-sm">{notice}</p>}
