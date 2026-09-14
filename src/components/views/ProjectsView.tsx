@@ -4,6 +4,7 @@ import { useWorkspaceContext } from '../../contexts/WorkspaceContext';
 import { useSession } from '../../hooks/useSession';
 import { useAppRoute } from '../../routing/useAppRoute';
 import { isProjectsEnabled, isPrivateProjectsEnabled } from '../../lib/projectsFeature';
+import { ProjectServiceDelegations } from '../projects/ProjectServiceDelegations';
 import { PrivateProjectAccess } from '../projects/PrivateProjectAccess';
 import { createProjectRepo, isProjectUuid, type ProjectRepo } from '../../services/projectRepo';
 import type { Project, ProjectTask, ProjectMember, ProjectTaskStatus, NewProject, NewTask } from '../../types/project';
@@ -67,6 +68,7 @@ function ProjectsWorkspace({ userId, accessToken, workspaceId, workspaceName, ro
     const [showArchived, setShowArchived] = useState(false);
     const [busy, setBusy] = useState(false);
     const [synapseOpen, setSynapseOpen] = useState(false);
+    const [servicesOpen, setServicesOpen] = useState(false);
     const lock = useRef(false);
 
     useEffect(() => {
@@ -172,6 +174,10 @@ function ProjectsWorkspace({ userId, accessToken, workspaceId, workspaceName, ro
                     <p className="mt-3 whitespace-pre-wrap break-words text-sm text-[var(--fg-3)]">{project.description || 'Aucune description.'}</p>
                     {canWrite && <div className="mt-4 flex flex-wrap gap-2"><Button variant="outline" disabled={busy} onClick={() => openEditor({ kind: 'project', id: project.id, original: project })}>Modifier le projet</Button><Button variant="outline" disabled={busy} onClick={() => openArchive({ kind: 'project', row: project })}>{project.archived_at ? 'Restaurer le projet' : 'Archiver le projet'}</Button></div>}
                 </Surface>
+                {import.meta.env.VITE_PROJECT_SERVICE_DELEGATIONS_ENABLED === 'true' && ['owner','admin'].includes(loaded.role) && ['owner','admin'].includes(role) && <div className="space-y-3">
+                    <Button variant="outline" disabled={accessBlocked} onClick={() => setServicesOpen(!servicesOpen)}>Autorisations de service</Button>
+                    {servicesOpen && <ProjectServiceDelegations ownerId={userId} projectId={project.id} workspaceId={workspaceId} accessToken={accessToken} archived={!!project.archived_at} blocked={accessBlocked}/>}
+                </div>}
                 {isPrivateProjectsEnabled() && <div>
                     <Button variant="outline" disabled={accessBlocked || busy || !!editor || !!archive} onClick={() => setSynapseOpen(true)}>Accès Synapse</Button>
                     {synapseOpen && <PrivateProjectAccess ownerId={userId} accessToken={accessToken} workspaceId={workspaceId} projectId={project.id} projectName={project.name}

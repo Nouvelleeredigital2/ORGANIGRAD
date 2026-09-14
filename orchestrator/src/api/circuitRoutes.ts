@@ -1,3 +1,4 @@
+import { nativeProjectRef } from './projectRef.js';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { Sql } from 'postgres';
 import { z } from 'zod';
@@ -38,8 +39,7 @@ export function registerCircuitRoutes(app:FastifyInstance,deps:{sql:Sql;appUrl?:
   const humans=await deps.sql<{id:string;name:string}[]>`select m.user_id as id,coalesce(p.display_name,'Membre') as name from public.workspace_members m left join public.profiles p on p.id=m.user_id where m.workspace_id=${req.workspaceId!} and m.role in ('owner','admin','member') order by name limit 100`;
   const workers=await deps.sql<{id:string;name:string}[]>`select id,nom as name from public.hybrid_nodes where workspace_id=${req.workspaceId!} and type in ('AGENT_IA','SOFTWARE_MCP') order by nom limit 200`;
   return {projects:projects.map(project=>{
-   const url=new URL(deps.appUrl!);url.search='';url.hash='';url.searchParams.set('v','projects');url.searchParams.set('project',project.id);url.searchParams.set('workspace',req.workspaceId!);
-   return {name:project.name,ref:{projectId:project.id,workspaceId:req.workspaceId!,sourceApp:'organigrad',canonicalUrl:url.toString()}};
+   return {name:project.name,ref:nativeProjectRef(deps.appUrl,project.id,req.workspaceId!)};
   }),humans,workers};
  }));
  app.get('/api/circuit-runs',route(async req=>({runs:await(await authorize(req,'execution:read')).store.runs()})));

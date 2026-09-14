@@ -10,6 +10,9 @@ import { NodeNotFoundError, OptimisticConcurrencyError } from '../state/pgGraphS
 import { PgBotStore, BotNotFoundError, BotOptimisticConcurrencyError, BotValidationError, validateBotMutation } from '../state/pgBotStore.js';
 import { buildAuthHook } from './auth.js';
 import { isProjectReadRoute, registerProjectRoutes } from './projectRoutes.js';
+import { registerProjectServiceDelegationRoutes } from './projectServiceDelegations.js';
+import { registerProjectServiceTargetRoutes } from './projectServiceTargets.js';
+import { registerProjectServiceMissionRoutes } from './projectServiceMissions.js';
 import { registerCircuitRoutes } from './circuitRoutes.js';
 import { isPrivateProjectPath, isPrivateProjectRoute, registerPrivateProjectRoutes } from './privateProjectRoutes.js';
 import { verifySupabaseJwt } from './userAuth.js';
@@ -50,6 +53,7 @@ export interface PgServerDeps {
     projectsEnabled?: boolean;
     /** Circuit APIs stay absent until the additive SQL and project bindings are qualified. */
     circuitsEnabled?: boolean;
+    projectServiceDelegationsEnabled?: boolean;
     /** Independent opt-in; no legacy authentication or graph authority is delegated. */
     privateProjectsEnabled?: boolean;
     privateProjectsIssuer?: string;
@@ -193,6 +197,7 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
     });
     app.addHook('onRequest', async (req, reply) => {
         const path = req.url.split('?')[0]!;
+        if (path.includes('/service-delegations') || path === '/api/service-projects' || path === '/api/service-missions') reply.header('Cache-Control','private, no-store');
         if (isPrivateProjectPath(path)) {
             reply.header('Cache-Control', 'private, no-store');
             if (deps.privateProjectsEnabled !== true || !isPrivateProjectRoute(req)) {
@@ -209,6 +214,11 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
     });
 
     if (deps.projectsEnabled === true) registerProjectRoutes(app, deps);
+    if (deps.projectServiceDelegationsEnabled === true && deps.projectsEnabled === true && deps.circuitsEnabled === true) {
+        registerProjectServiceDelegationRoutes(app, deps.sql, deps.notifierOptions?.appUrl);
+        registerProjectServiceTargetRoutes(app, deps.sql, deps.notifierOptions?.appUrl);
+        registerProjectServiceMissionRoutes(app, deps.sql, deps.notifierOptions?.appUrl);
+    }
     if (deps.circuitsEnabled === true) registerCircuitRoutes(app, { ...deps, appUrl: deps.notifierOptions?.appUrl });
     if (deps.privateProjectsEnabled === true) registerPrivateProjectRoutes(app, {
         sql: deps.sql,

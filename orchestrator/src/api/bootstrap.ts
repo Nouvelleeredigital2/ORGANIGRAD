@@ -41,6 +41,7 @@ export async function startOrchestrator() {
             sql,
             projectsEnabled: env.projectsEnabled,
             circuitsEnabled: env.circuitsEnabled,
+            projectServiceDelegationsEnabled: env.projectServiceDelegationsEnabled,
             privateProjectsEnabled: env.privateProjectsEnabled,
             privateProjectsIssuer: env.privateProjectsIssuer,
             privateProjectsVerifyUserToken: env.privateProjectsEnabled ? createSupabaseJwtVerifier({
