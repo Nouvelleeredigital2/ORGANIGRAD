@@ -46,6 +46,10 @@ function dossierKey(project: ProjectRef, dossierId: string): string {
     return `${project.ownerApplication}:${project.workspaceId}:${project.projectId}:${dossierId}`;
 }
 
+function commandKey(command: BorealCommand): string {
+    return `${dossierKey(command.project, command.dossierId)}:${command.idempotencyKey}`;
+}
+
 function copy(receipt: BorealReceipt): BorealReceipt {
     return {
         ...receipt,
@@ -71,7 +75,7 @@ export class BorealProductionService {
     async start(rawCommand: BorealCommand, topics: readonly BorealTopic[]): Promise<BorealReceipt> {
         const command = createBorealCommand(rawCommand);
         requireStage(command, 'veille');
-        const existingCommand = this.commands.get(command.idempotencyKey);
+        const existingCommand = this.commands.get(commandKey(command));
         if (existingCommand) return copy(existingCommand);
         if (!topics.length || topics.some((topic) => !topic.id.trim() || !topic.title.trim() || !topic.sourceUrl.trim())) {
             throw new Error('La veille doit contenir au moins un sujet sourcé');
@@ -81,7 +85,7 @@ export class BorealProductionService {
         const current = this.dossiers.get(key);
         if (current) {
             const receipt = copy(current);
-            this.commands.set(command.idempotencyKey, receipt);
+            this.commands.set(commandKey(command), receipt);
             return receipt;
         }
 
@@ -98,14 +102,14 @@ export class BorealProductionService {
             engineTaskId: null,
         };
         this.dossiers.set(key, receipt);
-        this.commands.set(command.idempotencyKey, copy(receipt));
+        this.commands.set(commandKey(command), copy(receipt));
         return copy(receipt);
     }
 
     async chooseTopic(rawCommand: BorealCommand, topicId: string): Promise<BorealReceipt> {
         const command = createBorealCommand(rawCommand);
         requireStage(command, 'selection');
-        const replay = this.commands.get(command.idempotencyKey);
+        const replay = this.commands.get(commandKey(command));
         if (replay) return copy(replay);
         const dossier = this.requireDossier(command);
         if (dossier.selectedTopicId) throw new Error('Un sujet a déjà été choisi pour ce dossier');
@@ -116,14 +120,14 @@ export class BorealProductionService {
         dossier.selectedTopicId = topic.id;
         dossier.state = 'BROUILLON';
         const receipt = copy(dossier);
-        this.commands.set(command.idempotencyKey, receipt);
+        this.commands.set(commandKey(command), receipt);
         return receipt;
     }
 
     async saveArticle(rawCommand: BorealCommand, article: { title: string; body: string }): Promise<BorealReceipt> {
         const command = createBorealCommand(rawCommand);
         requireStage(command, 'redaction');
-        const replay = this.commands.get(command.idempotencyKey);
+        const replay = this.commands.get(commandKey(command));
         if (replay) return copy(replay);
         const dossier = this.requireDossier(command);
         if (!dossier.selectedTopicId) throw new Error('Un sujet doit être choisi dans LINK avant la rédaction');
@@ -132,14 +136,14 @@ export class BorealProductionService {
         await this.ports.editorial.saveArticle(command, { ...article, topicId: dossier.selectedTopicId });
         dossier.state = 'BROUILLON';
         const receipt = copy(dossier);
-        this.commands.set(command.idempotencyKey, receipt);
+        this.commands.set(commandKey(command), receipt);
         return receipt;
     }
 
     async requestGraphic(rawCommand: BorealCommand, prompt: string): Promise<BorealReceipt> {
         const command = createBorealCommand(rawCommand);
         requireStage(command, 'generation');
-        const replay = this.commands.get(command.idempotencyKey);
+        const replay = this.commands.get(commandKey(command));
         if (replay) return copy(replay);
         const dossier = this.requireDossier(command);
         if (!dossier.selectedTopicId) throw new Error('Un sujet doit être choisi dans LINK avant le brief visuel');
@@ -151,7 +155,7 @@ export class BorealProductionService {
         dossier.engineTaskId = engine.kind === 'submitted' ? engine.taskId : null;
         dossier.state = 'EN_ATTENTE_ENGINE';
         const receipt = copy(dossier);
-        this.commands.set(command.idempotencyKey, receipt);
+        this.commands.set(commandKey(command), receipt);
         return receipt;
     }
 

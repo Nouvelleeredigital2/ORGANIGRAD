@@ -45,6 +45,24 @@ describe('BorealProductionService', () => {
         expect(first.state).toBe('EN_ATTENTE_DU_CHOIX');
     });
 
+    it('never reuses an idempotency receipt across two projects', async () => {
+        const p = ports();
+        const service = new BorealProductionService(p);
+        const otherProject = { ...project, projectId: '4e9bc251-fc88-4896-b9e9-0902dd4d003a', canonicalUrl: 'https://organigrad.example.test/projects/other' };
+        const topics = [{ id: 'topic-1', title: 'Sobriété numérique', sourceUrl: 'https://source.example.test/a' }];
+
+        await service.start(command('veille', 'shared-key'), topics);
+        await service.start(createBorealCommand({
+            project: otherProject,
+            dossierId: 'dossier-boreal-001',
+            stage: 'veille',
+            deliverableVersion: 1,
+            idempotencyKey: 'shared-key',
+        }), topics);
+
+        expect(p.editorial.ensureDossier).toHaveBeenCalledTimes(2);
+    });
+
     it('does not create an article before the person chose a sourced topic in LINK', async () => {
         const p = ports();
         const service = new BorealProductionService(p);
