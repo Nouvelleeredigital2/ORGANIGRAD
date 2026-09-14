@@ -3,9 +3,10 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { Sql } from 'postgres';
 import { z } from 'zod';
 import { CircuitDefinitionSchema, CircuitDecisionSchema, CircuitScheduleSchema } from '@apps2026/contracts';
-import { PgCircuitStore } from '../state/pgCircuitStore.js';
+import { PgCircuitStore, type StoredCircuit } from '../state/pgCircuitStore.js';
 import { PgCircuitScheduling } from '../state/pgCircuitScheduling.js';
 import { CircuitError, nextOccurrences } from '../orchestration/circuits.js';
+import { createBorealProductionTemplate } from '../orchestration/borealProductionTemplate.js';
 import { hasScope, scopesForRole, type Scope } from './scopes.js';
 
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -63,6 +64,29 @@ export function registerCircuitRoutes(app:FastifyInstance,deps:{sql:Sql;appUrl?:
   return reply.code(edit?200:201).send({circuit});
  }
  app.post('/api/circuits',route((req,reply)=>save(req,reply,false)));
+ app.post('/api/circuits/boreal-production-template',route(async(req,reply)=>{
+  const auth=await authorize(req,'graph:write');
+  if(!deps.appUrl?.startsWith('https://'))throw new CircuitError('PROJECT_ORIGIN_UNQUALIFIED',503);
+  const origin=new URL(deps.appUrl);
+  if(origin.username||origin.password||origin.search||origin.hash)throw new CircuitError('PROJECT_ORIGIN_UNQUALIFIED',503);
+  const body=z.object({projectId:z.string().uuid(),ericId:z.string().uuid(),designId:z.string().uuid(),engineId:z.string().uuid(),guardianId:z.string().uuid(),humanId:z.string().uuid()}).strict().parse(req.body);
+  const existing=await deps.sql<StoredCircuit[]>`select id,version,definition,enabled from public.team_circuits where workspace_id=${req.workspaceId!} and project_id=${body.projectId} and definition->>'name'='Boréal Production — parcours éditorial' order by updated_at desc limit 1`;
+  if(existing[0])return reply.code(200).send({circuit:existing[0]});
+  const human=await deps.sql<{role:string}[]>`select role from public.workspace_members where workspace_id=${req.workspaceId!} and user_id=${body.humanId}`;
+  if(!human[0] || !['owner','admin','member'].includes(human[0].role))throw new CircuitError('APPROVER_ACCOUNT_REQUIRED',400);
+  const workers:[string,'AGENT_IA'|'SOFTWARE_MCP'][]=[[body.ericId,'AGENT_IA'],[body.designId,'AGENT_IA'],[body.engineId,'SOFTWARE_MCP'],[body.guardianId,'AGENT_IA']];
+  for(const [workerId,type] of workers){
+   const rows=await deps.sql<{id:string;type:string}[]>`select id,type from public.hybrid_nodes where workspace_id=${req.workspaceId!} and id=${workerId} and type=${type}`;
+   if(!rows[0])throw new CircuitError('ASSIGNEE_NOT_FOUND',400);
+   if(type==='AGENT_IA'){
+    const bot=await deps.sql<{enabled:boolean}[]>`select enabled from public.bot_profiles where workspace_id=${req.workspaceId!} and id=${workerId}`;
+    if(!bot[0] || bot[0].enabled!==true)throw new CircuitError('PILOT_BOT_NOT_ACTIVATED');
+   }
+  }
+  const definition=createBorealProductionTemplate({project:nativeProjectRef(deps.appUrl,body.projectId,req.workspaceId!),...body});
+  const circuit=await auth.store.saveDefinition(definition,auth.actorId);
+  return reply.code(201).send({circuit});
+ }));
  app.put('/api/circuits/:id',route((req,reply)=>save(req,reply,true)));
  app.post('/api/circuits/preview-schedule',route(async req=>{
   await authorize(req,'graph:read');

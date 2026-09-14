@@ -30,3 +30,11 @@ it('refuse un fuseau invalide avant tout appel API',async()=>{
  await expect(client.previewCircuitSchedule({weekday:1,hour:7,minute:0,timeZone:'Paris/invalide'})).rejects.toThrow();
  expect(fetcher).not.toHaveBeenCalled();
 });
+it('crée le modèle Boréal Production avec une session humaine et sans programmation',async()=>{
+ const id='11111111-1111-4111-8111-111111111111';
+ const fetcher=vi.fn().mockResolvedValue(Response.json({circuit:{id,version:1,enabled:false,definition:{name:'Boréal Production — parcours éditorial'}}}));
+ const client=new OrchestratorClient({fetchImpl:fetcher,getUserAuth:async()=>({token:'session',workspaceId:'workspace'})});
+ await client.createBorealProductionCircuit({projectId:id,ericId:id,designId:id,engineId:id,guardianId:id,humanId:id});
+ expect(fetcher.mock.calls[0]![0]).toContain('/circuits/boreal-production-template');
+ expect(fetcher.mock.calls[0]![1]).toMatchObject({method:'POST',headers:{authorization:'Bearer session','x-workspace-id':'workspace'}});
+});

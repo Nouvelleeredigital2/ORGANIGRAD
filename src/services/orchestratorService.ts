@@ -98,6 +98,15 @@ export interface BotActivationResult {
     verification?: BotActivationStatus;
 }
 
+export interface BorealProductionTemplateInput {
+    projectId: string;
+    ericId: string;
+    designId: string;
+    engineId: string;
+    guardianId: string;
+    humanId: string;
+}
+
 export interface SseStatusEvent {
     type: 'NODE_STATUS_CHANGED';
     nodeId: string;
@@ -388,6 +397,10 @@ export class OrchestratorClient {
     }
     async saveCircuit(definition:CircuitDefinition,existing?:StoredCircuit):Promise<StoredCircuit> {
         return (await this.circuitRequest<{circuit:StoredCircuit}>(existing?`/circuits/${encodeURIComponent(existing.id)}`:'/circuits',{definition,...(existing?{expectedVersion:existing.version}:{})},existing?'PUT':'POST')).circuit;
+    }
+    /** Crée le modèle Boréal Production côté serveur après ses préconditions d’activation. */
+    async createBorealProductionCircuit(input:BorealProductionTemplateInput):Promise<StoredCircuit> {
+        return (await this.circuitRequest<{circuit:StoredCircuit}>('/circuits/boreal-production-template',input,'POST')).circuit;
     }
 
     async upsertBot(bot: BotMutationPayload): Promise<BotProfile> {
