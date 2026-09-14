@@ -10,6 +10,19 @@
 
 ---
 
+## Réconciliation d'implémentation — 15 septembre
+
+Après lecture des branches locales, les tâches de moteur prévues ci-dessous ont été remplacées par l'intégration de `feat/projects-frontend-20260913`, qui apporte déjà la version persistante et testée des circuits, tentatives Engine, activation vérifiée et interfaces Circuits/Bots. Le prototype mémoire initial a été supprimé afin de ne pas introduire un second moteur concurrent.
+
+Les ajouts propres à Boréal Production sont :
+
+- `orchestrator/src/orchestration/borealProductionTemplate.ts`, unique modèle à sept étapes ;
+- `POST /api/circuits/boreal-production-template`, qui vérifie projet, équipe distincte, rôles et activation avant création, puis rejoue le circuit existant ;
+- `BorealProductionSetup`, le parcours visuel qui prépare ce modèle sans programmation ;
+- le dossier Claude et la recette locale, qui séparent les preuves locales des préconditions de préproduction.
+
+Les tâches historiques sont conservées ci-dessous comme trace du raisonnement, pas comme une seconde liste d'actions à exécuter.
+
 ### Task 1: Définir le contrat local du pilote et de ses commandes
 
 **Files:**
