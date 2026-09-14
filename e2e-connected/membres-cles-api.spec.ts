@@ -23,12 +23,19 @@ test.describe('Invitations et clés API', () => {
         client = await clientPour(COMPTE_A!);
         workspaceId = await workspaceDe(client, COMPTE_A!);
 
+        const {
+            data: { user },
+            error: userError,
+        } = await client.auth.getUser();
+        test.skip(!user || Boolean(userError), 'le compte de test connecté est introuvable');
+
         // Ces parcours sont réservés à owner/admin : sans ce rôle, les tests
         // échoueraient pour une raison sans rapport avec ce qu'ils vérifient.
         const { data } = await client
             .from('workspace_members')
             .select('role')
             .eq('workspace_id', workspaceId)
+            .eq('user_id', user!.id)
             .single();
         test.skip(
             !['owner', 'admin'].includes(String(data?.role)),
@@ -53,8 +60,11 @@ test.describe('Invitations et clés API', () => {
         await page.getByPlaceholder('alice@exemple.fr').fill(email);
         await page.getByRole('button', { name: /^Inviter$/ }).click();
 
-        // L'invitation apparaît dans la liste des invitations en attente.
-        await expect(page.getByText(email)).toBeVisible({ timeout: 20_000 });
+        // La confirmation nominative est visible. L'adresse figure aussi dans le
+        // toast et le texte d'aide ; le titre exact évite un faux échec strict.
+        await expect(page.getByText(`Invitation créée · ${email}`, { exact: true })).toBeVisible({
+            timeout: 20_000,
+        });
 
         // Et elle existe réellement en base — l'affichage seul ne le prouve pas.
         const { data } = await client

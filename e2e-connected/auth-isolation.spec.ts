@@ -235,7 +235,11 @@ test.describe('Rôle en lecture seule', () => {
         await expect(page.getByRole('button', { name: /^Inviter$/ })).toHaveCount(0);
 
         await page.goto('/?v=api-keys');
-        await expect(page.getByText(/ne permet pas de consulter/i)).toBeVisible({ timeout: 15_000 });
+        await expect(
+            page.getByText('Ton rôle ne permet pas de consulter les clés API de ce workspace.', {
+                exact: true,
+            }),
+        ).toBeVisible({ timeout: 15_000 });
         await expect(page.getByRole('button', { name: /Créer la clé/i })).toHaveCount(0);
     });
 
