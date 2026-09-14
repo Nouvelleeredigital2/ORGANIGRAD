@@ -1,0 +1,41 @@
+import { useState } from 'react';
+import { ArrowDown,ArrowUp,Check,Clock,Plus,Trash2 } from 'lucide-react';
+import { CircuitDefinitionSchema,type CircuitDefinition,type CircuitStep } from '@apps2026/contracts';
+import { CircuitSchedulePreview } from './CircuitSchedulePreview';
+import { Button,Surface } from '../../design/ui';
+import { STEP_LABELS,type CircuitOptions } from '../../types/circuit';
+const field='mt-1 w-full rounded-xl border border-[var(--hairline)] bg-[var(--surface)] px-3 py-2 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)]';
+export function CircuitEditor({options,initial,onSave,onCancel,allowBotApproval=false,onPreviewSchedule}:{options:CircuitOptions;initial?:CircuitDefinition;onSave:(d:CircuitDefinition)=>Promise<unknown>|unknown;onCancel:()=>void;allowBotApproval?:boolean;onPreviewSchedule?:(schedule:NonNullable<CircuitDefinition['schedule']>)=>Promise<string[]>}) {
+ const [name,setName]=useState(initial?.name??'');
+ const [projectId,setProjectId]=useState(initial?.project.projectId??options.projects[0]?.ref.projectId??'');
+ const [steps,setSteps]=useState<CircuitStep[]>(()=>initial?.steps??(Object.keys(STEP_LABELS) as CircuitStep['kind'][]).map((kind,index)=>({id:`step-${index+1}`,kind,assigneeId:(['selection','approval'].includes(kind)?options.humans:options.workers)[0]?.id??'',validatorKind:'human',instructions:STEP_LABELS[kind],...(kind==='approval'?{correctionStepId:'step-3'}:{})})));
+ const [scheduled,setScheduled]=useState(Boolean(initial?.schedule));
+ const [schedule,setSchedule]=useState(initial?.schedule??{weekday:1,hour:7,minute:0,timeZone:'Europe/Paris'});
+ const [error,setError]=useState('');const [busy,setBusy]=useState(false);
+ const update=(index:number,changes:Partial<CircuitStep>)=>setSteps(old=>old.map((step,i)=>i===index?{...step,...changes}:step));
+ const move=(index:number,delta:number)=>setSteps(old=>{const next=[...old];const current=next[index],other=next[index+delta];if(current&&other){next[index]=other;next[index+delta]=current;}return next;});
+ async function save(event:React.FormEvent) {
+  event.preventDefault();setError('');
+  const project=options.projects.find(p=>p.ref.projectId===projectId)?.ref;
+  if(!project){setError('Choisissez un projet existant avant de continuer.');return;}
+  const result=CircuitDefinitionSchema.safeParse({name,project,steps,schedule:scheduled?schedule:null});
+  if(!result.success){setError('Vérifiez le nom, les responsables et les retours de correction. Le circuit doit se terminer par une validation.');return;}
+  setBusy(true);try{await onSave(result.data);}catch{setError('Enregistrement impossible. Rechargez si le circuit ou vos droits ont changé.');}finally{setBusy(false);}
+ }
+ return <form onSubmit={save} className="space-y-6" aria-label="Éditeur de circuit">
+  <Surface className="p-5"><div className="grid gap-4 sm:grid-cols-2"><label className="text-sm">Nom du circuit<input className={field} value={name} maxLength={160} onChange={e=>setName(e.target.value)}/></label><label className="text-sm">Projet partagé<select className={field} value={projectId} disabled={Boolean(initial)} onChange={e=>setProjectId(e.target.value)}><option value="">Choisir un projet</option>{options.projects.map(p=><option key={p.ref.projectId} value={p.ref.projectId}>{p.name}</option>)}</select></label></div></Surface>
+  <div className="flex items-center gap-3"><div className="h-px flex-1 bg-[var(--hairline)]"/><span className="text-xs uppercase tracking-widest text-[var(--fg-3)]">Le parcours du dossier</span><div className="h-px flex-1 bg-[var(--hairline)]"/></div>
+  <ol className="space-y-3">{steps.map((step,index)=>{
+   const gate=['selection','approval'].includes(step.kind);const people=gate&&step.validatorKind==='human'?options.humans:options.workers;
+   return <li key={step.id}><Surface className="p-4 sm:p-5"><div className="flex flex-wrap items-center gap-3"><span className="grid h-9 w-9 place-items-center rounded-full bg-[var(--accent-soft)] text-sm font-medium">{String(index+1).padStart(2,'0')}</span><h3 className="flex-1 font-medium">{STEP_LABELS[step.kind]}</h3><Button variant="ghost" size="sm" disabled={index===0||busy} aria-label={`Monter ${STEP_LABELS[step.kind]}`} onClick={()=>move(index,-1)}><ArrowUp size={16}/></Button><Button variant="ghost" size="sm" disabled={index===steps.length-1||busy} aria-label={`Descendre ${STEP_LABELS[step.kind]}`} onClick={()=>move(index,1)}><ArrowDown size={16}/></Button><Button variant="ghost" size="sm" disabled={steps.length<=2||busy} aria-label={`Retirer ${STEP_LABELS[step.kind]}`} onClick={()=>setSteps(old=>old.filter((_,i)=>i!==index))}><Trash2 size={16}/></Button></div>
+    <div className="mt-4 grid gap-4 sm:grid-cols-2"><label className="text-sm">Fonction<select className={field} value={step.kind} onChange={e=>update(index,{kind:e.target.value as CircuitStep['kind'],assigneeId:'',correctionStepId:undefined})}>{Object.entries(STEP_LABELS).map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label><label className="text-sm">Responsable<select className={field} value={step.assigneeId} onChange={e=>update(index,{assigneeId:e.target.value})}><option value="">Choisir un membre</option>{people.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></label></div>
+    <label className="mt-3 block text-sm">Consignes<textarea className={field} rows={2} maxLength={4000} value={step.instructions} onChange={e=>update(index,{instructions:e.target.value})}/></label>
+    {gate&&<div className="mt-3 grid gap-4 sm:grid-cols-2"><label className="text-sm">Validation<select className={field} value={step.validatorKind} onChange={e=>update(index,{validatorKind:e.target.value as 'human'|'bot',assigneeId:''})}><option value="human">Personne autorisée</option>{allowBotApproval&&<option value="bot">Bot désigné explicitement</option>}</select></label><label className="text-sm">Reprendre en cas de correction<select className={field} value={step.correctionStepId??''} onChange={e=>update(index,{correctionStepId:e.target.value||undefined})}><option value="">Aucun retour configuré</option>{steps.slice(0,index).map(s=><option key={s.id} value={s.id}>{STEP_LABELS[s.kind]}</option>)}</select></label></div>}
+   </Surface></li>;
+  })}</ol>
+  <Button variant="outline" disabled={steps.length>=32||busy} onClick={()=>setSteps(old=>[...old.slice(0,-1),{id:crypto.randomUUID(),kind:'control',assigneeId:'',instructions:'Vérifier le livrable',validatorKind:'human'},...old.slice(-1)])}><Plus size={16}/>Ajouter une étape</Button>
+  <Surface className="p-5"><label className="flex items-center gap-3 text-sm"><Clock size={18}/><input type="checkbox" checked={scheduled} onChange={e=>setScheduled(e.target.checked)}/>Prévoir un rendez-vous hebdomadaire</label>{scheduled&&<div className="mt-4 grid gap-3 sm:grid-cols-3"><label className="text-sm">Jour<select className={field} value={schedule.weekday} onChange={e=>setSchedule({...schedule,weekday:Number(e.target.value)})}>{['Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi'].map((day,i)=><option key={day} value={i}>{day}</option>)}</select></label><label className="text-sm">Heure<input className={field} type="time" value={`${String(schedule.hour).padStart(2,'0')}:${String(schedule.minute).padStart(2,'0')}`} onChange={e=>{const[h,m]=e.target.value.split(':').map(Number);setSchedule({...schedule,hour:h??schedule.hour,minute:m??schedule.minute});}}/></label><label className="text-sm">Fuseau<input className={field} value={schedule.timeZone} onChange={e=>setSchedule({...schedule,timeZone:e.target.value})}/></label></div>}{scheduled&&onPreviewSchedule&&<CircuitSchedulePreview key={JSON.stringify(schedule)} schedule={schedule} preview={onPreviewSchedule}/>}<p className="mt-3 text-xs text-[var(--fg-3)]">Le circuit est enregistré en brouillon. La programmation nécessite une activation vérifiée.</p></Surface>
+  {error&&<p role="alert" className="text-sm text-red-700">{error}</p>}
+  <div className="flex justify-end gap-3"><Button variant="ghost" disabled={busy} onClick={onCancel}>Annuler</Button><Button tone="blue" type="submit" disabled={busy}><Check size={16}/>{busy?'Enregistrement…':'Enregistrer le circuit'}</Button></div>
+ </form>;
+}

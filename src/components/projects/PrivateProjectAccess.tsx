@@ -102,7 +102,8 @@ export function PrivateProjectAccess({ ownerId, accessToken, workspaceId, projec
 
     return <BaseModal isOpen onClose={close} title="Accès Synapse">
         <div className="space-y-5 text-[var(--fg-1)]">
-            <p className="break-words text-sm">Accès personnel à « {projectName} », en lecture seule pour ce projet (projects:read).</p>
+            <p className="break-words text-sm">Accès personnel à « {projectName} », en lecture seule pour ce projet.</p>
+            <p className="text-sm text-[var(--fg-3)]">Cet accès permet de consulter votre projet depuis Synapse. Les autorisations de travail de l’équipe se gèrent séparément.</p>
             <p className="text-sm text-[var(--fg-3)]">La durée effective est limitée par votre session actuelle et peut être plus courte que la durée demandée. Une déconnexion ou un retrait d’accès peut invalider ce jeton.</p>
             {accessChecking ? <p role="status">Vérification de l’accès à l’espace… Le panneau et le secret sont conservés ; les actions sont suspendues.</p>
                 : accessError ? <div className="space-y-2"><p role="alert">Vérification de l’accès impossible. Le panneau et le secret sont conservés ; les actions sont suspendues.</p><Button variant="outline" onClick={onRecheck}>Revérifier l’accès</Button></div> : null}
@@ -115,11 +116,15 @@ export function PrivateProjectAccess({ ownerId, accessToken, workspaceId, projec
             </form>
             {issued && <section aria-label="Accès créé" className="space-y-3 rounded-xl border border-[var(--hairline)] p-4 print:hidden">
                 <p>Ce secret n’est disponible qu’ici, jusqu’à la fermeture. Enregistrez-le dans Mes connexions de Synapse.</p>
-                <dl className="space-y-1 text-sm">
+                <details className="text-sm">
+                    <summary className="min-h-10 cursor-pointer py-2 font-medium">Détails de connexion</summary>
+                    <p className="mb-2">À reporter dans le formulaire de connexion Synapse. Droit accordé : <code>projects:read</code>.</p>
+                    <dl className="space-y-1 text-sm">
                     <dt>Propriétaire (UUID)</dt><dd className="select-all break-all"><code>{ownerId}</code></dd>
                     <dt>Espace (UUID)</dt><dd className="select-all break-all"><code>{workspaceId}</code></dd>
                     <dt>Projet (UUID)</dt><dd className="select-all break-all"><code>{projectId}</code></dd>
-                </dl>
+                    </dl>
+                </details>
                 <p>Expiration effective : <time dateTime={date(issued.expiresAt).toISOString()}>{date(issued.expiresAt).toLocaleString('fr-FR')}</time> (environ {Math.max(0, Math.ceil((issued.expiresAt * 1000 - Date.now()) / 60000))} min restantes).</p>
                 {revealed && !accessBlocked ? <code className="block select-all break-all">{secret.current}</code> : <p>Secret masqué</p>}
                 <Button variant="outline" disabled={accessBlocked} onClick={() => setRevealed(value => !value)}>{revealed ? 'Masquer le secret' : 'Révéler le secret'}</Button>

@@ -34,6 +34,8 @@ export function ApiKeysView() {
     const [newKeyName, setNewKeyName] = useState('');
     /** Scope technique additionnel pour le synchroniseur de bots vers Hermès. */
     const [withBotsExport, setWithBotsExport] = useState(false);
+    const [withVoiceAssign, setWithVoiceAssign] = useState(false);
+    const [withVoiceResolve, setWithVoiceResolve] = useState(false);
     const [creating, setCreating] = useState(false);
     const [revealedKey, setRevealedKey] = useState<{ raw: string; name: string } | null>(null);
     const [error, setError] = useState<string | null>(null);
@@ -108,11 +110,11 @@ export function ApiKeysView() {
         // façon d'appeler GET /api/bots/bundle depuis un service technique (le
         // scope n'est jamais dans les scopes par défaut d'une clé — l'admin
         // l'accorde explicitement ici).
-        const { data, error: err } = withBotsExport
+        const { data, error: err } = (withBotsExport || withVoiceAssign || withVoiceResolve)
             ? await supabase.rpc('create_scoped_workspace_api_key', {
                   p_workspace_id: activeId,
                   p_name: newKeyName.trim(),
-                  p_scopes: ['graph:read', 'node:read', 'execution:read', 'bots:export'],
+                  p_scopes: [...(withBotsExport ? ['graph:read','node:read','execution:read','bots:export'] : []), ...(withVoiceAssign ? ['voice:assign'] : []), ...(withVoiceResolve ? ['voice:resolve'] : [])],
               })
             : await supabase.rpc('create_workspace_api_key', {
                   p_workspace_id: activeId,
@@ -278,6 +280,9 @@ export function ApiKeysView() {
                                     à une clé technique.
                                 </span>
                             </label>
+                            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={withVoiceAssign} onChange={e=>setWithVoiceAssign(e.target.checked)}/> Autoriser les affectations vocales (voice:assign)</label>
+                            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={withVoiceResolve} onChange={e=>setWithVoiceResolve(e.target.checked)}/> Autoriser la résolution vocale (voice:resolve)</label>
+                            <p className="text-sm">Les droits vocaux nécessitent aussi une autorisation explicite pour chaque projet, bot et voix native.</p>
                         </form>
                     </Surface>
                 )}

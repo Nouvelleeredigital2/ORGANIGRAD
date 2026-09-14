@@ -26,12 +26,41 @@ export class BotValidationError extends Error {
     }
 }
 
+export class HumanSessionRequiredError extends Error {
+    constructor() {
+        super('Une session humaine vérifiée est requise pour cette décision.');
+        this.name = 'HumanSessionRequiredError';
+    }
+}
+
+export interface BotActivationCheck {
+    code: string;
+    label: string;
+    passed: boolean;
+}
+
+export interface BotActivationStatus {
+    botId: string;
+    workspaceId?: string;
+    enabled: boolean;
+    ready: boolean;
+    checks: BotActivationCheck[];
+}
+
+export interface BotActivationResult {
+    status: 'activated' | 'draft';
+    botId: string;
+    actorId: string;
+    verification?: BotActivationStatus;
+}
+
 interface DbRow {
     id: string;
     workspace_id: string;
     runtime_id: string;
     file_name: string;
     display_name: string;
+    avatar_url?: string | null;
     family: BotFamily;
     brand: string | null;
     network: string | null;
@@ -60,6 +89,7 @@ export interface BotMutationInput {
     runtimeId: string;
     fileName: string;
     displayName: string;
+    avatarUrl?: string | null;
     family: BotFamily;
     brand?: string | null;
     network?: string | null;
@@ -89,6 +119,17 @@ export function validateBotMutation(raw: unknown): BotMutationInput {
         throw new BotValidationError('body', 'Corps de requête invalide');
     }
     const b = raw as Record<string, unknown>;
+    if (b.enabled !== undefined && typeof b.enabled !== 'boolean') throw new BotValidationError('enabled', 'enabled doit être un booléen.');
+    if (b.avatarUrl != null) {
+        let valid = false;
+        if (typeof b.avatarUrl === 'string' && b.avatarUrl.length <= 2048 && /^https:\/\/\S+$/.test(b.avatarUrl)) {
+            try {
+                const url = new URL(b.avatarUrl);
+                valid = url.protocol === 'https:' && Boolean(url.hostname) && !url.username && !url.password;
+            } catch { /* Invalid URLs are rejected below. */ }
+        }
+        if (!valid) throw new BotValidationError('avatarUrl', 'Portrait : URL HTTPS sans identifiants, 2048 caractères maximum.');
+    }
 
     if (typeof b.id !== 'string' || !UUID_PATTERN.test(b.id)) {
         throw new BotValidationError('id', 'id invalide (UUID)');
@@ -143,6 +184,7 @@ export function validateBotMutation(raw: unknown): BotMutationInput {
         runtimeId: b.runtimeId,
         fileName: b.fileName,
         displayName: b.displayName,
+        ...(b.avatarUrl !== undefined ? { avatarUrl: typeof b.avatarUrl === 'string' ? b.avatarUrl : null } : {}),
         family: b.family as BotFamily,
         brand: typeof b.brand === 'string' ? b.brand : null,
         network: typeof b.network === 'string' ? b.network : null,
@@ -157,7 +199,7 @@ export function validateBotMutation(raw: unknown): BotMutationInput {
         usefulContext: textField('usefulContext', 2000),
         sources,
         model,
-        enabled: b.enabled !== false,
+        ...(typeof b.enabled === 'boolean' ? { enabled: b.enabled } : {}),
     };
 }
 
@@ -174,6 +216,7 @@ export class PgBotStore {
             runtimeId: r.runtime_id,
             fileName: r.file_name,
             displayName: r.display_name,
+            avatarUrl: r.avatar_url ?? null,
             family: r.family,
             brand: r.brand,
             network: r.network,
@@ -219,6 +262,99 @@ export class PgBotStore {
         return this.rowToProfile(row);
     }
 
+    private async asHuman<T>(actorId: string | undefined, operation: (sql: Sql) => Promise<T>): Promise<T> {
+        if (!actorId || !UUID_PATTERN.test(actorId)) throw new HumanSessionRequiredError();
+        return this.sql.begin(async transaction => {
+            const sql = transaction as unknown as Sql;
+            // `auth.uid()` inside the SECURITY DEFINER RPC reads this value.
+            // It is transaction-local, so a pooled database connection cannot
+            // accidentally reuse the preceding human identity.
+            await sql`select set_config('request.jwt.claim.sub', ${actorId}, true)`;
+            return operation(sql);
+        }) as Promise<T>;
+    }
+
+    async activationStatus(id: string, actorId: string | undefined): Promise<BotActivationStatus> {
+        return this.asHuman(actorId, async sql => {
+            const rows = await sql<{ result: BotActivationStatus }[]>`
+                select public.bot_activation_status(${id}::uuid) as result
+            `;
+            const result = rows[0]?.result;
+            if (!result) throw new BotNotFoundError(id);
+            return result;
+        });
+    }
+
+    async activateVerified(id: string, actorId: string | undefined): Promise<BotActivationResult> {
+        return this.asHuman(actorId, async sql => {
+            const rows = await sql<{ result: BotActivationResult }[]>`
+                select public.activate_verified_bot(${id}::uuid) as result
+            `;
+            const result = rows[0]?.result;
+            if (!result) throw new BotNotFoundError(id);
+            return result;
+        });
+    }
+
+    async deactivate(id: string, reason: string, actorId: string | undefined): Promise<BotActivationResult> {
+        if (!reason.trim()) throw new BotValidationError('reason', 'Un motif de désactivation est requis.');
+        return this.asHuman(actorId, async sql => {
+            const rows = await sql<{ result: BotActivationResult }[]>`
+                select public.deactivate_bot(${id}::uuid, ${reason.trim()}) as result
+            `;
+            const result = rows[0]?.result;
+            if (!result) throw new BotNotFoundError(id);
+            return result;
+        });
+    }
+
+    /** A failed node association must never leave an orphan persona behind. */
+    async createWithNode(input: BotMutationInput): Promise<BotProfile> {
+        if (input.updated_at) throw new BotValidationError('updated_at', 'Une création ne prend pas de version.');
+        const result = await this.sql.begin(async transaction => {
+            const sql = transaction as unknown as Sql;
+            const bot = await new PgBotStore(sql, this.workspaceId).upsert({ ...input, enabled: false });
+            await sql`
+                insert into public.hybrid_nodes
+                    (id, workspace_id, type, nom, role_titre, parent_id, grade_id, skills, status, external_app, avatar_url)
+                values (${bot.id}, ${this.workspaceId}, 'AGENT_IA', ${bot.displayName},
+                    ${bot.brand ? `${bot.family} · ${bot.brand}` : bot.family}, null, 'Agent',
+                    ${sql.array([bot.network, bot.family].filter((value): value is string => Boolean(value)))},
+                    'IDLE', 'organigrad-bots', ${bot.avatarUrl ?? null})
+                on conflict (id) do nothing
+            `;
+            const compatible = await sql`
+                select id from public.hybrid_nodes where id = ${bot.id}
+                    and workspace_id = ${this.workspaceId} and type = 'AGENT_IA' for update
+            `;
+            if (!compatible.length) throw new BotValidationError('id', 'Identifiant déjà associé à un autre membre.');
+            return bot;
+        });
+        return result as BotProfile;
+    }
+
+    /** Synchronize identity only; hierarchy, execution and external ownership stay intact. */
+    async updateWithNode(input: BotMutationInput): Promise<BotProfile> {
+        if (!input.updated_at) throw new BotValidationError('updated_at', 'La version chargée est requise.');
+        const result = await this.sql.begin(async transaction => {
+            const sql = transaction as unknown as Sql;
+            const store = new PgBotStore(sql, this.workspaceId);
+            const previous = await store.get(input.id);
+            if (!previous.enabled && input.enabled === true) throw new BotValidationError('enabled', 'Activation en attente de vérification des connexions et dépendances.');
+            const bot = await store.upsert(input);
+            await sql`
+                update public.hybrid_nodes set
+                    nom = ${bot.displayName},
+                    role_titre = ${bot.brand ? `${bot.family} · ${bot.brand}` : bot.family},
+                    avatar_url = ${bot.avatarUrl ?? null}
+                where id = ${bot.id} and workspace_id = ${this.workspaceId}
+                    and type = 'AGENT_IA' and external_app = 'organigrad-bots'
+            `;
+            return bot;
+        });
+        return result as BotProfile;
+    }
+
     /**
      * Crée ou met à jour un bot. Le prompt compilé et son empreinte sont
      * TOUJOURS recalculés ici — jamais acceptés depuis le client. C'est ce qui
@@ -231,6 +367,7 @@ export class PgBotStore {
             runtimeId: input.runtimeId,
             fileName: input.fileName,
             displayName: input.displayName,
+            avatarUrl: input.avatarUrl ?? null,
             family: input.family,
             brand: input.brand ?? null,
             network: input.network ?? null,
@@ -245,7 +382,7 @@ export class PgBotStore {
             usefulContext: input.usefulContext ?? '',
             sources: input.sources ?? [],
             model: input.model ?? {},
-            enabled: input.enabled ?? true,
+            enabled: input.enabled ?? false,
             compiledPrompt: '',
             compiledSha256: '',
         };
@@ -256,13 +393,16 @@ export class PgBotStore {
             const rows = await this.sql<DbRow[]>`
                 update public.bot_profiles set
                     runtime_id = ${draft.runtimeId}, file_name = ${draft.fileName},
-                    display_name = ${draft.displayName}, family = ${draft.family},
+                    display_name = ${draft.displayName},
+                    avatar_url = case when ${input.avatarUrl !== undefined} then ${draft.avatarUrl ?? null} else avatar_url end,
+                    family = ${draft.family},
                     brand = ${draft.brand}, network = ${draft.network}, telegram_username = ${draft.telegramUsername},
                     mission = ${draft.mission}, personality = ${draft.personality}, research = ${draft.research},
                     watch = ${draft.watch}, deliverables = ${draft.deliverables}, method = ${draft.method},
                     limits = ${draft.limits}, useful_context = ${draft.usefulContext},
                     sources = ${this.sql.json(draft.sources as unknown as JsonValue)},
-                    model = ${this.sql.json(draft.model as unknown as JsonValue)}, enabled = ${draft.enabled},
+                    model = ${this.sql.json(draft.model as unknown as JsonValue)},
+                    enabled = case when ${input.enabled !== undefined} then ${draft.enabled} else enabled end,
                     compiled_prompt = ${compiledPrompt}, compiled_sha256 = ${compiledSha256}
                 where id = ${draft.id} and workspace_id = ${this.workspaceId}
                     and updated_at::text = ${input.updated_at}
@@ -274,11 +414,11 @@ export class PgBotStore {
 
         const rows = await this.sql<DbRow[]>`
             insert into public.bot_profiles
-                (id, workspace_id, runtime_id, file_name, display_name, family, brand, network,
+                (id, workspace_id, runtime_id, file_name, display_name, avatar_url, family, brand, network,
                  telegram_username, mission, personality, research, watch, deliverables, method,
                  limits, useful_context, sources, model, enabled, compiled_prompt, compiled_sha256)
             values
-                (${draft.id}, ${this.workspaceId}, ${draft.runtimeId}, ${draft.fileName}, ${draft.displayName},
+                (${draft.id}, ${this.workspaceId}, ${draft.runtimeId}, ${draft.fileName}, ${draft.displayName}, ${draft.avatarUrl ?? null},
                  ${draft.family}, ${draft.brand}, ${draft.network}, ${draft.telegramUsername},
                  ${draft.mission}, ${draft.personality}, ${draft.research}, ${draft.watch},
                  ${draft.deliverables}, ${draft.method}, ${draft.limits}, ${draft.usefulContext},

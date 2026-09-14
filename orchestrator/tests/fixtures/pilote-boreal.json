@@ -1,0 +1,44 @@
+{
+  "synthetic": true,
+  "environment": "local-test-only",
+  "remoteImport": "not-performed",
+  "project": {
+    "name": "TEST FICTIF — Atelier Boréal",
+    "description": "Association imaginaire qui répare des objets. Tous les noms, documents et sources de ce jeu sont fictifs. Aucun contenu ne doit être publié.",
+    "ref": {
+      "sourceApp": "organigrad",
+      "workspaceId": "10000000-0000-4000-8000-000000000001",
+      "projectId": "10000000-0000-4000-8000-000000000002",
+      "canonicalUrl": "https://organigrad.example.invalid/projects/10000000-0000-4000-8000-000000000002"
+    }
+  },
+  "bindings": {
+    "linkSpaceName": "TEST FICTIF — Atelier Boréal",
+    "orvionBoardName": "TEST FICTIF — Dossiers Atelier Boréal",
+    "remoteLinkSpaceId": null,
+    "remoteOrvionBoardId": null
+  },
+  "members": [
+    {"id":"10000000-0000-4000-8000-000000000011","name":"TEST — Nora Veille","kind":"bot","mission":"Sélectionner et sourcer les sujets ; ne pas rédiger à la place du rédacteur."},
+    {"id":"10000000-0000-4000-8000-000000000012","name":"TEST — Sami Rédaction","kind":"bot","mission":"Rédiger à partir du sujet retenu sans ajouter de statistiques inventées."},
+    {"id":"10000000-0000-4000-8000-000000000013","name":"TEST — Iris Visuel","kind":"bot","mission":"Produire le brief graphique ; ne pas annoncer une image générée sans résultat Engine."},
+    {"id":"10000000-0000-4000-8000-000000000014","name":"TEST — Engine simulé","kind":"application","mission":"Référence simulée utilisée uniquement par les tests unitaires."},
+    {"id":"10000000-0000-4000-8000-000000000015","name":"TEST — Alex Validation","kind":"human","mission":"Identité synthétique locale ; aucun compte réel ni droit distant."}
+  ],
+  "schedule": {"weekday":1,"hour":7,"minute":0,"timeZone":"Europe/Paris","enabled":false},
+  "sources": [
+    {"url":"https://sources.example.invalid/boreal/reparation","title":"SOURCE FICTIVE — carnet de réparation","text":"Dans ce scénario imaginaire, des bénévoles ouvrent un atelier de réparation le samedi."},
+    {"url":"https://sources.example.invalid/boreal/outils","title":"SOURCE FICTIVE — prêt d’outils","text":"Dans ce scénario imaginaire, une bibliothèque prête des outils avec une fiche de retour."}
+  ],
+  "dossiers": [
+    {"id":"10000000-0000-4000-8000-000000000021","title":"TEST FICTIF — Veille réparation du lundi","subject":"Comment préparer une visite à un atelier de réparation ?","articleV1":"CONTENU FICTIF. L’atelier Boréal accueille les objets en panne. Venez avec votre objet et demandez un diagnostic.","correction":"Ajouter une liste de préparation et préciser que la réparation n’est pas garantie.","articleV2":"CONTENU FICTIF. Avant votre visite à l’atelier Boréal, notez la panne, apportez les accessoires utiles et vérifiez les modalités d’accueil. Un diagnostic permet d’évaluer les possibilités ; aucune réparation n’est garantie.","visualPrompt":"ILLUSTRATION DE TEST : atelier de réparation imaginaire, établi en bois, lampe et outils rangés, deux adultes discutant d’un diagnostic, lumière douce, aucun logo, aucun texte, format horizontal."},
+    {"id":"10000000-0000-4000-8000-000000000022","title":"TEST FICTIF — Veille prêt d’outils","subject":"Préparer une fiche de prêt d’outils","articleV1":"CONTENU FICTIF. Une fiche de prêt indique l’outil, sa date de retour et son état.","correction":"Ajouter le contrôle de l’état au retour.","articleV2":"CONTENU FICTIF. La fiche indique l’outil, les dates de prêt et de retour, ainsi que son état constaté au départ et au retour.","visualPrompt":"ILLUSTRATION DE TEST : bibliothèque d’outils imaginaire, étagères ordonnées, composition simple, aucun logo ni texte."}
+  ],
+  "conversation": [
+    {"channel":"telegram","text":"TEST FICTIF — Retenons le sujet sur la préparation d’une visite."},
+    {"channel":"link","text":"TEST FICTIF — Ajouter la liste de préparation et retirer toute garantie de réparation."},
+    {"channel":"link","text":"TEST FICTIF — Version corrigée approuvée dans le banc local uniquement."}
+  ],
+  "engine": {"mode":"fixture-only","realJobId":null,"realImageUrl":null},
+  "publication": {"enabled":false,"destination":null}
+}

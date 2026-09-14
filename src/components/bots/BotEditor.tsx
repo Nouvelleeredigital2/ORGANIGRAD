@@ -15,6 +15,7 @@ import { cx } from '../../design/cx';
 import { TEXT, Z } from '../../design/tokens';
 import { useEscapeClose } from '../../hooks/useEscapeClose';
 import { randomUuid } from '../../utils/randomId';
+import { BotPortrait } from './BotPortrait';
 
 interface BotEditorProps {
     isOpen: boolean;
@@ -122,6 +123,12 @@ export function BotEditor({ isOpen, bot, onClose, onSave }: BotEditorProps) {
 
                 <div className="max-h-[70vh] space-y-6 overflow-y-auto p-6">
                     {/* Identité ------------------------------------------------ */}
+                    <div className="flex items-center gap-4">
+                        <BotPortrait name={draft.displayName} url={draft.avatarUrl} />
+                        <FormField label="URL du portrait" hint="Lien HTTPS vers une image existante. Le téléversement sera disponible ultérieurement.">
+                            <Input aria-label="URL du portrait" type="url" maxLength={2048} value={draft.avatarUrl ?? ''} onChange={(e) => update('avatarUrl', e.target.value || null)} placeholder="https://…" />
+                        </FormField>
+                    </div>
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                         <FormField label="Famille">
                             <Select value={draft.family} onChange={(e) => handleFamilyChange(e.target.value as BotFamily)}>
@@ -322,14 +329,11 @@ export function BotEditor({ isOpen, bot, onClose, onSave }: BotEditorProps) {
                         </FormField>
                     </div>
 
-                    <label className="flex items-center gap-2 text-[13px] text-slate-700">
-                        <input
-                            type="checkbox"
-                            checked={draft.enabled}
-                            onChange={(e) => update('enabled', e.target.checked)}
-                        />
-                        Actif — installé lors de la prochaine synchronisation Hermès
-                    </label>
+                    <p className="text-[13px] text-slate-700">
+                        {draft.enabled
+                            ? 'Bot existant activé — les connexions et le déploiement sont vérifiés séparément.'
+                            : 'Brouillon — activation en attente de vérification des connexions et des dépendances.'}
+                    </p>
 
                     {/* Aperçu du prompt compilé -------------------------------- */}
                     <FormField

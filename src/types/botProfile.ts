@@ -55,6 +55,7 @@ export interface BotProfile {
     /** Fichier lu par le lecteur, ex. 'anita.instagram.bot.txt' ou 'Hannah.txt'. */
     fileName: string;
     displayName: string;
+    avatarUrl?: string | null;
     family: BotFamily;
     brand: string | null;
     network: string | null;
@@ -78,6 +79,15 @@ export const RUNTIME_ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 export const FILE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}\.txt$/;
 export const TELEGRAM_USERNAME_PATTERN = /^[A-Za-z0-9_]{1,64}$/;
 
+/** Public image URL only; neither the compiler nor the server fetches it. */
+export function isBotAvatarUrl(value: unknown): value is string {
+    if (typeof value !== 'string' || value.length > 2048 || !/^https:\/\/\S+$/.test(value)) return false;
+    try {
+        const url = new URL(value);
+        return url.protocol === 'https:' && Boolean(url.hostname) && !url.username && !url.password;
+    } catch { return false; }
+}
+
 /** Bornes alignees sur les contraintes SQL de `bot_profiles`. */
 export const BOT_FIELD_MAX = {
     displayName: 80,
@@ -100,6 +110,7 @@ export function emptyBotProfile(id: string, family: BotFamily = 'redacteur'): Bo
         runtimeId: '',
         fileName: '',
         displayName: '',
+        avatarUrl: null,
         family,
         brand: null,
         network: family === 'redacteur' ? 'instagram' : null,
@@ -114,7 +125,7 @@ export function emptyBotProfile(id: string, family: BotFamily = 'redacteur'): Bo
         usefulContext: '',
         sources: [],
         model: { provider: 'ollama-cloud', model: 'gpt-oss:120b', temperature: 0.3 },
-        enabled: true,
+        enabled: false,
         compiledPrompt: '',
         compiledSha256: '',
     };
@@ -127,6 +138,7 @@ export function emptyBotProfile(id: string, family: BotFamily = 'redacteur'): Bo
  */
 export function validateBotProfile(p: BotProfile): string[] {
     const errors: string[] = [];
+    if (p.avatarUrl != null && !isBotAvatarUrl(p.avatarUrl)) errors.push('Portrait : URL HTTPS sans identifiants, 2048 caractères maximum.');
     if (!p.displayName.trim() || p.displayName.length > BOT_FIELD_MAX.displayName) {
         errors.push('Nom affiche : 1 a 80 caracteres.');
     }
