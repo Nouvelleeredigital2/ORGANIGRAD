@@ -7,7 +7,7 @@ import { OrchestrationEngine } from '../orchestration/engine.js';
 import { createSynapseProducer } from '../synapse/producer.js';
 import { IllegalTransitionError } from '../domain/stateMachine.js';
 import { NodeNotFoundError, OptimisticConcurrencyError } from '../state/pgGraphStore.js';
-import { PgBotStore, BotNotFoundError, BotOptimisticConcurrencyError, BotValidationError, validateBotMutation } from '../state/pgBotStore.js';
+import { PgBotStore, BotNotFoundError, BotOptimisticConcurrencyError, BotValidationError, HumanSessionRequiredError, validateBotMutation } from '../state/pgBotStore.js';
 import { buildAuthHook } from './auth.js';
 import { isProjectReadRoute, registerProjectRoutes } from './projectRoutes.js';
 import { registerProjectServiceDelegationRoutes } from './projectServiceDelegations.js';
@@ -566,6 +566,49 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
         }
     });
 
+    // --- GET /api/bots/:id/activation — vérifications, sans écriture -------
+    app.get<{ Params: { id: string } }>('/api/bots/:id/activation', async (req, reply) => {
+        try {
+            assertScope(req.scopes, SCOPES.botsRead);
+            const store = new PgBotStore(deps.sql, req.workspaceId!);
+            const activation = await store.activationStatus(req.params.id, req.userId);
+            return { activation };
+        } catch (err) {
+            return handleError(reply, err);
+        }
+    });
+
+    // --- POST /api/bots/:id/activation — décision humaine owner/admin -------
+    app.post<{ Params: { id: string } }>('/api/bots/:id/activation', async (req, reply) => {
+        try {
+            assertScope(req.scopes, SCOPES.botsWrite);
+            assertScope(req.scopes, SCOPES.workspaceAdmin);
+            const store = new PgBotStore(deps.sql, req.workspaceId!);
+            const activation = await store.activateVerified(req.params.id, req.userId);
+            recordAudit(req, 'bots:activate', req.params.id, 'success');
+            return { activation };
+        } catch (err) {
+            recordAudit(req, 'bots:activate', req.params.id, auditResultOf(err));
+            return handleError(reply, err);
+        }
+    });
+
+    // --- DELETE /api/bots/:id/activation — retrait humain immédiat ----------
+    app.delete<{ Params: { id: string }; Body: { reason?: unknown } }>('/api/bots/:id/activation', async (req, reply) => {
+        try {
+            assertScope(req.scopes, SCOPES.botsWrite);
+            assertScope(req.scopes, SCOPES.workspaceAdmin);
+            if (typeof req.body?.reason !== 'string') throw new BotValidationError('reason', 'Un motif de désactivation est requis.');
+            const store = new PgBotStore(deps.sql, req.workspaceId!);
+            const activation = await store.deactivate(req.params.id, req.body.reason, req.userId);
+            recordAudit(req, 'bots:deactivate', req.params.id, 'success');
+            return { activation };
+        } catch (err) {
+            recordAudit(req, 'bots:deactivate', req.params.id, auditResultOf(err));
+            return handleError(reply, err);
+        }
+    });
+
     // --- GET /api/bots/:id -----------------------------------------------
     app.get<{ Params: { id: string } }>('/api/bots/:id', async (req, reply) => {
         try {
@@ -893,6 +936,9 @@ function handleError(reply: import('fastify').FastifyReply, err: unknown) {
     }
     if (err instanceof BotValidationError) {
         return reply.code(400).send({ error: 'VALIDATION_ERROR', field: err.field, message: err.message });
+    }
+    if (err instanceof HumanSessionRequiredError) {
+        return reply.code(403).send({ error: 'HUMAN_SESSION_REQUIRED' });
     }
     if (err instanceof BotNotFoundError) {
         return reply.code(404).send({ error: 'BOT_NOT_FOUND', botId: err.botId });

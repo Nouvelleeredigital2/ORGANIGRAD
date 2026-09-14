@@ -78,6 +78,26 @@ export interface BotBundle {
     files: Record<string, { agent: string; content: string; sha256: string }>;
 }
 
+export interface BotActivationCheck {
+    code: string;
+    label: string;
+    passed: boolean;
+}
+
+export interface BotActivationStatus {
+    botId?: string;
+    enabled: boolean;
+    ready: boolean;
+    checks: BotActivationCheck[];
+}
+
+export interface BotActivationResult {
+    status: 'activated' | 'draft';
+    botId: string;
+    actorId: string;
+    verification?: BotActivationStatus;
+}
+
 export interface SseStatusEvent {
     type: 'NODE_STATUS_CHANGED';
     nodeId: string;
@@ -298,6 +318,31 @@ export class OrchestratorClient {
         }
         const body = (await res.json()) as { bots: BotProfile[] };
         return body.bots;
+    }
+
+    async fetchBotActivation(id: string): Promise<BotActivationStatus> {
+        const headers = await this.humanHeaders();
+        const res = await this.fetchImpl(`${this.baseUrl}/bots/${encodeURIComponent(id)}/activation`, { headers });
+        if (!res.ok) throw new OrchestratorClientError(`HTTP_${res.status}`, res.status, await res.json().catch(() => ({})));
+        return ((await res.json()) as { activation: BotActivationStatus }).activation;
+    }
+
+    async activateBot(id: string): Promise<BotActivationResult> {
+        const headers = await this.humanHeaders();
+        const res = await this.fetchImpl(`${this.baseUrl}/bots/${encodeURIComponent(id)}/activation`, {
+            method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: '{}',
+        });
+        if (!res.ok) throw new OrchestratorClientError(`HTTP_${res.status}`, res.status, await res.json().catch(() => ({})));
+        return ((await res.json()) as { activation: BotActivationResult }).activation;
+    }
+
+    async deactivateBot(id: string, reason: string): Promise<BotActivationResult> {
+        const headers = await this.humanHeaders();
+        const res = await this.fetchImpl(`${this.baseUrl}/bots/${encodeURIComponent(id)}/activation`, {
+            method: 'DELETE', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify({ reason }),
+        });
+        if (!res.ok) throw new OrchestratorClientError(`HTTP_${res.status}`, res.status, await res.json().catch(() => ({})));
+        return ((await res.json()) as { activation: BotActivationResult }).activation;
     }
 
     private async circuitRequest<T>(path: string, body?: unknown, method='GET'): Promise<T> {

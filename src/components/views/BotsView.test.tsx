@@ -1,14 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { BotsView } from './BotsView';
 import type { BotProfile } from '../../types/botProfile';
 import type { WorkspaceRole } from '../../auth/permissions';
+import type { OrchestratorClient } from '../../services/orchestratorService';
+
+type TestClient = Pick<OrchestratorClient, 'fetchBots' | 'fetchBotActivation'>;
 
 const bridgeMock = vi.hoisted(() => ({
     connected: false,
     connectionState: 'local' as 'local' | 'connecting' | 'connected' | 'degraded' | 'failed',
     nodes: [],
-    client: null as null | { fetchBots: () => Promise<BotProfile[]> },
+    client: null as null | TestClient,
 }));
 
 vi.mock('../../hooks/useOrchestratorBridge', () => ({
@@ -87,6 +90,23 @@ describe('BotsView', () => {
         render(<BotsView />);
         await waitFor(() => expect(screen.getByRole('button', { name: 'Éditer Anita' })).toBeInTheDocument());
         expect(screen.queryByRole('button', { name: 'Supprimer Anita' })).not.toBeInTheDocument();
+    });
+
+    it('shows a verified activation decision to an administrator', async () => {
+        bridgeMock.connectionState = 'connected';
+        bridgeMock.client = {
+            fetchBots: vi.fn(async () => [{ ...BOT, enabled: false }]),
+            fetchBotActivation: vi.fn(async () => ({
+                ready: true,
+                enabled: false,
+                checks: [{ code: 'mission', label: 'Mission définie', passed: true }],
+            })),
+        };
+        render(<BotsView />);
+        await screen.findByText('Anita');
+        fireEvent.click(screen.getByRole('button', { name: 'Vérifier Anita' }));
+        expect(await screen.findByText('Prêt à activer')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Activer Anita' })).toBeInTheDocument();
     });
 
     it('ignores an old workspace response after the new workspace has loaded', async()=>{
