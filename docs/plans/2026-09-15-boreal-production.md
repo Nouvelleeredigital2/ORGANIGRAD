@@ -1,3 +1,6 @@
+# Plan remplacé — Boréal Production
+
+> **Statut : historique.** Le 15 septembre, la décision a changé : la prochaine étape est la recette connectée de `TEST FICTIF — Atelier Boréal`. Boréal Production ne sera créé qu’après cette réussite. Le plan actif est [2026-09-15-atelier-boreal-connecte.md](2026-09-15-atelier-boreal-connecte.md).
 # Boréal Production Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.

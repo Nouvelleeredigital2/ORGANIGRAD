@@ -1,6 +1,9 @@
 import { CircuitDefinitionSchema, type CircuitDefinition } from '@apps2026/contracts';
 
-export interface BorealProductionTeam {
+export const BOREAL_RECIPE_PROJECT_NAME = 'TEST FICTIF — Atelier Boréal';
+export const BOREAL_RECIPE_CIRCUIT_NAME = 'TEST FICTIF — Atelier Boréal — recette connectée';
+
+export interface BorealRecipeTeam {
     project: CircuitDefinition['project'];
     ericId: string;
     designId: string;
@@ -10,19 +13,18 @@ export interface BorealProductionTeam {
 }
 
 /**
- * Modèle du pilote réel. Il ne crée aucune donnée distante : la création du
- * projet, les activations et les mandats restent des gestes gouvernés. Il
- * fournit seulement une définition cohérente à enregistrer par les routes de
- * circuit persistantes déjà autorisées.
+ * Modèle de recette, borné au projet fictif Atelier Boréal par la route.
+ * Il ne crée ni projet distant, ni programmation, ni publication ; ces gestes
+ * restent séparés du futur projet Boréal Production.
  */
-export function createBorealProductionTemplate(team: BorealProductionTeam): CircuitDefinition {
-    if (team.project.sourceApp !== 'organigrad') throw new Error('Boréal Production doit appartenir à OrganiGrad');
+export function createBorealRecipeTemplate(team: BorealRecipeTeam): CircuitDefinition {
+    if (team.project.sourceApp !== 'organigrad') throw new Error('La recette Atelier Boréal doit appartenir à OrganiGrad');
     const identities = [team.ericId, team.designId, team.engineId, team.guardianId, team.humanId];
     if (identities.some((id) => !id.trim()) || new Set(identities).size !== identities.length) {
-        throw new Error('Les identités Boréal doivent être distinctes');
+        throw new Error('Les identités Atelier Boréal doivent être distinctes');
     }
     return CircuitDefinitionSchema.parse({
-        name: 'Boréal Production — parcours éditorial',
+        name: BOREAL_RECIPE_CIRCUIT_NAME,
         project: team.project,
         schedule: null,
         steps: [

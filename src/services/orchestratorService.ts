@@ -98,7 +98,7 @@ export interface BotActivationResult {
     verification?: BotActivationStatus;
 }
 
-export interface BorealProductionTemplateInput {
+export interface BorealRecipeTemplateInput {
     projectId: string;
     ericId: string;
     designId: string;
@@ -398,9 +398,9 @@ export class OrchestratorClient {
     async saveCircuit(definition:CircuitDefinition,existing?:StoredCircuit):Promise<StoredCircuit> {
         return (await this.circuitRequest<{circuit:StoredCircuit}>(existing?`/circuits/${encodeURIComponent(existing.id)}`:'/circuits',{definition,...(existing?{expectedVersion:existing.version}:{})},existing?'PUT':'POST')).circuit;
     }
-    /** Crée le modèle Boréal Production côté serveur après ses préconditions d’activation. */
-    async createBorealProductionCircuit(input:BorealProductionTemplateInput):Promise<StoredCircuit> {
-        return (await this.circuitRequest<{circuit:StoredCircuit}>('/circuits/boreal-production-template',input,'POST')).circuit;
+    /** Crée exclusivement le modèle de recette Atelier Boréal côté serveur après ses préconditions d’activation. */
+    async createBorealRecipeCircuit(input:BorealRecipeTemplateInput):Promise<StoredCircuit> {
+        return (await this.circuitRequest<{circuit:StoredCircuit}>('/circuits/boreal-recipe-template',input,'POST')).circuit;
     }
 
     async upsertBot(bot: BotMutationPayload): Promise<BotProfile> {

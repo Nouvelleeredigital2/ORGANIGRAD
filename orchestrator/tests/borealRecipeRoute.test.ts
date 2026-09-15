@@ -25,12 +25,12 @@ function sql(enabled = true, existing = false) {
         if (text.includes('from public.bot_profiles')) return Promise.resolve([{ enabled }]);
         if (text.includes('from public.team_circuits') && text.includes("definition->>'name'")) return Promise.resolve(existing ? [{
             id: '88888888-8888-4888-8888-888888888888', version: 1, enabled: false,
-            definition: { name: 'Boréal Production — parcours éditorial', project: { projectId: ids.projectId }, steps: [] },
+            definition: { name: 'TEST FICTIF — Atelier Boréal — recette connectée', project: { projectId: ids.projectId }, steps: [] },
         }] : []);
-        if (text.includes('from public.projects')) return Promise.resolve([{ id: ids.projectId }]);
+        if (text.includes('from public.projects')) return Promise.resolve([{ id: ids.projectId, name: 'TEST FICTIF — Atelier Boréal' }]);
         if (text.includes('insert into public.team_circuits')) return Promise.resolve([{
             id: '88888888-8888-4888-8888-888888888888', version: 1, enabled: false,
-            definition: { name: 'Boréal Production — parcours éditorial', project: { projectId: ids.projectId }, steps: [] },
+            definition: { name: 'TEST FICTIF — Atelier Boréal — recette connectée', project: { projectId: ids.projectId }, steps: [] },
         }]);
         return Promise.resolve([]);
     });
@@ -41,43 +41,60 @@ function sql(enabled = true, existing = false) {
     return query as unknown as Sql;
 }
 
-describe('POST /api/circuits/boreal-production-template', () => {
-    it('creates the governed seven-step template only when the three pilot bots are activated', async () => {
+describe('POST /api/circuits/boreal-recipe-template', () => {
+    it('creates the governed seven-step recipe template only when the three pilot bots are activated', async () => {
         const app = Fastify();
         app.addHook('onRequest', async req => { req.workspaceId = workspaceId; req.userId = humanId; });
         const database = sql(true);
         registerCircuitRoutes(app, { sql: database, appUrl: 'https://organigrad.example.test' });
 
-        const response = await app.inject({ method: 'POST', url: '/api/circuits/boreal-production-template', payload: { ...ids, humanId } });
+        const response = await app.inject({ method: 'POST', url: '/api/circuits/boreal-recipe-template', payload: { ...ids, humanId } });
 
         expect(response.statusCode, response.body).toBe(201);
-        expect(response.json().circuit.definition.name).toBe('Boréal Production — parcours éditorial');
+        expect(response.json().circuit.definition.name).toBe('TEST FICTIF — Atelier Boréal — recette connectée');
         expect((database as unknown as ReturnType<typeof vi.fn>).mock.calls.some(call => String(call[0]).includes('bot_profiles'))).toBe(true);
         await app.close();
     });
 
-    it('refuses to create the production circuit while a pilot persona remains a draft', async () => {
+    it('refuses to create the recipe circuit while a pilot persona remains a draft', async () => {
         const app = Fastify();
         app.addHook('onRequest', async req => { req.workspaceId = workspaceId; req.userId = humanId; });
         registerCircuitRoutes(app, { sql: sql(false), appUrl: 'https://organigrad.example.test' });
 
-        const response = await app.inject({ method: 'POST', url: '/api/circuits/boreal-production-template', payload: { ...ids, humanId } });
+        const response = await app.inject({ method: 'POST', url: '/api/circuits/boreal-recipe-template', payload: { ...ids, humanId } });
 
         expect(response.statusCode, response.body).toBe(409);
         expect(response.json()).toMatchObject({ error: 'PILOT_BOT_NOT_ACTIVATED' });
         await app.close();
     });
 
-    it('returns the existing production circuit instead of creating a duplicate after a lost response', async () => {
+    it('returns the existing recipe circuit instead of creating a duplicate after a lost response', async () => {
         const app = Fastify();
         app.addHook('onRequest', async req => { req.workspaceId = workspaceId; req.userId = humanId; });
         const database = sql(true, true);
         registerCircuitRoutes(app, { sql: database, appUrl: 'https://organigrad.example.test' });
 
-        const response = await app.inject({ method: 'POST', url: '/api/circuits/boreal-production-template', payload: { ...ids, humanId } });
+        const response = await app.inject({ method: 'POST', url: '/api/circuits/boreal-recipe-template', payload: { ...ids, humanId } });
 
         expect(response.statusCode, response.body).toBe(200);
         expect((database as unknown as ReturnType<typeof vi.fn>).mock.calls.some(call => String(call[0]).includes('insert into public.team_circuits'))).toBe(false);
+        await app.close();
+    });
+    it('refuses a project other than TEST FICTIF — Atelier Boréal', async () => {
+        const app = Fastify();
+        app.addHook('onRequest', async req => { req.workspaceId = workspaceId; req.userId = humanId; });
+        const database = sql(true);
+        const original = database as unknown as ReturnType<typeof vi.fn>;
+        original.mockImplementation((strings: TemplateStringsArray) => {
+            const text = strings.join(' ').toLowerCase();
+            if (text.includes('workspace_members')) return Promise.resolve([{ role: 'admin' }]);
+            if (text.includes('from public.projects')) return Promise.resolve([{ id: ids.projectId, name: 'Un autre projet' }]);
+            return Promise.resolve([]);
+        });
+        registerCircuitRoutes(app, { sql: database, appUrl: 'https://organigrad.example.test' });
+        const response = await app.inject({ method: 'POST', url: '/api/circuits/boreal-recipe-template', payload: { ...ids, humanId } });
+        expect(response.statusCode, response.body).toBe(409);
+        expect(response.json()).toMatchObject({ error: 'BOREAL_RECIPE_PROJECT_REQUIRED' });
         await app.close();
     });
 });
