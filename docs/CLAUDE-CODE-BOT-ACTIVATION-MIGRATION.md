@@ -50,4 +50,3 @@ Le canal Telegram, Vox ou Engine n'est pas considéré comme vérifié par cette
 ## Retour arrière
 
 Ne pas supprimer les reçus pendant un retour arrière : ils sont l'historique de décision. Le retour fonctionnel est de désactiver le bot avec `deactivate_bot`, ce qui conserve la trace. Un retour de schéma exige une décision séparée après export des reçus ; il ne fait pas partie de cette migration.
-
