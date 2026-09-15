@@ -14,7 +14,7 @@
 import type { HybridNode, NodeStatus, McpConfig, NotificationChannels } from '../types/hybridNode';
 import type { BotProfile } from '../types/botProfile';
 import { CircuitScheduleSchema, type CircuitDecision, type CircuitDefinition, type CircuitSchedule } from '@apps2026/contracts';
-import type { CircuitOptions, CircuitRun, StoredCircuit } from '../types/circuit';
+import type { CircuitOptions, CircuitRun, StoredCircuit, ScheduleAuthorization, ScheduleOccurrence } from '../types/circuit';
 
 /**
  * Vue PUBLIQUE d'un nœud renvoyée par `GET /api/graph` (cf. DTO côté
@@ -76,6 +76,26 @@ export interface BotMutationPayload {
 /** Paquet de synchronisation Hermès — GET /api/bots/bundle. */
 export interface BotBundle {
     files: Record<string, { agent: string; content: string; sha256: string }>;
+}
+
+export interface BotActivationCheck {
+    code: string;
+    label: string;
+    passed: boolean;
+}
+
+export interface BotActivationStatus {
+    botId?: string;
+    enabled: boolean;
+    ready: boolean;
+    checks: BotActivationCheck[];
+}
+
+export interface BotActivationResult {
+    status: 'activated' | 'draft';
+    botId: string;
+    actorId: string;
+    verification?: BotActivationStatus;
 }
 
 export interface SseStatusEvent {
@@ -160,6 +180,10 @@ export class OrchestratorClient {
         return this.apiKey ? { authorization: `Bearer ${this.apiKey}` } : {};
     }
 
+    private async connectionHeaders(): Promise<Record<string, string>> {
+        return this.apiKey ? this.authHeaders() : this.humanHeaders();
+    }
+
     /**
      * En-têtes pour une action HUMAINE : session utilisateur (JWT + workspace) si
      * disponible, sinon repli sur la clé API (qui, sans scope humain, sera refusée
@@ -186,7 +210,8 @@ export class OrchestratorClient {
         try {
             const res = await this.fetchImpl(`${this.baseUrl}/graph`, {
                 method: 'GET',
-                headers: { accept: 'application/json', ...this.authHeaders() },
+                headers: { accept: 'application/json', ...await this.connectionHeaders() },
+                redirect: 'error',
                 signal: delaiMaximal(timeoutMs),
             });
             return res.ok;
@@ -198,7 +223,8 @@ export class OrchestratorClient {
 
     async fetchGraph(): Promise<OrchestratorGraphNode[]> {
         const res = await this.fetchImpl(`${this.baseUrl}/graph`, {
-            headers: this.authHeaders(),
+            headers: await this.connectionHeaders(),
+            redirect: 'error',
         });
         if (!res.ok) throw new Error(`GET /graph → ${res.status}`);
         const body = (await res.json()) as { nodes: OrchestratorGraphNode[] };
@@ -294,14 +320,55 @@ export class OrchestratorClient {
         return body.bots;
     }
 
+    async fetchBotActivation(id: string): Promise<BotActivationStatus> {
+        const headers = await this.humanHeaders();
+        const res = await this.fetchImpl(`${this.baseUrl}/bots/${encodeURIComponent(id)}/activation`, { headers });
+        if (!res.ok) throw new OrchestratorClientError(`HTTP_${res.status}`, res.status, await res.json().catch(() => ({})));
+        return ((await res.json()) as { activation: BotActivationStatus }).activation;
+    }
+
+    async activateBot(id: string): Promise<BotActivationResult> {
+        const headers = await this.humanHeaders();
+        const res = await this.fetchImpl(`${this.baseUrl}/bots/${encodeURIComponent(id)}/activation`, {
+            method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: '{}',
+        });
+        if (!res.ok) throw new OrchestratorClientError(`HTTP_${res.status}`, res.status, await res.json().catch(() => ({})));
+        return ((await res.json()) as { activation: BotActivationResult }).activation;
+    }
+
+    async deactivateBot(id: string, reason: string): Promise<BotActivationResult> {
+        const headers = await this.humanHeaders();
+        const res = await this.fetchImpl(`${this.baseUrl}/bots/${encodeURIComponent(id)}/activation`, {
+            method: 'DELETE', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify({ reason }),
+        });
+        if (!res.ok) throw new OrchestratorClientError(`HTTP_${res.status}`, res.status, await res.json().catch(() => ({})));
+        return ((await res.json()) as { activation: BotActivationResult }).activation;
+    }
+
     private async circuitRequest<T>(path: string, body?: unknown, method='GET'): Promise<T> {
         const headers=await this.humanHeaders();
         const res=await this.fetchImpl(`${this.baseUrl}${path}`,{method,headers:{...headers,'Content-Type':'application/json'},cache:'no-store',redirect:'error',signal:delaiMaximal(10000),...(body===undefined?{}:{body:JSON.stringify(body)})});
         if(!res.ok)throw new OrchestratorClientError(`HTTP_${res.status}`,res.status,await res.json().catch(()=>({})));
+        if(res.status===204)return undefined as T;
         return res.json() as Promise<T>;
     }
     async fetchCircuits():Promise<StoredCircuit[]> {
         return (await this.circuitRequest<{circuits:StoredCircuit[]}>('/circuits')).circuits;
+    }
+    async fetchCircuitSchedule(id:string):Promise<ScheduleAuthorization|null> {
+        return (await this.circuitRequest<{authorization:ScheduleAuthorization|null}>(`/circuits/${encodeURIComponent(id)}/schedule-authorization`)).authorization;
+    }
+    async fetchCircuitOccurrences(id:string):Promise<ScheduleOccurrence[]> {
+        return (await this.circuitRequest<{occurrences:ScheduleOccurrence[]}>(`/circuits/${encodeURIComponent(id)}/occurrences`)).occurrences;
+    }
+    async recoverCircuitOccurrence(id:string,occurrenceId:string):Promise<CircuitRun> {
+        return (await this.circuitRequest<{run:CircuitRun}>(`/circuits/${encodeURIComponent(id)}/occurrences/${encodeURIComponent(occurrenceId)}/recover`,{},'POST')).run;
+    }
+    async authorizeCircuitSchedule(id:string,input:{idempotencyKey:string;expectedVersion:number;expiresAt:string}):Promise<ScheduleAuthorization> {
+        return (await this.circuitRequest<{authorization:ScheduleAuthorization}>(`/circuits/${encodeURIComponent(id)}/schedule-authorization`,input,'POST')).authorization;
+    }
+    async revokeCircuitSchedule(id:string,grantId:string):Promise<void> {
+        await this.circuitRequest(`/circuits/${encodeURIComponent(id)}/schedule-authorization/${encodeURIComponent(grantId)}`,undefined,'DELETE');
     }
     async fetchCircuitOptions():Promise<CircuitOptions> { return this.circuitRequest('/circuits/options'); }
     async previewCircuitSchedule(schedule:CircuitSchedule):Promise<string[]> {
@@ -310,6 +377,9 @@ export class OrchestratorClient {
         return result.occurrences;
     }
     async fetchCircuitRuns():Promise<CircuitRun[]> { return (await this.circuitRequest<{runs:CircuitRun[]}>('/circuit-runs')).runs; }
+    async startCircuitRun(circuitId:string,idempotencyKey:string):Promise<CircuitRun> {
+        return (await this.circuitRequest<{run:CircuitRun}>(`/circuits/${encodeURIComponent(circuitId)}/runs`,{idempotencyKey},'POST')).run;
+    }
     async decideCircuitRun(id:string,decision:CircuitDecision):Promise<CircuitRun> {
         return (await this.circuitRequest<{run:CircuitRun}>(`/circuit-runs/${encodeURIComponent(id)}/decisions`,decision,'POST')).run;
     }
@@ -401,7 +471,7 @@ export class OrchestratorClient {
         // actions humaines (session utilisateur vérifiée requise par l'orchestrateur).
         const headers =
             action === 'run' || action === 'run-flow'
-                ? this.authHeaders()
+                ? await this.connectionHeaders()
                 : await this.humanHeaders();
         const res = await this.fetchImpl(`${this.baseUrl}/nodes/${id}/${action}`, {
             method: 'POST',
@@ -423,7 +493,7 @@ export class OrchestratorClient {
     private async fetchSseTicket(): Promise<string> {
         const res = await this.fetchImpl(`${this.baseUrl}/events/ticket`, {
             method: 'POST',
-            headers: { 'content-type': 'application/json', ...this.authHeaders() },
+            headers: { 'content-type': 'application/json', ...await this.connectionHeaders() },
             body: '{}',
         });
         if (!res.ok) throw new OrchestratorClientError(`TICKET_${res.status}`, res.status);

@@ -1,0 +1,42 @@
+import { act,cleanup,fireEvent,render,screen } from '@testing-library/react';
+import { afterEach,beforeEach,expect,it,vi } from 'vitest';
+import { CircuitManualStart } from './CircuitManualStart';
+beforeEach(()=>sessionStorage.clear());
+afterEach(()=>{cleanup();vi.restoreAllMocks();});
+const props={circuitId:'circuit',contextKey:'user:workspace',onStarted:vi.fn()};
+it('explains unavailable session storage without sending a request',async()=>{
+ vi.spyOn(Storage.prototype,'setItem').mockImplementation(()=>{throw new Error('blocked');});
+ const startCircuitRun=vi.fn();
+ render(<CircuitManualStart {...props} client={{startCircuitRun}}/>);
+ fireEvent.click(screen.getByRole('button',{name:'Démarrer un dossier'}));
+ expect(await screen.findByRole('alert')).toHaveTextContent('stockage de session');
+ expect(startCircuitRun).not.toHaveBeenCalled();
+});
+it('reuses an unconfirmed request after a network failure and remount',async()=>{
+ const startCircuitRun=vi.fn().mockRejectedValueOnce(new Error('network')).mockResolvedValue({id:'run'});
+ const view=render(<CircuitManualStart {...props} client={{startCircuitRun}}/>);
+ fireEvent.click(screen.getByRole('button',{name:'Démarrer un dossier'}));
+ await screen.findByRole('alert');
+ view.unmount();
+ render(<CircuitManualStart {...props} client={{startCircuitRun}}/>);
+ fireEvent.click(screen.getByRole('button',{name:'Démarrer un dossier'}));
+ await screen.findByText('Dossier créé.');
+ expect(startCircuitRun.mock.calls[0]).toEqual(startCircuitRun.mock.calls[1]);
+ expect(startCircuitRun.mock.calls[0]![1]).toMatch(/^[0-9a-f-]{36}$/);
+ expect(sessionStorage.length).toBe(0);
+});
+it('separates requests for different workspaces and prevents double submission',async()=>{
+ let finish!:(value:unknown)=>void;
+ const startCircuitRun=vi.fn().mockImplementation(()=>new Promise(resolve=>{finish=resolve;}));
+ const onStarted=vi.fn();
+ const view=render(<CircuitManualStart {...props} onStarted={onStarted} client={{startCircuitRun}}/>);
+ const button=screen.getByRole('button',{name:'Démarrer un dossier'});
+ fireEvent.click(button);fireEvent.click(button);
+ expect(startCircuitRun).toHaveBeenCalledTimes(1);
+ view.unmount();
+ await act(async()=>{finish({id:'old'});});
+ expect(onStarted).not.toHaveBeenCalled();
+ render(<CircuitManualStart {...props} contextKey="user:other-workspace" client={{startCircuitRun}}/>);
+ fireEvent.click(screen.getByRole('button',{name:'Démarrer un dossier'}));
+ expect(startCircuitRun.mock.calls[0]![1]).not.toBe(startCircuitRun.mock.calls[1]![1]);
+});

@@ -26,6 +26,34 @@ export class BotValidationError extends Error {
     }
 }
 
+export class HumanSessionRequiredError extends Error {
+    constructor() {
+        super('Une session humaine vérifiée est requise pour cette décision.');
+        this.name = 'HumanSessionRequiredError';
+    }
+}
+
+export interface BotActivationCheck {
+    code: string;
+    label: string;
+    passed: boolean;
+}
+
+export interface BotActivationStatus {
+    botId: string;
+    workspaceId?: string;
+    enabled: boolean;
+    ready: boolean;
+    checks: BotActivationCheck[];
+}
+
+export interface BotActivationResult {
+    status: 'activated' | 'draft';
+    botId: string;
+    actorId: string;
+    verification?: BotActivationStatus;
+}
+
 /**
  * Sort de `updateWithNode` : la fiche appartient à Organigrad et est toujours
  * écrite ; le nœud d'organigramme qui la reflète ne l'est que si Organigrad le
@@ -249,6 +277,52 @@ export class PgBotStore {
         const row = rows[0];
         if (!row) throw new BotNotFoundError(id);
         return this.rowToProfile(row);
+    }
+
+    private async asHuman<T>(actorId: string | undefined, operation: (sql: Sql) => Promise<T>): Promise<T> {
+        if (!actorId || !UUID_PATTERN.test(actorId)) throw new HumanSessionRequiredError();
+        return this.sql.begin(async transaction => {
+            const sql = transaction as unknown as Sql;
+            // `auth.uid()` inside the SECURITY DEFINER RPC reads this value.
+            // It is transaction-local, so a pooled database connection cannot
+            // accidentally reuse the preceding human identity.
+            await sql`select set_config('request.jwt.claim.sub', ${actorId}, true)`;
+            return operation(sql);
+        }) as Promise<T>;
+    }
+
+    async activationStatus(id: string, actorId: string | undefined): Promise<BotActivationStatus> {
+        return this.asHuman(actorId, async sql => {
+            const rows = await sql<{ result: BotActivationStatus }[]>`
+                select public.bot_activation_status(${id}::uuid) as result
+            `;
+            const result = rows[0]?.result;
+            if (!result) throw new BotNotFoundError(id);
+            return result;
+        });
+    }
+
+    async activateVerified(id: string, actorId: string | undefined): Promise<BotActivationResult> {
+        return this.asHuman(actorId, async sql => {
+            const rows = await sql<{ result: BotActivationResult }[]>`
+                select public.activate_verified_bot(${id}::uuid) as result
+            `;
+            const result = rows[0]?.result;
+            if (!result) throw new BotNotFoundError(id);
+            return result;
+        });
+    }
+
+    async deactivate(id: string, reason: string, actorId: string | undefined): Promise<BotActivationResult> {
+        if (!reason.trim()) throw new BotValidationError('reason', 'Un motif de désactivation est requis.');
+        return this.asHuman(actorId, async sql => {
+            const rows = await sql<{ result: BotActivationResult }[]>`
+                select public.deactivate_bot(${id}::uuid, ${reason.trim()}) as result
+            `;
+            const result = rows[0]?.result;
+            if (!result) throw new BotNotFoundError(id);
+            return result;
+        });
     }
 
     /** A failed node association must never leave an orphan persona behind. */

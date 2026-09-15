@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { Sql, TransactionSql } from 'postgres';
-import { CircuitDefinitionSchema, type CircuitDefinition, type CircuitDecision } from '@apps2026/contracts';
-import { CircuitError, startExecution, decideStep, controlExecution, nextOccurrences, type CircuitExecution } from '../orchestration/circuits.js';
+import { CircuitDefinitionSchema, type ArtifactReference, type CircuitDefinition, type CircuitDecision } from '@apps2026/contracts';
+import { CircuitError, startExecution, decideStep, controlExecution, completeStep, nextOccurrences, type CircuitExecution } from '../orchestration/circuits.js';
 
 export interface StoredCircuit { id:string; version:number; definition:CircuitDefinition; enabled:boolean; }
 export class PgCircuitStore {
@@ -29,7 +29,11 @@ export class PgCircuitStore {
     if(!previous[0])throw new CircuitError('STALE_CIRCUIT');
     const rows=await tx<StoredCircuit[]>`update public.team_circuits set definition=${tx.json(definition)},version=version+1,updated_at=clock_timestamp() where id=${id} and workspace_id=${this.workspaceId} and project_id=${definition.project.projectId} and version=${expectedVersion} returning id,version,definition,enabled`;
     if(!rows[0])throw new CircuitError('STALE_CIRCUIT');
-    if(JSON.stringify(previous[0].definition.schedule)!==JSON.stringify(definition.schedule)) {
+    const oldSchedule=previous[0].definition.schedule??undefined,newSchedule=definition.schedule??undefined;
+    const scheduleChanged=oldSchedule===undefined || newSchedule===undefined
+     ? oldSchedule!==newSchedule
+     : oldSchedule.weekday!==newSchedule.weekday || oldSchedule.hour!==newSchedule.hour || oldSchedule.minute!==newSchedule.minute || oldSchedule.timeZone!==newSchedule.timeZone;
+    if(scheduleChanged) {
      if(!definition.schedule)await tx`delete from public.circuit_schedule_cursors where circuit_id=${id} and workspace_id=${this.workspaceId}`;
      else {
       const clock=await tx<{now:Date}[]>`select clock_timestamp() as now`;
@@ -70,6 +74,16 @@ export class PgCircuitStore {
    const rows=await tx<{state:CircuitExecution}[]>`select state from public.circuit_executions where id=${id} and workspace_id=${this.workspaceId} for update`;
    if(!rows[0])throw new CircuitError('RUN_NOT_FOUND',404);
    const state=decideStep(rows[0].state,input,actor);
+   await tx`update public.circuit_executions set state=${tx.json(state as unknown as Record<string,never>)},version=${state.version},updated_at=clock_timestamp() where id=${id} and workspace_id=${this.workspaceId}`;
+   return state;
+  }) as unknown as CircuitExecution;
+ }
+ /** Frontière service : l'appelant a déjà vérifié la délégation et détient un reçu accepté pour ces sorties. */
+ async complete(id:string,stepId:string,expectedVersion:number,outputs:ArtifactReference[]):Promise<CircuitExecution> {
+  return await this.sql.begin(async tx=>{
+   const rows=await tx<{state:CircuitExecution}[]>`select state from public.circuit_executions where id=${id} and workspace_id=${this.workspaceId} for update`;
+   if(!rows[0])throw new CircuitError('RUN_NOT_FOUND',404);
+   const state=completeStep(rows[0].state,stepId,expectedVersion,outputs);
    await tx`update public.circuit_executions set state=${tx.json(state as unknown as Record<string,never>)},version=${state.version},updated_at=clock_timestamp() where id=${id} and workspace_id=${this.workspaceId}`;
    return state;
   }) as unknown as CircuitExecution;

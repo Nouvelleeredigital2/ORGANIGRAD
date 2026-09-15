@@ -18,8 +18,9 @@ function signJwt(payload: Record<string, unknown>): string {
     const s = createHmac('sha256', JWT_SECRET).update(`${h}.${p}`).digest('base64url');
     return `${h}.${p}.${s}`;
 }
-const MEMBER_JWT = signJwt({ sub: 'user-member', exp: FUTURE });
-const VIEWER_JWT = signJwt({ sub: 'user-viewer', exp: FUTURE });
+const MEMBER_ID = '00000000-0000-4000-8000-000000000010';
+const MEMBER_JWT = signJwt({ sub: MEMBER_ID, exp: FUTURE });
+const VIEWER_JWT = signJwt({ sub: '00000000-0000-4000-8000-000000000011', exp: FUTURE });
 
 const BOT_ROW = {
     id: '00000000-0000-4000-8000-000000000001',
@@ -54,6 +55,20 @@ function makeSql(role: string, opts: { insertRow?: typeof BOT_ROW | null } = {})
     const fn = vi.fn((strings: TemplateStringsArray) => {
         const q = String(strings.join(' ')).toLowerCase();
         if (q.includes('workspace_members')) return Promise.resolve([{ role }]);
+        if (q.includes('bot_activation_status')) return Promise.resolve([{
+            result: {
+                botId: BOT_ROW.id,
+                ready: true,
+                enabled: false,
+                checks: [{ code: 'mission', label: 'Mission définie', passed: true }],
+            },
+        }]);
+        if (q.includes('activate_verified_bot')) return Promise.resolve([{
+            result: { status: 'activated', botId: BOT_ROW.id, actorId: MEMBER_ID },
+        }]);
+        if (q.includes('deactivate_bot')) return Promise.resolve([{
+            result: { status: 'draft', botId: BOT_ROW.id, actorId: MEMBER_ID },
+        }]);
         if (q.includes('insert into public.bot_profiles')) {
             return Promise.resolve(opts.insertRow === null ? [] : [opts.insertRow ?? BOT_ROW]);
         }
@@ -160,6 +175,32 @@ describe('/api/bots', () => {
         const res = await inject('GET', '/api/bots/00000000-0000-4000-8000-000000000009', MEMBER_JWT);
         expect(res.statusCode).toBe(404);
         expect(res.json().error).toBe('BOT_NOT_FOUND');
+    });
+
+    it('exposes activation checks to a workspace member without permitting activation', async () => {
+        await build('member');
+        const status = await inject('GET', `/api/bots/${VALID_BODY.id}/activation`, MEMBER_JWT);
+        expect(status.statusCode).toBe(200);
+        expect(status.json().activation).toMatchObject({ ready: true, enabled: false });
+
+        const attempt = await inject('POST', `/api/bots/${VALID_BODY.id}/activation`, MEMBER_JWT, {});
+        expect(attempt.statusCode).toBe(403);
+        expect(attempt.json().error).toBe('INSUFFICIENT_SCOPE');
+    });
+
+    it('lets an administrator activate and deactivate through dedicated human routes', async () => {
+        const sql = await build('admin');
+        const activate = await inject('POST', `/api/bots/${VALID_BODY.id}/activation`, MEMBER_JWT, {});
+        expect(activate.statusCode).toBe(200);
+        expect(activate.json().activation).toMatchObject({ status: 'activated', botId: VALID_BODY.id });
+
+        const deactivate = await inject('DELETE', `/api/bots/${VALID_BODY.id}/activation`, MEMBER_JWT, { reason: 'Révision demandée' });
+        expect(deactivate.statusCode).toBe(200);
+        expect(deactivate.json().activation).toMatchObject({ status: 'draft', botId: VALID_BODY.id });
+
+        const queries = (sql as unknown as ReturnType<typeof vi.fn>).mock.calls.map(call => String(call[0]).toLowerCase());
+        expect(queries.some(query => query.includes('activate_verified_bot'))).toBe(true);
+        expect(queries.some(query => query.includes('deactivate_bot'))).toBe(true);
     });
 
     it('POST /api/bots — 400 avant tout accès SQL si le corps est invalide', async () => {

@@ -11,6 +11,11 @@ export interface EngineJobState { jobId: string; status: EngineJobStatus }
 export interface EngineSubmittedJob extends EngineJobState { pipeline: string[] }
 export interface EngineArtifactReference { fileId: string; role: string; type: string; downloadUrl: string }
 export interface EngineImageInput { engineId: string; prompt: string }
+export function validEngineImageInput(input: EngineImageInput): boolean {
+    return !!input && typeof input.engineId === 'string' && /^[a-z][a-z0-9-]{0,63}$/.test(input.engineId)
+        && input.engineId !== 'automatic' && typeof input.prompt === 'string'
+        && !!input.prompt.trim() && input.prompt.length <= 2000;
+}
 export type EngineTaskErrorCode = 'INVALID_CONFIG' | 'INVALID_INPUT' | 'ATTEMPT_CONFLICT' | 'ENGINE_UNAVAILABLE' | 'ENGINE_UNREACHABLE' | 'ENGINE_REJECTED' | 'INVALID_RESPONSE' | 'DELIVERY_UNCERTAIN';
 
 export class EngineTaskError extends Error {
@@ -98,9 +103,11 @@ export function createEngineTaskClient(config: {
         return result;
     }
 
-    async function submit(input: EngineImageInput): Promise<EngineSubmittedJob> {
+    async function checkAvailability(input: EngineImageInput): Promise<void> {
         const selected = (await listEngines()).find(engine => engine.id === input.engineId);
         if (!selected || !selected.enabled || selected.status !== 'available' || !selected.tasks.includes('generate-image')) throw new EngineTaskError('ENGINE_UNAVAILABLE');
+    }
+    async function submit(input: EngineImageInput): Promise<EngineSubmittedJob> {
         const response = await request('POST', '/api/v1/jobs', { taskType: 'generate-image', engine: input.engineId, prompt: input.prompt });
         try {
             const state = jobState(response);
@@ -110,19 +117,33 @@ export function createEngineTaskClient(config: {
         } catch { throw new EngineTaskError('DELIVERY_UNCERTAIN'); }
     }
 
-    return {
-        listEngines,
-        async submitOnce(submissionId: string, input: EngineImageInput): Promise<EngineSubmittedJob> {
-            if (typeof submissionId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(submissionId) || !input || typeof input.engineId !== 'string' || !identifier.test(input.engineId) || input.engineId === 'automatic' || typeof input.prompt !== 'string' || !input.prompt.trim() || input.prompt.length > 2000) throw new EngineTaskError('INVALID_INPUT');
+    function once(submissionId:string,input:EngineImageInput,operation:()=>Promise<EngineSubmittedJob>):Promise<EngineSubmittedJob> {
+            if (typeof submissionId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(submissionId) || !validEngineImageInput(input)) throw new EngineTaskError('INVALID_INPUT');
             const fingerprint = JSON.stringify([input.engineId, input.prompt]);
             const previous = attempts.get(submissionId);
             if (previous) {
                 if (previous.fingerprint !== fingerprint) throw new EngineTaskError('ATTEMPT_CONFLICT');
                 return previous.result;
             }
-            const result = submit({ engineId: input.engineId, prompt: input.prompt });
+            const result = operation();
             attempts.set(submissionId, { fingerprint, result });
             return result;
+    }
+    return {
+        get qualifiedOrigin() { return origin; },
+        listEngines,
+        /** Read-only preflight before the durable dispatch marker. The returned
+         * operation captures this origin and exact input and performs only POST. */
+        async prepareImage(input:EngineImageInput):Promise<(submissionId:string)=>Promise<EngineSubmittedJob>> {
+            if(!validEngineImageInput(input))throw new EngineTaskError('INVALID_INPUT');
+            const snapshot={engineId:input.engineId,prompt:input.prompt};
+            await checkAvailability(snapshot);
+            return submissionId=>once(submissionId,snapshot,()=>submit(snapshot));
+        },
+        async submitOnce(submissionId: string, input: EngineImageInput): Promise<EngineSubmittedJob> {
+            if(!validEngineImageInput(input))throw new EngineTaskError('INVALID_INPUT');
+            const snapshot={engineId:input.engineId,prompt:input.prompt};
+            return once(submissionId,snapshot,async()=>{await checkAvailability(snapshot);return submit(snapshot);});
         },
         async getJob(jobId: string): Promise<EngineJobState> {
             if (!uuid.test(jobId)) throw new EngineTaskError('INVALID_INPUT');

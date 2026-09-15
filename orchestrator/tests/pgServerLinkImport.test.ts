@@ -82,6 +82,8 @@ const AGENTS_BODY = {
             role: 'veille',
             channel: 'telegram-hermes',
             enabled: true,
+            presence: 'online',
+            cadence: 'hebdo lundi 8h00',
         },
         {
             id: 'disabled-1',
@@ -113,10 +115,15 @@ describe('POST /api/integrations/link/import', () => {
         vi.clearAllMocks();
     });
 
+    /** Dernier faux `sql` construit — sert à inspecter les requêtes émises. */
+    let sqlSpy: ReturnType<typeof vi.fn>;
+
     async function buildApp(overrides: Record<string, unknown> = {}) {
         const { buildPgServer } = await import('../src/api/pgServer.js');
+        const sql = makeSql();
+        sqlSpy = sql as unknown as ReturnType<typeof vi.fn>;
         app = buildPgServer({
-            sql: makeSql(),
+            sql,
             jwtSecret: JWT_SECRET,
             linkBaseUrl: 'https://link.example.com',
             linkBridgeToken: 'bridge-secret',
@@ -177,6 +184,50 @@ describe('POST /api/integrations/link/import', () => {
             roleTitre: 'Veilleuse mariage',
             notificationChannels: { telegram: 'telegram-hermes' },
         });
+    });
+
+    /**
+     * Risque couvert : ré-importer en perdant ce que LINK sait de ses bots.
+     *
+     * La présence est écrite par cette requête-ci, PAS par `upsertNode` — et
+     * c'est délibéré : la tenir hors du `on conflict do update` générique est
+     * ce qui permet à une édition de fiche depuis la SPA de la conserver. Si
+     * quelqu'un déplace ces colonnes dans `upsertNode`, ce test doit tomber.
+     */
+    it("écrit la présence et la cadence, datées, hors de upsertNode", async () => {
+        await buildApp();
+        await call(OWNER_JWT);
+
+        const update = sqlSpy.mock.calls.find((args) =>
+            String((args[0] as TemplateStringsArray).join(' ')).includes('presence_observed_at'),
+        );
+        expect(update, "aucune requête n'a écrit la présence").toBeDefined();
+
+        const [, presence, observedAt, cadence] = update as unknown[];
+        expect(presence).toBe('online');
+        expect(cadence).toBe('hebdo lundi 8h00');
+        // Une présence non datée serait affichée comme courante à tort.
+        expect(observedAt).toBeInstanceOf(Date);
+
+        // `upsertNode` continue de ne rien savoir de l'observation.
+        expect(upsertSpy.mock.calls[0]?.[0]).not.toHaveProperty('sourceObservation');
+    });
+
+    it("n'invente pas de date de relevé quand LINK ne rapporte pas de présence", async () => {
+        await buildApp({
+            fetchImpl: jsonResponse({
+                agents: [{ ...AGENTS_BODY.agents[0], presence: undefined, cadence: undefined }],
+            }),
+        });
+        await call(OWNER_JWT);
+
+        const update = sqlSpy.mock.calls.find((args) =>
+            String((args[0] as TemplateStringsArray).join(' ')).includes('presence_observed_at'),
+        );
+        const [, presence, observedAt, cadence] = update as unknown[];
+        expect(presence).toBeNull();
+        expect(observedAt).toBeNull();
+        expect(cadence).toBeNull();
     });
 
     it('ré-import (agent déjà présent) → updated, pas created', async () => {

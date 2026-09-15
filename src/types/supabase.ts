@@ -51,6 +51,10 @@ export type Database = {
                     type: string;
                     updated_at: string;
                     workspace_id: string;
+                    /** Observation externe (migration 20260912100000). */
+                    presence: string | null;
+                    presence_observed_at: string | null;
+                    cadence: string | null;
                 };
                 Insert: {
                     avatar_url?: string | null;
@@ -69,6 +73,11 @@ export type Database = {
                     type: string;
                     updated_at?: string;
                     workspace_id: string;
+                    // `presence`, `presence_observed_at` et `cadence` sont
+                    // VOLONTAIREMENT absents : seul l'import LINK les écrit, via
+                    // l'orchestrateur. Les omettre ici fait refuser par le
+                    // compilateur toute tentative de les réécrire depuis la SPA,
+                    // qui effacerait l'observation à chaque enregistrement.
                 };
                 Update: Partial<Database['public']['Tables']['hybrid_nodes']['Insert']>;
                 Relationships: [];

@@ -7,7 +7,13 @@ const labels:Record<CircuitRun['status'],string>={ready:'À exécuter',waiting_a
 const artifactLabels:Record<string,string>={watch:'Veille',subject:'Sujet',brief:'Brief',article:'Article',visual_prompt:'Prompt graphique',image:'Visuel',review:'Contrôle'};
 const historyLabels:Record<string,string>={completed:'Livrable enregistré',approved:'Version approuvée',revised:'Correction demandée',paused:'Mise en pause',resumed:'Reprise',cancelled:'Annulation'};
 export type CircuitControl={action:'pause'|'resume'|'cancel';expectedVersion:number;idempotencyKey:string};
-export function CircuitRunCard({run,userId,admin,onDecision,onControl}:{run:CircuitRun;userId:string|null;admin:boolean;onDecision:(decision:CircuitDecision)=>Promise<unknown>;onControl:(input:CircuitControl)=>Promise<unknown>}) {
+type CircuitRunCardProps={run:CircuitRun;userId:string|null;admin:boolean;onDecision:(decision:CircuitDecision)=>Promise<unknown>;onControl:(input:CircuitControl)=>Promise<unknown>};
+export function CircuitRunCard(props:CircuitRunCardProps) {
+ const {run,userId,admin}=props;
+ const identity=JSON.stringify([run.id,run.version,run.currentStepId,run.definition.project,userId,admin]);
+ return <CircuitRunRevision key={identity} {...props}/>;
+}
+function CircuitRunRevision({run,userId,admin,onDecision,onControl}:CircuitRunCardProps) {
  const [subjectIndex,setSubjectIndex]=useState(''),[feedback,setFeedback]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState('');
  const receipts=useRef(new Map<string,string>());
  const step=run.definition.steps.find(item=>item.id===run.currentStepId);
@@ -18,7 +24,7 @@ export function CircuitRunCard({run,userId,admin,onDecision,onControl}:{run:Circ
   if(!value){value=crypto.randomUUID();receipts.current.set(hash,value);}return value;
  }
  async function submit(choice:'approve'|'revise') {
-  if(!step||busy)return;
+  if(!step||busy||!mayDecide)return;
   if(choice==='revise'&&!feedback.trim()){setError('Précisez la correction attendue.');return;}
   const selected=subjectIndex===''?undefined:subjects[Number(subjectIndex)];
   if(choice==='approve'&&step.kind==='selection'&&!selected){setError('Choisissez le sujet à retenir.');return;}
@@ -29,7 +35,7 @@ export function CircuitRunCard({run,userId,admin,onDecision,onControl}:{run:Circ
   finally{setBusy(false);}
  }
  async function control(action:CircuitControl['action']) {
-  if(busy)return;const body={action,expectedVersion:run.version};
+  if(busy||!admin||['cancelled','ready_to_publish'].includes(run.status))return;const body={action,expectedVersion:run.version};
   setBusy(true);setError('');
   try{await onControl({...body,idempotencyKey:key(body)});}
   catch{setError('Commande non confirmée. Actualisez le dossier ou réessayez.');}

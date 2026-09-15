@@ -1,6 +1,13 @@
 import postgres, { type Sql, type TransactionSql } from 'postgres';
 import { transition, type NodeStatus } from '../domain/stateMachine.js';
-import type { HybridNode, JsonObject, McpConfig, NotificationChannels, NodeType } from '../domain/types.js';
+import type {
+    HybridNode,
+    JsonObject,
+    McpConfig,
+    NotificationChannels,
+    NodeType,
+    SourceObservation,
+} from '../domain/types.js';
 import { type GraphStore, type TransitionEvent, NodeNotFoundError } from './graphStore.js';
 import type { SecretCipher } from '../security/crypto.js';
 import { decryptText, decryptJson, encryptText, encryptJson } from '../security/nodeSecrets.js';
@@ -54,8 +61,33 @@ interface DbRow {
     notification_channels: unknown;
     avatar_url: string | null;
     status: NodeStatus;
+    presence: string | null;
+    presence_observed_at: string | Date | null;
+    cadence: string | null;
     updated_at: string;
     updated_at_text?: string;
+}
+
+/**
+ * Projette les colonnes d'observation externe en `SourceObservation`, ou
+ * `undefined` si la ligne n'en porte aucune (nœud natif Organigrad).
+ *
+ * Le driver `postgres` rend un `timestamptz` sous forme de `Date` : on
+ * normalise en ISO, car le contrat expose une chaîne et la SPA la reformate.
+ */
+function sourceObservationOf(r: DbRow): SourceObservation | undefined {
+    const observedAt =
+        r.presence_observed_at instanceof Date
+            ? r.presence_observed_at.toISOString()
+            : (r.presence_observed_at ?? undefined);
+
+    if (!r.presence && !observedAt && !r.cadence) return undefined;
+
+    return {
+        ...(r.presence ? { presence: r.presence } : {}),
+        ...(observedAt ? { observedAt } : {}),
+        ...(r.cadence ? { cadence: r.cadence } : {}),
+    };
 }
 
 export class PgGraphStore implements GraphStore {
@@ -74,6 +106,7 @@ export class PgGraphStore implements GraphStore {
 
     /** Déchiffre les champs sensibles d'une ligne DB vers HybridNode. */
     private rowToNode(r: DbRow): HybridNode & { updated_at: string } {
+        const observation = sourceObservationOf(r);
         return {
             id: r.id,
             // Le driver `postgres` convertit timestamptz en Date et perd les
@@ -91,6 +124,7 @@ export class PgGraphStore implements GraphStore {
             notificationChannels: decryptJson<NotificationChannels>(this.cipher, r.notification_channels) ?? undefined,
             avatarUrl: r.avatar_url ?? undefined,
             status: r.status,
+            ...(observation ? { sourceObservation: observation } : {}),
         };
     }
 

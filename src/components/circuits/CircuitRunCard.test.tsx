@@ -1,4 +1,4 @@
-import { render,screen,fireEvent,waitFor } from '@testing-library/react';
+import { act,render,screen,fireEvent,waitFor } from '@testing-library/react';
 import { it,expect,vi } from 'vitest';
 import { CircuitDefinitionSchema } from '@apps2026/contracts';
 import type { CircuitRun } from '../../types/circuit';
@@ -22,4 +22,25 @@ it('ne propose pas la validation à une autre personne',()=>{
  render(<CircuitRunCard run={run} userId="other" admin={false} onDecision={vi.fn()} onControl={vi.fn()}/>);
  expect(screen.queryByRole('button',{name:'Retenir ce sujet'})).toBeNull();
  expect(screen.getByText('En attente du responsable désigné.')).toBeDefined();
+});
+it('ne conserve pas le choix par index après changement de version du dossier',async()=>{
+ const decide=vi.fn().mockResolvedValue(undefined);
+ const view=render(<CircuitRunCard run={run} userId={id} admin={false} onDecision={decide} onControl={vi.fn()}/>);
+ fireEvent.change(screen.getByLabelText('Sujet à retenir'),{target:{value:'0'}});
+ const revised={...run,version:3,outputs:{watch:[{...subject,id:'different-subject',version:2}]}};
+ view.rerender(<CircuitRunCard run={revised} userId={id} admin={false} onDecision={decide} onControl={vi.fn()}/>);
+ fireEvent.click(screen.getByRole('button',{name:'Retenir ce sujet'}));
+ expect(decide).not.toHaveBeenCalled();
+ expect(await screen.findByRole('alert')).toHaveTextContent('Choisissez le sujet à retenir.');
+});
+it('une réponse perdue sur un autre dossier ne pollue pas le nouveau',async()=>{
+ let reject!:(error:Error)=>void;
+ const decide=vi.fn(()=>new Promise((_resolve,no)=>{reject=no;}));
+ const view=render(<CircuitRunCard run={run} userId={id} admin={false} onDecision={decide} onControl={vi.fn()}/>);
+ fireEvent.change(screen.getByLabelText('Sujet à retenir'),{target:{value:'0'}});
+ fireEvent.click(screen.getByRole('button',{name:'Retenir ce sujet'}));
+ view.rerender(<CircuitRunCard run={{...run,id:'other-run'}} userId={id} admin={false} onDecision={decide} onControl={vi.fn()}/>);
+ await act(async()=>reject(new Error('Lost response')));
+ expect(screen.queryByRole('alert')).toBeNull();
+ expect(screen.getByLabelText('Sujet à retenir')).toHaveValue('');
 });
