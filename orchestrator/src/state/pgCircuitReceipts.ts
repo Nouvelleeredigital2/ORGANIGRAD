@@ -88,8 +88,7 @@ export class PgCircuitReceipts {
         let dispatchAllowed = false;
         const receipt = await this.rpc(async tx => {
             // Same lock order as circuit_receipt_reserve: execution, then receipt.
-            const runs = await tx<Array<{ state: { history: Array<{ stepId: string; version: number; kind: string; outputs?: ArtifactReference[] }> } }>>
-                `select state from public.circuit_executions where id=${input.runId} and workspace_id=${this.workspaceId} for update`;
+            const runs = await tx<Array<{ state: { history: Array<{ stepId: string; version: number; kind: string; outputs?: ArtifactReference[] }> } }>>`select state from public.circuit_executions where id=${input.runId} and workspace_id=${this.workspaceId} for update`;
             // Pause/resume changes the version, not the certainty of an older effect.
             const unresolved = await tx<Array<{ id: string }>>`select id from public.circuit_execution_receipts
                 where workspace_id=${this.workspaceId} and run_id=${input.runId} and step_id=${input.stepId}
@@ -98,8 +97,7 @@ export class PgCircuitReceipts {
             // An accepted reference can still be absent from run state after a
             // crash. A new version must not create it again. Completed historical
             // outputs remain eligible for an intentional later correction.
-            const accepted = await tx<Array<{ run_version: number; reference: ArtifactReference }>>
-                `select run_version,reference from public.circuit_execution_receipts
+            const accepted = await tx<Array<{ run_version: number; reference: ArtifactReference }>>`select run_version,reference from public.circuit_execution_receipts
                 where workspace_id=${this.workspaceId} and run_id=${input.runId} and step_id=${input.stepId}
                 and run_version<>${input.runVersion} and status='accepted'`;
             const history = runs[0]?.state.history ?? [];
