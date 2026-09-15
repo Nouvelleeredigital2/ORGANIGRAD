@@ -92,7 +92,7 @@ describe('attente Engine et livrables d’accompagnement (recette Atelier Boréa
  });
  it('Engine indisponible : état durable, aucune image ; seule une reprise explicite rend l’étape prête',async()=>{
   const {waitForEngine,resumeEngine}=await import('../src/orchestration/circuits.js');
-  let run=completeStep(startExecution('b',boreal,1),'brief',1,[ref('visual_prompt'),ref('brief')]);
+  const run=completeStep(startExecution('b',boreal,1),'brief',1,[ref('visual_prompt'),ref('brief')]);
   expect(()=>waitForEngine(run,'brief',run.version)).toThrow('STALE_EXECUTION');
   const waiting=waitForEngine(run,'image',run.version);
   expect(waiting).toMatchObject({status:'waiting_engine',currentStepId:'image',version:run.version+1});
