@@ -15,6 +15,12 @@ export interface OrchestratorEnv {
     projectsEnabled: boolean;
     circuitsEnabled: boolean;
     projectServiceDelegationsEnabled: boolean;
+    /** Livraison Orvion sous reçu : exige délégations + circuits, une origine Orvion qualifiée et un fichier de mandat. */
+    circuitDeliveryEnabled: boolean;
+    orvionBaseUrl?: string;
+    orvionQualifiedOrigin?: string;
+    /** Chemin du fichier contenant l'UUID du mandat Orvion ; son contenu n'est jamais journalisé. */
+    orvionServiceMandateFile?: string;
     circuitSchedulerEnabled: boolean;
     circuitSchedulerProjectIds: string[];
     privateProjectsEnabled: boolean;
@@ -175,6 +181,20 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): OrchestratorEn
     if(!['true','false'].includes(delegationsRaw))issues.push('PROJECT_SERVICE_DELEGATIONS_ENABLED doit valoir true ou false');
     if(projectServiceDelegationsEnabled&&!circuitsEnabled)issues.push('PROJECT_SERVICE_DELEGATIONS_ENABLED exige CIRCUITS_ENABLED');
 
+    const deliveryRaw=source.CIRCUIT_DELIVERY_ENABLED?.trim() || 'false';
+    const circuitDeliveryEnabled=deliveryRaw==='true';
+    const orvionBaseUrl=source.ORVION_BASE_URL?.trim() || undefined;
+    const orvionQualifiedOrigin=source.ORVION_QUALIFIED_ORIGIN?.trim() || undefined;
+    const orvionServiceMandateFile=source.ORVION_SERVICE_MANDATE_FILE?.trim() || undefined;
+    if(!['true','false'].includes(deliveryRaw))issues.push('CIRCUIT_DELIVERY_ENABLED doit valoir true ou false');
+    if(circuitDeliveryEnabled) {
+        if(!projectServiceDelegationsEnabled||!circuitsEnabled)issues.push('CIRCUIT_DELIVERY_ENABLED exige PROJECT_SERVICE_DELEGATIONS_ENABLED et CIRCUITS_ENABLED');
+        let base:URL|undefined;
+        try { base=new URL(orvionBaseUrl??''); } catch { base=undefined; }
+        if(!base||base.protocol!=='https:'||base.username||base.password||base.search||base.hash||base.pathname!=='/')issues.push('ORVION_BASE_URL doit être une origine HTTPS nue (https://hote[:port]/)');
+        if(!orvionQualifiedOrigin||!base||orvionQualifiedOrigin!==base.origin)issues.push("ORVION_QUALIFIED_ORIGIN doit être exactement l'origine d'ORVION_BASE_URL");
+        if(!orvionServiceMandateFile)issues.push('ORVION_SERVICE_MANDATE_FILE doit désigner le fichier contenant le mandat Orvion');
+    }
     const schedulerRaw=source.CIRCUIT_SCHEDULER_ENABLED?.trim() || 'false';
     const circuitSchedulerEnabled=schedulerRaw==='true';
     const circuitSchedulerProjectIds=[...new Set((source.CIRCUIT_SCHEDULER_PROJECT_IDS??'').split(',').map(id=>id.trim().toLowerCase()).filter(Boolean))];
@@ -209,6 +229,10 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): OrchestratorEn
         projectsEnabled,
         circuitsEnabled,
         projectServiceDelegationsEnabled,
+        circuitDeliveryEnabled,
+        orvionBaseUrl,
+        orvionQualifiedOrigin,
+        orvionServiceMandateFile,
         circuitSchedulerEnabled,
         circuitSchedulerProjectIds,
         privateProjectsEnabled,

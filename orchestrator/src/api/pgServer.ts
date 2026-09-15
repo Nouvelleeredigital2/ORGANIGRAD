@@ -14,6 +14,10 @@ import { registerProjectServiceDelegationRoutes } from './projectServiceDelegati
 import { registerProjectServiceTargetRoutes } from './projectServiceTargets.js';
 import { registerProjectServiceMissionRoutes } from './projectServiceMissions.js';
 import { registerCircuitRoutes } from './circuitRoutes.js';
+import { registerCircuitDeliveryRoutes } from './circuitDeliveryRoutes.js';
+import { PgCircuitReceipts } from '../state/pgCircuitReceipts.js';
+import { PgCircuitStore } from '../state/pgCircuitStore.js';
+import type { OrvionServiceClient } from '../integrations/orvionServiceClient.js';
 import { isPrivateProjectPath, isPrivateProjectRoute, registerPrivateProjectRoutes } from './privateProjectRoutes.js';
 import { isLinkBridgeDecisionPath, registerLinkBridgeRoutes, type LinkBridgeConfig, type NodeDecisionResult } from './linkBridgeRoutes.js';
 import type { JsonObject } from '../domain/types.js';
@@ -56,6 +60,8 @@ export interface PgServerDeps {
     /** Circuit APIs stay absent until the additive SQL and project bindings are qualified. */
     circuitsEnabled?: boolean;
     projectServiceDelegationsEnabled?: boolean;
+    /** Livraison Orvion sous reçu : présent seulement quand CIRCUIT_DELIVERY_ENABLED et la configuration sont complets. */
+    circuitDelivery?: { orvion: OrvionServiceClient };
     /** Independent opt-in; no legacy authentication or graph authority is delegated. */
     privateProjectsEnabled?: boolean;
     privateProjectsIssuer?: string;
@@ -241,6 +247,15 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
         registerProjectServiceMissionRoutes(app, deps.sql, deps.notifierOptions?.appUrl);
     }
     if (deps.circuitsEnabled === true) registerCircuitRoutes(app, { ...deps, appUrl: deps.notifierOptions?.appUrl });
+    if (deps.circuitDelivery) {
+        // Échec explicite : la livraison ne s'enregistre jamais à moitié câblée.
+        if (deps.projectServiceDelegationsEnabled !== true || deps.projectsEnabled !== true || deps.circuitsEnabled !== true || !deps.notifierOptions?.appUrl?.startsWith('https://')) throw new Error('CIRCUIT_DELIVERY_CONFIG_INCOMPLETE');
+        registerCircuitDeliveryRoutes(app, {
+            sql: deps.sql, appUrl: deps.notifierOptions.appUrl, orvion: deps.circuitDelivery.orvion,
+            receiptsFor: workspaceId => new PgCircuitReceipts(deps.sql, workspaceId),
+            storeFor: workspaceId => new PgCircuitStore(deps.sql, workspaceId),
+        });
+    }
     if (deps.privateProjectsEnabled === true) registerPrivateProjectRoutes(app, {
         sql: deps.sql,
         issuer: deps.privateProjectsIssuer ?? '',
