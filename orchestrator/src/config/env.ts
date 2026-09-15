@@ -38,6 +38,20 @@ export interface OrchestratorEnv {
     linkBaseUrl?: string;
     /** Token Bearer du pont LINK (GET /api/bridge/agents), jamais exposé au client. */
     linkBridgeToken?: string;
+    /**
+     * Pont LINK ↔ hub Synapse (décisions relayées par acteur signé, attestations
+     * d'identité). `LINK_BRIDGE_ENABLED=1` exige les quatre variables ci-dessous ;
+     * les fichiers sont lus par le bootstrap (`loadLinkBridgeConfig`).
+     */
+    linkBridgeEnabled: boolean;
+    /** Fichier JSON `{kid: pem}` des clés publiques Ed25519 épinglées du hub. */
+    linkBridgeHubPublicKeysFile?: string;
+    /** `kid` des attestations OrganiGrad. */
+    organigradIdentitySigningKid?: string;
+    /** Fichier PEM PKCS8 de la clé privée Ed25519 d'OrganiGrad. ⚠️ SECRET (chemin seulement ici). */
+    organigradIdentitySigningPrivateKeyFile?: string;
+    /** Base https du hub pour `POST /api/identity-links/<action>`. */
+    identityLinksHubUrl?: string;
 }
 
 export class EnvValidationError extends Error {
@@ -168,6 +182,24 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): OrchestratorEn
     if(circuitSchedulerEnabled&&!circuitsEnabled)issues.push('CIRCUIT_SCHEDULER_ENABLED exige CIRCUITS_ENABLED');
     if(circuitSchedulerProjectIds.some(id=>! /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id)) || (circuitSchedulerEnabled&&!circuitSchedulerProjectIds.length))issues.push('CIRCUIT_SCHEDULER_PROJECT_IDS exige une liste explicite de UUID de projets');
 
+    // Pont LINK ↔ hub Synapse : opt-in explicite, configuration complète ou échec.
+    const linkBridgeRaw=source.LINK_BRIDGE_ENABLED?.trim() || '0';
+    const linkBridgeEnabled=linkBridgeRaw==='1';
+    if(!['0','1'].includes(linkBridgeRaw))issues.push('LINK_BRIDGE_ENABLED doit valoir 0 ou 1');
+    const linkBridgeHubPublicKeysFile=source.LINK_BRIDGE_HUB_PUBLIC_KEYS_FILE?.trim() || undefined;
+    const organigradIdentitySigningKid=source.ORGANIGRAD_IDENTITY_SIGNING_KID?.trim() || undefined;
+    const organigradIdentitySigningPrivateKeyFile=source.ORGANIGRAD_IDENTITY_SIGNING_PRIVATE_KEY_FILE?.trim() || undefined;
+    const identityLinksHubUrl=source.IDENTITY_LINKS_HUB_URL?.trim() || undefined;
+    if(linkBridgeEnabled){
+        if(mode!=='pg')issues.push('LINK_BRIDGE_ENABLED exige Postgres');
+        if(!source.APP_URL?.trim().startsWith('https://'))issues.push('LINK_BRIDGE_ENABLED exige APP_URL HTTPS (référence canonique de projet)');
+        if(!(source.SUPABASE_JWT_SECRET?.trim() || source.SUPABASE_JWKS_URL?.trim()))issues.push('LINK_BRIDGE_ENABLED exige une vérification des sessions humaines (SUPABASE_JWT_SECRET ou SUPABASE_JWKS_URL)');
+        if(!linkBridgeHubPublicKeysFile)issues.push('LINK_BRIDGE_HUB_PUBLIC_KEYS_FILE est requise quand LINK_BRIDGE_ENABLED=1');
+        if(!organigradIdentitySigningKid||organigradIdentitySigningKid.length>128)issues.push('ORGANIGRAD_IDENTITY_SIGNING_KID est requise (≤ 128 caractères) quand LINK_BRIDGE_ENABLED=1');
+        if(!organigradIdentitySigningPrivateKeyFile)issues.push('ORGANIGRAD_IDENTITY_SIGNING_PRIVATE_KEY_FILE est requise quand LINK_BRIDGE_ENABLED=1');
+        if(!identityLinksHubUrl||!isHttpUrl(identityLinksHubUrl)||!identityLinksHubUrl.startsWith('https://'))issues.push('IDENTITY_LINKS_HUB_URL doit être une URL https quand LINK_BRIDGE_ENABLED=1');
+    }
+
     if (issues.length > 0) {
         throw new EnvValidationError(issues);
     }
@@ -197,5 +229,10 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): OrchestratorEn
         supabaseJwksUrl: source.SUPABASE_JWKS_URL?.trim() || undefined,
         linkBaseUrl,
         linkBridgeToken,
+        linkBridgeEnabled,
+        linkBridgeHubPublicKeysFile,
+        organigradIdentitySigningKid,
+        organigradIdentitySigningPrivateKeyFile,
+        identityLinksHubUrl,
     };
 }

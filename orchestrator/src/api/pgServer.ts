@@ -15,6 +15,8 @@ import { registerProjectServiceTargetRoutes } from './projectServiceTargets.js';
 import { registerProjectServiceMissionRoutes } from './projectServiceMissions.js';
 import { registerCircuitRoutes } from './circuitRoutes.js';
 import { isPrivateProjectPath, isPrivateProjectRoute, registerPrivateProjectRoutes } from './privateProjectRoutes.js';
+import { isLinkBridgeDecisionPath, registerLinkBridgeRoutes, type LinkBridgeConfig, type NodeDecisionResult } from './linkBridgeRoutes.js';
+import type { JsonObject } from '../domain/types.js';
 import { verifySupabaseJwt } from './userAuth.js';
 import type { UserTokenVerifier } from './userAuth.js';
 import { assertScope, MissingScopeError, SCOPES } from './scopes.js';
@@ -82,6 +84,15 @@ export interface PgServerDeps {
     fetchImpl?: typeof fetch;
     /** Résolution DNS injectable pour les tests de safeFetch (défaut : DNS réel). */
     fetchLookup?: import('../net/ssrfGuard.js').SafeFetchDeps['lookup'];
+    /**
+     * Pont LINK ↔ hub Synapse (décisions relayées par acteur signé + attestations
+     * d'identité). Absent → `/api/link-bridge/*` et `/api/identity-links/*`
+     * répondent 404. Le bootstrap ne le fournit que si LINK_BRIDGE_ENABLED=1
+     * ET que la configuration (clés, URL du hub) est complète.
+     */
+    linkBridge?: LinkBridgeConfig;
+    /** Horloge en secondes Unix pour la fraîcheur des assertions (tests). */
+    linkBridgeNow?: () => number;
 }
 
 const PUBLIC_PATHS = new Set(['/healthz']);
@@ -140,6 +151,7 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
         action: string,
         resourceId: string | null,
         result: 'success' | 'denied' | 'error',
+        metadata?: JsonObject,
     ): void => {
         audit
             .record({
@@ -150,6 +162,7 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
                 resourceType: 'node',
                 resourceId,
                 result,
+                ...(metadata ? { metadata } : {}),
                 ip: req.ip ?? null,
                 requestId: req.id ?? null,
             })
@@ -207,6 +220,14 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
         }
         if (PUBLIC_PATHS.has(path)) return;
         if (isSseStreamPath(req.url)) return; // authentifié par ticket dans le handler
+        // Décisions relayées par LINK : authentifiées par l'assertion d'acteur
+        // signée du hub (en-tête X-Synapse-Actor), jamais par Bearer. Le handler
+        // porte tous les contrôles ; 404 tant que le pont n'est pas configuré.
+        if (isLinkBridgeDecisionPath(path)) {
+            reply.header('Cache-Control', 'private, no-store');
+            if (!deps.linkBridge) return reply.code(404).send({ error: 'LINK_BRIDGE_NOT_FOUND' });
+            return;
+        }
         // Project reads run the existing auth inside their own error/cache boundary.
         if (deps.projectsEnabled === true && isProjectReadRoute(req)) return;
         if (!req.url.startsWith('/api/') && !req.url.startsWith('/mcp')) return;
@@ -742,71 +763,103 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
         }
     });
 
+    /**
+     * Décision humaine sur un nœud (approbation → IDLE + reprise du flux ;
+     * rejet → ERROR avec feedback). Séquence UNIQUE partagée par les routes
+     * `/api/nodes/:id/approve|reject` (session Bearer) et par le pont LINK
+     * (acteur signé par le hub, `linkBridgeRoutes.ts`) : scope, transition,
+     * audit, annonce Synapse best-effort, reprise best-effort.
+     *
+     * L'identité (`req.workspaceId`, `req.userId`, `req.scopes`) DOIT avoir été
+     * établie par l'appelant — hook d'auth ou vérification d'assertion — avant
+     * l'appel. Lève les erreurs métier ; `decideNodeHttp` les traduit en HTTP.
+     */
+    const decideNode = async (
+        req: import('fastify').FastifyRequest,
+        nodeId: string,
+        decision: 'approved' | 'rejected',
+        feedback?: string,
+        auditMetadata?: JsonObject,
+    ): Promise<NodeDecisionResult> => {
+        const action = decision === 'approved' ? 'human:approve' : 'human:reject';
+        const logPrefix = decision === 'approved' ? '[approve]' : '[reject]';
+        assertScope(req.scopes, decision === 'approved' ? SCOPES.humanApprove : SCOPES.humanReject);
+        const store = storeFor(req.workspaceId!, req.apiKeyId, req.userId);
+        if (decision === 'approved') {
+            await store.applyTransition(nodeId, 'IDLE');
+        } else {
+            await store.applyTransition(nodeId, 'ERROR', { feedback: feedback ?? '' });
+        }
+        recordAudit(req, action, nodeId, 'success', auditMetadata);
+        // Hop 5 — annonce la décision officielle sur le bus (best-effort).
+        // Enveloppé dans try/catch : une panne Synapse ne doit jamais échouer la réponse HTTP.
+        try {
+            await synapseProducer.onDecision?.(nodeId, decision, decision === 'approved' ? undefined : (feedback ?? ''), {
+                decidedBy: req.userId ?? req.apiKeyId ?? undefined,
+                title: await nodeTitleOf(store, nodeId),
+            });
+        } catch (synapseErr) {
+            console.warn(`${logPrefix} Synapse onDecision failed (best-effort)`, synapseErr);
+        }
+        if (decision === 'rejected') return { ok: true, resumed: false, waitingHumanAt: null };
+        // Reprise du workflow après validation humaine (best-effort : un échec
+        // de reprise n'invalide pas l'approbation déjà persistée).
+        let resume: Awaited<ReturnType<OrchestrationEngine['resumeFromChildOf']>> = null;
+        try {
+            const engine = new OrchestrationEngine(store, mcp, synapseProducer);
+            resume = await engine.resumeFromChildOf(nodeId);
+        } catch (resumeErr) {
+            recordAudit(req, 'flow:resume', nodeId, 'error', auditMetadata);
+            console.warn(`${logPrefix} reprise du flux échouée`, resumeErr);
+        }
+        return { ok: true, resumed: resume !== null, waitingHumanAt: resume?.waitingHumanAt ?? null };
+    };
+
+    /** `decideNode` + traduction HTTP des erreurs (audit denied/error, `handleError`). */
+    const decideNodeHttp = async (
+        req: import('fastify').FastifyRequest,
+        reply: import('fastify').FastifyReply,
+        nodeId: string,
+        decision: 'approved' | 'rejected',
+        feedback?: string,
+        auditMetadata?: JsonObject,
+    ): Promise<NodeDecisionResult | import('fastify').FastifyReply> => {
+        try {
+            return await decideNode(req, nodeId, decision, feedback, auditMetadata);
+        } catch (err) {
+            recordAudit(req, decision === 'approved' ? 'human:approve' : 'human:reject', nodeId, auditResultOf(err), auditMetadata);
+            return handleError(reply, err);
+        }
+    };
+
     // --- POST /api/nodes/:id/approve ---------------------------------------
     // Validation HUMAINE : exige le scope human:approve, qu'une clé technique
     // ne peut pas obtenir (cf. create_workspace_api_key). Après approbation, le
     // flux REPREND automatiquement à partir de l'aval.
-    app.post<{ Params: { id: string } }>('/api/nodes/:id/approve', async (req, reply) => {
-        try {
-            assertScope(req.scopes, SCOPES.humanApprove);
-            const store = storeFor(req.workspaceId!, req.apiKeyId, req.userId);
-            await store.applyTransition(req.params.id, 'IDLE');
-            recordAudit(req, 'human:approve', req.params.id, 'success');
-            // Hop 5 — annonce la décision officielle sur le bus (best-effort).
-            // Enveloppé dans try/catch : une panne Synapse ne doit jamais échouer la réponse HTTP.
-            try {
-                await synapseProducer.onDecision?.(req.params.id, 'approved', undefined, {
-                    decidedBy: req.userId ?? req.apiKeyId ?? undefined,
-                    title: await nodeTitleOf(store, req.params.id),
-                });
-            } catch (synapseErr) {
-                console.warn('[approve] Synapse onDecision failed (best-effort)', synapseErr);
-            }
-            // Reprise du workflow après validation humaine (best-effort : un échec
-            // de reprise n'invalide pas l'approbation déjà persistée).
-            let resume: Awaited<ReturnType<OrchestrationEngine['resumeFromChildOf']>> = null;
-            try {
-                const engine = new OrchestrationEngine(store, mcp, synapseProducer);
-                resume = await engine.resumeFromChildOf(req.params.id);
-            } catch (resumeErr) {
-                recordAudit(req, 'flow:resume', req.params.id, 'error');
-                console.warn('[approve] reprise du flux échouée', resumeErr);
-            }
-            return { ok: true, resumed: resume !== null, waitingHumanAt: resume?.waitingHumanAt ?? null };
-        } catch (err) {
-            recordAudit(req, 'human:approve', req.params.id, auditResultOf(err));
-            return handleError(reply, err);
-        }
-    });
+    app.post<{ Params: { id: string } }>('/api/nodes/:id/approve', async (req, reply) =>
+        decideNodeHttp(req, reply, req.params.id, 'approved'),
+    );
 
     // --- POST /api/nodes/:id/reject ----------------------------------------
     app.post<{ Params: { id: string }; Body: { feedback?: string } }>(
         '/api/nodes/:id/reject',
         async (req, reply) => {
-            try {
-                assertScope(req.scopes, SCOPES.humanReject);
-                const store = storeFor(req.workspaceId!, req.apiKeyId, req.userId);
-                await store.applyTransition(req.params.id, 'ERROR', {
-                    feedback: req.body?.feedback ?? '',
-                });
-                recordAudit(req, 'human:reject', req.params.id, 'success');
-                // Hop 5 — annonce le rejet officiel sur le bus (best-effort).
-                // Enveloppé dans try/catch : une panne Synapse ne doit jamais échouer la réponse HTTP.
-                try {
-                    await synapseProducer.onDecision?.(req.params.id, 'rejected', req.body?.feedback ?? '', {
-                        decidedBy: req.userId ?? req.apiKeyId ?? undefined,
-                        title: await nodeTitleOf(store, req.params.id),
-                    });
-                } catch (synapseErr) {
-                    console.warn('[reject] Synapse onDecision failed (best-effort)', synapseErr);
-                }
-                return { ok: true };
-            } catch (err) {
-                recordAudit(req, 'human:reject', req.params.id, auditResultOf(err));
-                return handleError(reply, err);
-            }
+            const outcome = await decideNodeHttp(req, reply, req.params.id, 'rejected', req.body?.feedback ?? '');
+            // Contrat historique du rejet : `{ ok: true }` seulement.
+            return 'ok' in outcome ? { ok: true } : outcome;
         },
     );
+
+    // --- Pont LINK : décisions relayées par acteur signé + attestations ------
+    registerLinkBridgeRoutes(app, {
+        sql: deps.sql,
+        config: deps.linkBridge,
+        appUrl: deps.notifierOptions?.appUrl,
+        decideNode: decideNodeHttp,
+        fetchImpl: deps.fetchImpl,
+        fetchLookup: deps.fetchLookup,
+        now: deps.linkBridgeNow,
+    });
 
     // --- POST /api/nodes/:id/reset -----------------------------------------
     app.post<{ Params: { id: string } }>('/api/nodes/:id/reset', async (req, reply) => {
