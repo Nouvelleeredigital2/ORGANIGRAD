@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { ArtifactReference } from '@apps2026/contracts';
 import { CircuitReceiptError, type CircuitReceipt, type CircuitReceiptKey, type CircuitReceiptProject, type PgCircuitReceipts } from '../state/pgCircuitReceipts.js';
-import { OrvionServiceError, type OrvionArtifactKind, type OrvionBriefPayload, type OrvionCommandPayload, type OrvionDeliverable, type OrvionOperation, type OrvionSubjectPayload } from '../integrations/orvionServiceClient.js';
+import { OrvionServiceError, type OrvionArtifactKind, type OrvionCommandPayload, type OrvionDeliverable, type OrvionOperation } from '../integrations/orvionServiceClient.js';
 import type { PgCircuitStore } from '../state/pgCircuitStore.js';
 import type { CircuitExecution } from './circuits.js';
 
@@ -22,7 +22,7 @@ export interface ReceiptedDeliveryInput {
     key: CircuitReceiptKey;
     editorial: { boardId: string; dossierId: string };
     operation: OrvionOperation;
-    payload: { content: string; sources?: string[]; expectedVersion?: number; kind?: OrvionArtifactKind; brief?: OrvionBriefPayload; subjects?: OrvionSubjectPayload[] };
+    payload: { content: string; sources?: string[]; expectedVersion?: number; kind?: OrvionArtifactKind };
 }
 export interface ReceiptedDeliveryDeps {
     receipts: Pick<PgCircuitReceipts, 'reserve' | 'accept' | 'markUncertain' | 'supersede' | 'lastAccepted'>;
@@ -32,7 +32,7 @@ export interface ReceiptedDeliveryDeps {
     store: Pick<PgCircuitStore, 'getRun' | 'complete'>;
     workspaceId: string;
 }
-export interface ReceiptedDeliveryResult { receipt: CircuitReceipt; reference: ArtifactReference; run: CircuitExecution; reused: boolean; /** Livrables complémentaires rendus par Orvion dans la même commande (brief du prompt graphique). */ companions: ArtifactReference[] }
+export interface ReceiptedDeliveryResult { receipt: CircuitReceipt; reference: ArtifactReference; run: CircuitExecution; reused: boolean }
 
 /** Espace de noms constant du module : la clé d'idempotence ne dépend que du quadruplet workspace/run/version/étape. */
 const IDEMPOTENCY_NAMESPACE = '6f8a3c1e-2d47-5b9a-8e61-4c0f7d2a9b35';
@@ -52,17 +52,17 @@ export function deliveryIdempotencyKey(workspaceId: string, key: CircuitReceiptK
 /** Genre attendu par completeStep pour chaque étape de production (circuits.ts). */
 const expectedKindByStep: Record<string, OrvionArtifactKind> = { watch: 'watch', writing: 'article', visual_brief: 'visual_prompt', generation: 'image', control: 'review' };
 /** Genre que produit chaque opération Orvion (migration 20260915100000 d'Orvion) ; version:create prend celui du payload. */
-const producedKindByOperation: Partial<Record<OrvionOperation, OrvionArtifactKind>> = { 'watch:create': 'watch', 'article:create': 'article', 'brief:create': 'brief', 'visual_prompt:create': 'visual_prompt', 'review:create': 'review', 'image:attach': 'image' };
+const producedKindByOperation: Partial<Record<OrvionOperation, OrvionArtifactKind>> = { 'watch:create': 'watch', 'article:create': 'article', 'brief:create': 'brief', 'review:create': 'review', 'image:attach': 'image' };
 /** L'opération doit produire exactement le genre que l'étape acceptera : refusé AVANT tout effet, jamais après.
  * Conséquence : `brief:create` (genre « brief ») ne peut pas livrer une étape visual_brief, qui exige « visual_prompt » —
- * `visual_prompt:create` (brief + prompt distincts, atomiques) ou `version:create` avec `kind: 'visual_prompt'` y parviennent. */
+ * seule `version:create` avec `kind: 'visual_prompt'` y parvient. */
 function operationMatchesStep(stepKind: string, operation: OrvionOperation, payloadKind: OrvionArtifactKind | undefined): boolean {
     const expected = expectedKindByStep[stepKind];
     if (!expected) return false;
     if (operation === 'version:create') return payloadKind === expected;
     return producedKindByOperation[operation] === expected && (payloadKind === undefined || payloadKind === expected);
 }
-const operations: readonly OrvionOperation[] = ['watch:create', 'article:create', 'brief:create', 'visual_prompt:create', 'review:create', 'version:create', 'image:attach'];
+const operations: readonly OrvionOperation[] = ['watch:create', 'article:create', 'brief:create', 'review:create', 'version:create', 'image:attach'];
 const kinds: readonly string[] = ['watch', 'subject', 'brief', 'article', 'visual_prompt', 'image', 'review'];
 /** Sérialisation canonique (clés triées) : l'empreinte ne dépend pas de l'ordre des clés rendu par jsonb ou par zod. */
 function canonical(value: unknown): string {
@@ -78,14 +78,7 @@ function validInput(input: ReceiptedDeliveryInput): boolean {
         && !!payload && typeof payload.content === 'string' && payload.content.length > 0 && payload.content.length <= 200000
         && (payload.sources === undefined || (Array.isArray(payload.sources) && payload.sources.length <= 100 && payload.sources.every(s => typeof s === 'string' && s.length <= 4096)))
         && (payload.expectedVersion === undefined || (Number.isInteger(payload.expectedVersion) && payload.expectedVersion >= 0))
-        && (payload.kind === undefined || kinds.includes(payload.kind))
-        && ((input.operation === 'visual_prompt:create') === (payload.brief !== undefined))
-        && (payload.brief === undefined || (typeof payload.brief.content === 'string' && payload.brief.content.length > 0 && payload.brief.content.length <= 200000
-            && (payload.brief.sources === undefined || (Array.isArray(payload.brief.sources) && payload.brief.sources.length <= 100 && payload.brief.sources.every(s => typeof s === 'string' && s.length <= 4096)))
-            && (payload.brief.expectedVersion === undefined || (Number.isInteger(payload.brief.expectedVersion) && payload.brief.expectedVersion >= 0))))
-        && (payload.subjects === undefined || (input.operation === 'watch:create' && Array.isArray(payload.subjects) && payload.subjects.length >= 1 && payload.subjects.length <= 10
-            && payload.subjects.every(s => !!s && typeof s.content === 'string' && s.content.length > 0 && s.content.length <= 200000
-                && (s.sources === undefined || (Array.isArray(s.sources) && s.sources.length <= 100 && s.sources.every(u => typeof u === 'string' && u.length <= 4096))))));
+        && (payload.kind === undefined || kinds.includes(payload.kind));
 }
 function isCurrent(run: CircuitExecution, key: CircuitReceiptKey): boolean {
     return run.version === key.runVersion && run.currentStepId === key.stepId && run.status === 'ready';
@@ -93,13 +86,6 @@ function isCurrent(run: CircuitExecution, key: CircuitReceiptKey): boolean {
 function referenceOf(deliverable: OrvionDeliverable): ArtifactReference {
     // Jamais dossierId, replayed ni contenu : la référence est ce que l'état du circuit conserve.
     return { sourceApp: deliverable.sourceApp, id: deliverable.id, kind: deliverable.kind, version: deliverable.version, canonicalUrl: deliverable.canonicalUrl };
-}
-/** Livrables d'accompagnement (brief du prompt, sujets de la veille) : référencés à côté du livrable requis, jamais à sa place. */
-function companionsOf(deliverable: OrvionDeliverable): ArtifactReference[] {
-    const companions: ArtifactReference[] = [];
-    if (deliverable.brief) companions.push({ sourceApp: deliverable.sourceApp, id: deliverable.brief.id, kind: 'brief', version: deliverable.brief.version, canonicalUrl: deliverable.canonicalUrl });
-    for (const subject of deliverable.subjects ?? []) companions.push({ sourceApp: deliverable.sourceApp, id: subject.id, kind: 'subject', version: subject.version, canonicalUrl: deliverable.canonicalUrl });
-    return companions;
 }
 
 export async function deliverProductionStep(input: ReceiptedDeliveryInput, deps: ReceiptedDeliveryDeps): Promise<ReceiptedDeliveryResult> {
@@ -122,9 +108,7 @@ export async function deliverProductionStep(input: ReceiptedDeliveryInput, deps:
     const payload: OrvionCommandPayload = { dossierId: editorial.dossierId, content: input.payload.content,
         ...(input.payload.sources !== undefined ? { sources: input.payload.sources } : {}),
         ...(input.payload.expectedVersion !== undefined ? { expectedVersion: input.payload.expectedVersion } : {}),
-        ...(input.payload.kind !== undefined ? { kind: input.payload.kind } : {}),
-        ...(input.payload.brief !== undefined ? { brief: input.payload.brief } : {}),
-        ...(input.payload.subjects !== undefined ? { subjects: input.payload.subjects } : {}) };
+        ...(input.payload.kind !== undefined ? { kind: input.payload.kind } : {}) };
     // (d) Empreinte de la requête qualifiée ; le contenu lui-même n'est jamais stocké.
     const payloadSha256 = createHash('sha256').update(canonical({ origin, operation, project, boardId: editorial.boardId, dossierId: editorial.dossierId, payload })).digest('hex');
     // (e) Réservation durable AVANT l'effet.
@@ -137,9 +121,8 @@ export async function deliverProductionStep(input: ReceiptedDeliveryInput, deps:
     }
     if (receipt.reference) {
         // Déjà livré sous cette clé : la référence fait foi, aucun appel. L'état est rejoué s'il est resté en arrière.
-        // Le reçu ne porte que la référence principale : un rejeu ne reconstitue pas le brief d'accompagnement.
         const current = isCurrent(run, key) ? await deps.store.complete(key.runId, key.stepId, key.runVersion, [receipt.reference]) : run;
-        return { receipt, reference: receipt.reference, run: current, reused: true, companions: [] };
+        return { receipt, reference: receipt.reference, run: current, reused: true };
     }
     // (f) Nouvelle décision juste avant l'effet (recheckBeforeEffect).
     await deps.authorize(key);
@@ -158,14 +141,13 @@ export async function deliverProductionStep(input: ReceiptedDeliveryInput, deps:
     }
     // (h) Référence seulement (jamais dossierId ni contenu), puis acceptation durable.
     const reference = referenceOf(deliverable);
-    const companions = companionsOf(deliverable);
     const previousControl = step.kind === 'control' ? await deps.receipts.lastAccepted({ runId: key.runId, stepId: key.stepId, excludingId: receipt.id }) : null;
     const accepted = await deps.receipts.accept(receipt.id, reference);
     // (i) Une correction invalide le contrôle dépendant ; l'ancienne référence reste en base.
     if (previousControl) await deps.receipts.supersede(previousControl.id, accepted.id);
     // (j) L'état du circuit avance ; en cas d'échec le reçu fait foi et le rejeu complètera.
     let next: CircuitExecution;
-    try { next = await deps.store.complete(key.runId, key.stepId, key.runVersion, [reference, ...companions]); }
+    try { next = await deps.store.complete(key.runId, key.stepId, key.runVersion, [reference]); }
     catch { throw new ReceiptedDeliveryError('RECEIPT_ACCEPTED_STATE_UNPERSISTED', { receiptId: accepted.id }); }
-    return { receipt: accepted, reference, run: next, reused: false, companions };
+    return { receipt: accepted, reference, run: next, reused: false };
 }

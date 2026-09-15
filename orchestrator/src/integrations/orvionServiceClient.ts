@@ -8,24 +8,16 @@ import { z } from 'zod';
  * ni un journal. Une seule méthode, un seul POST par appel ; toute réponse non
  * vérifiable est DELIVERY_UNCERTAIN (l'effet a peut-être eu lieu), jamais un rejet.
  */
-export const orvionOperations = ['watch:create', 'article:create', 'brief:create', 'visual_prompt:create', 'review:create', 'version:create', 'image:attach'] as const;
+export const orvionOperations = ['watch:create', 'article:create', 'brief:create', 'review:create', 'version:create', 'image:attach'] as const;
 export type OrvionOperation = typeof orvionOperations[number];
 export const orvionArtifactKinds = ['watch', 'subject', 'brief', 'article', 'visual_prompt', 'image', 'review'] as const;
 export type OrvionArtifactKind = typeof orvionArtifactKinds[number];
 export interface OrvionProjectRef { sourceApp: string; workspaceId: string; projectId: string; canonicalUrl: string }
-/** `brief` n'existe que pour `visual_prompt:create` : Orvion crée le brief ET le prompt graphique dans une seule commande. */
-export interface OrvionBriefPayload { content: string; sources?: string[]; expectedVersion?: number }
-/** `subjects` n'existe que pour `watch:create` : la veille et ses sujets sourcés, versionnés séparément. */
-export interface OrvionSubjectPayload { content: string; sources?: string[] }
-export interface OrvionCommandPayload { dossierId: string; content: string; sources?: string[]; expectedVersion?: number; kind?: OrvionArtifactKind; brief?: OrvionBriefPayload; subjects?: OrvionSubjectPayload[] }
+export interface OrvionCommandPayload { dossierId: string; content: string; sources?: string[]; expectedVersion?: number; kind?: OrvionArtifactKind }
 export interface OrvionCommandInput { operation: OrvionOperation; project: OrvionProjectRef; boardId: string; idempotencyKey: string; payload: OrvionCommandPayload }
 export interface OrvionDeliverable {
     sourceApp: 'atelier-orvion'; objectType: 'editorial_version'; id: string; kind: OrvionArtifactKind; version: number;
     dossierId: string; boardId: string; replayed: boolean; canonicalUrl: string;
-    /** Rendu seulement par `visual_prompt:create` : la version du brief créée avec le prompt, jamais substituée. */
-    brief?: { id: string; kind: 'brief'; version: number };
-    /** Rendu seulement par `watch:create` avec sujets : une version « subject » par sujet. */
-    subjects?: Array<{ id: string; kind: 'subject'; version: number }>;
 }
 export type OrvionServiceErrorCode = 'INVALID_CONFIG' | 'INVALID_INPUT' | 'DELIVERY_UNCERTAIN' | 'ORVION_REJECTED';
 export class OrvionServiceError extends Error {
@@ -40,11 +32,8 @@ const commandSchema = z.object({
     operation: z.enum(orvionOperations),
     project: z.object({ sourceApp: z.string().min(1).max(128), workspaceId: z.string().min(1).max(128), projectId: z.string().min(1).max(128), canonicalUrl: z.string().url().max(2048) }).strict(),
     boardId: uuid, idempotencyKey: uuid,
-    payload: z.object({ dossierId: uuid, content: z.string().min(1).max(200000), sources: z.array(z.string().max(4096)).max(100).optional(), expectedVersion: z.number().int().min(0).optional(), kind: z.enum(orvionArtifactKinds).optional(),
-        brief: z.object({ content: z.string().min(1).max(200000), sources: z.array(z.string().max(4096)).max(100).optional(), expectedVersion: z.number().int().min(0).optional() }).strict().optional(),
-        subjects: z.array(z.object({ content: z.string().min(1).max(200000), sources: z.array(z.string().max(4096)).max(100).optional() }).strict()).min(1).max(10).optional() }).strict(),
-}).strict().refine(value => (value.operation === 'visual_prompt:create') === (value.payload.brief !== undefined), 'brief_iff_visual_prompt')
-    .refine(value => value.payload.subjects === undefined || value.operation === 'watch:create', 'subjects_only_with_watch');
+    payload: z.object({ dossierId: uuid, content: z.string().min(1).max(200000), sources: z.array(z.string().max(4096)).max(100).optional(), expectedVersion: z.number().int().min(0).optional(), kind: z.enum(orvionArtifactKinds).optional() }).strict(),
+}).strict();
 const rejection = z.object({ success: z.literal(false), error: z.object({ code: z.string().min(1).max(64).regex(/^[A-Z][A-Z0-9_]*$/) }).passthrough() }).passthrough();
 
 /** Lit le mandat Orvion depuis un fichier (jamais une variable journalisée) ; n'expose que le nom du fichier. */
@@ -85,10 +74,7 @@ export function createOrvionServiceClient(config: {
             sourceApp: z.literal('atelier-orvion'), objectType: z.literal('editorial_version'), id: uuid, kind: z.enum(orvionArtifactKinds),
             version: z.number().int().positive(), dossierId: uuid, boardId: uuid, replayed: z.boolean(),
             canonicalUrl: z.string().max(2048).refine(value => { try { const u = new URL(value); return u.protocol === 'https:' && u.origin === origin && !u.username && !u.password; } catch { return false; } }),
-            brief: z.object({ id: uuid, kind: z.literal('brief'), version: z.number().int().positive() }).strict().optional(),
-            subjects: z.array(z.object({ id: uuid, kind: z.literal('subject'), version: z.number().int().positive() }).strict()).max(10).optional(),
-        }).strict().refine(value => value.brief === undefined || value.kind === 'visual_prompt', 'brief_only_with_visual_prompt')
-            .refine(value => value.subjects === undefined || value.kind === 'watch', 'subjects_only_with_watch'),
+        }).strict(),
         message: z.string().max(1000).optional(),
     }).strict();
 
