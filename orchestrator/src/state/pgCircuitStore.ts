@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { Sql, TransactionSql } from 'postgres';
-import { CircuitDefinitionSchema, type CircuitDefinition, type CircuitDecision } from '@apps2026/contracts';
-import { CircuitError, startExecution, decideStep, controlExecution, nextOccurrences, type CircuitExecution } from '../orchestration/circuits.js';
+import { CircuitDefinitionSchema, type ArtifactReference, type CircuitDefinition, type CircuitDecision } from '@apps2026/contracts';
+import { CircuitError, startExecution, decideStep, completeStep, waitForEngine, controlExecution, nextOccurrences, type CircuitExecution } from '../orchestration/circuits.js';
 
 export interface StoredCircuit { id:string; version:number; definition:CircuitDefinition; enabled:boolean; }
 export class PgCircuitStore {
@@ -78,7 +78,26 @@ export class PgCircuitStore {
    return state;
   }) as unknown as CircuitExecution;
  }
- async control(id:string,input:{action:'pause'|'resume'|'cancel'|'retry_engine';expectedVersion:number;idempotencyKey:string},actorId:string):Promise<CircuitExecution> {
+ /** Internal worker transition. The caller must have settled an external receipt before this is invoked. */
+ async completeExternal(id:string,input:{stepId:string;expectedVersion:number;outputs:ArtifactReference[]}):Promise<CircuitExecution> {
+  return await this.sql.begin(async tx=>{
+   const rows=await tx<{state:CircuitExecution}[]>`select state from public.circuit_executions where id=${id} and workspace_id=${this.workspaceId} for update`;
+   const current=rows[0]?.state;if(!current)throw new CircuitError('RUN_NOT_FOUND',404);
+   const state=completeStep(current,input.stepId,input.expectedVersion,input.outputs);
+   await tx`update public.circuit_executions set state=${tx.json(state as unknown as Record<string,never>)},version=${state.version},updated_at=clock_timestamp() where id=${id} and workspace_id=${this.workspaceId}`;
+   return state;
+  }) as unknown as CircuitExecution;
+ }
+ /** Internal worker transition for a failed Engine submission. */
+ async waitForEngine(id:string,input:{stepId:string;expectedVersion:number}):Promise<CircuitExecution> {
+  return await this.sql.begin(async tx=>{
+   const rows=await tx<{state:CircuitExecution}[]>`select state from public.circuit_executions where id=${id} and workspace_id=${this.workspaceId} for update`;
+   const current=rows[0]?.state;if(!current)throw new CircuitError('RUN_NOT_FOUND',404);
+   const state=waitForEngine(current,input.stepId,input.expectedVersion);
+   await tx`update public.circuit_executions set state=${tx.json(state as unknown as Record<string,never>)},version=${state.version},updated_at=clock_timestamp() where id=${id} and workspace_id=${this.workspaceId}`;
+   return state;
+  }) as unknown as CircuitExecution;
+ } async control(id:string,input:{action:'pause'|'resume'|'cancel'|'retry_engine';expectedVersion:number;idempotencyKey:string},actorId:string):Promise<CircuitExecution> {
   return await this.sql.begin(async tx=>{
    await this.member(tx,actorId,true);
    const rows=await tx<{state:CircuitExecution}[]>`select state from public.circuit_executions where id=${id} and workspace_id=${this.workspaceId} for update`;

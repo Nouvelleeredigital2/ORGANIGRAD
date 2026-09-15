@@ -37,3 +37,24 @@ it('SQL: isolation, collision, snapshot et décision atomique',async()=>{
   await expect(store.decide(a.id,decision,{id:ws,kind:'human'})).rejects.toThrow('FORBIDDEN');
  }finally{await db.close();}
 },30000);
+
+it('persists an external step output only for the current execution revision',async()=>{
+ const db=new PGlite();
+ try {
+  await db.exec(`create table workspace_members(workspace_id uuid,user_id uuid,role text);insert into workspace_members values('${ws}','${ws}','owner');create role authenticated;create role anon;create table public.workspaces(id uuid primary key);create table public.projects(id uuid primary key,workspace_id uuid not null references workspaces(id), archived_at timestamptz);create function public.is_workspace_member(uuid) returns boolean language sql as $$select true$$;insert into workspaces values('${ws}');insert into projects values('${project}','${ws}',null);`);
+  await db.exec(readFileSync(new URL('../../supabase/migrations/20260911150000_circuits.sql',import.meta.url),'utf8'));
+  function adapter(client:{query: (s:string,v?:unknown[])=>Promise<{rows:unknown[]}>}) {
+   const tag=async(strings:TemplateStringsArray,...values:unknown[])=> (await client.query(strings.reduce((s,p,i)=>s+(i?`$${i}`:'')+p,''),values)).rows;
+   return Object.assign(tag,{json:JSON.stringify,begin:(fn:(sql:unknown)=>unknown)=>db.transaction(tx=>Promise.resolve(fn(adapter(tx))))});
+  }
+  const store=new PgCircuitStore(adapter(db) as unknown as Sql,ws);
+  const definition=CircuitDefinitionSchema.parse({name:'Veille',project:{projectId:project,workspaceId:ws,sourceApp:'organigrad',canonicalUrl:'https://example.org/p'},steps:[{id:'watch',kind:'watch',assigneeId:ws,instructions:'Chercher'},{id:'final',kind:'approval',assigneeId:ws,validatorKind:'human',instructions:'Valider',correctionStepId:'watch'}]});
+  const circuit=await store.saveDefinition(definition,ws);
+  const started=await store.start(circuit.id,'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',ws);
+  const artifact={sourceApp:'atelier-orvion' as const,id:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',kind:'watch' as const,version:1,canonicalUrl:'https://orvion.example.test/boards/boreal/watch'};
+  const completed=await store.completeExternal(started.id,{stepId:'watch',expectedVersion:1,outputs:[artifact]});
+  expect(completed.version).toBe(2);
+  expect(completed.status).toBe('waiting_approval');
+  await expect(store.completeExternal(started.id,{stepId:'watch',expectedVersion:1,outputs:[artifact]})).rejects.toThrow('STALE_EXECUTION');
+ } finally { await db.close(); }
+},30000);
