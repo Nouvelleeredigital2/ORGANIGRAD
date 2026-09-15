@@ -9,6 +9,7 @@
 export type OrchestratorMode = 'pg' | 'memory';
 
 import { validPrivateIssuer, validPrivateOrigin } from '../api/privateProjectRoutes.js';
+import { isIP } from 'node:net';
 
 export interface OrchestratorEnv {
     mode: OrchestratorMode;
@@ -34,6 +35,7 @@ export interface OrchestratorEnv {
     privateProjectsEnabled: boolean;
     privateProjectsIssuer?: string;
     port: number;
+    listenHost: string;
     appUrl?: string;
     supabaseDbUrl?: string;
     supabaseServiceRoleKey?: string;
@@ -107,6 +109,8 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): OrchestratorEn
     // PORT
     const portRaw = source.PORT?.trim();
     const port = portRaw ? Number(portRaw) : 3001;
+    const listenHost = source.ORCHESTRATOR_LISTEN_HOST?.trim() || '0.0.0.0';
+    if (!isIP(listenHost)) issues.push('ORCHESTRATOR_LISTEN_HOST doit être une adresse IP');
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
         issues.push('PORT doit être un entier entre 1 et 65535');
     }
@@ -267,6 +271,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): OrchestratorEn
         privateProjectsEnabled,
         privateProjectsIssuer,
         port,
+        listenHost,
         appUrl: source.APP_URL?.trim() || undefined,
         supabaseDbUrl: dbUrl,
         supabaseServiceRoleKey: serviceRole,

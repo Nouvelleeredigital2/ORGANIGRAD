@@ -14,6 +14,29 @@ vi.mock('../lib/supabase', () => ({ supabase: { auth: { getSession: async () => 
 
 afterEach(() => { workspace.activeId = 'workspace-a'; vi.restoreAllMocks(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 
+it('uses only the same-origin loopback proxy in the explicit development recipe', async () => {
+    vi.stubEnv('DEV', true);
+    vi.stubEnv('VITE_ORCHESTRATOR_URL', '/api');
+    vi.stubGlobal('location', { origin: 'http://127.0.0.1:5174', hostname: '127.0.0.1', protocol: 'http:' });
+    const fetcher = vi.fn().mockImplementation(async () => new Response(JSON.stringify({ nodes: [] })));
+    vi.stubGlobal('fetch', fetcher);
+    vi.spyOn(OrchestratorClient.prototype, 'subscribe').mockReturnValue(() => {});
+    const { result, unmount } = renderHook(() => useOrchestratorBridge());
+    await waitFor(() => expect(result.current.connectionState).toBe('connected'));
+    expect(fetcher.mock.calls.every(([url]) => String(url).startsWith('http://127.0.0.1:5174/api/'))).toBe(true);
+    unmount();
+});
+
+it.each([[false, '127.0.0.1'], [true, 'remote.example']])('rejects a relative API outside local development (%s, %s)', async (dev, hostname) => {
+    vi.stubEnv('DEV', dev);
+    vi.stubEnv('VITE_ORCHESTRATOR_URL', '/api');
+    vi.stubGlobal('location', { origin: `http://${hostname}:5174`, hostname, protocol: 'http:' });
+    const fetcher = vi.fn(); vi.stubGlobal('fetch', fetcher);
+    const { result, unmount } = renderHook(() => useOrchestratorBridge());
+    await waitFor(() => expect(result.current.connectionState).toBe('failed'));
+    expect(fetcher).not.toHaveBeenCalled(); unmount();
+});
+
 it('connects the deployed workspace using the human session, ignoring legacy browser credentials', async () => {
     vi.stubEnv('VITE_ORCHESTRATOR_URL', 'https://organigrad.example');
     const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ nodes: [] })));

@@ -101,8 +101,8 @@ export async function startOrchestrator() {
             registerSynapseConsumer(app);
             console.log('[orchestrator] consumer Synapse ACTIF (mode pg)');
         }
-        await app.listen({ port, host: '0.0.0.0' });
-        console.log(`[orchestrator] mode Postgres + API key sur http://0.0.0.0:${port}`);
+        await app.listen({ port, host: env.listenHost });
+        console.log(`[orchestrator] mode Postgres + API key sur ${env.listenHost}:${port}`);
         return { app, mode: 'pg' as const };
     }
 
@@ -133,8 +133,8 @@ export async function startOrchestrator() {
     registerSynapseConsumer(app);
     // Proxy vocal (SDK @apps2026/voice-client) — même patron qu'en mode pg.
     registerVoiceGatewayRoutes(app);
-    await app.listen({ port, host: '0.0.0.0' });
-    console.log(`[orchestrator] mode in-memory sur http://0.0.0.0:${port}`);
+    await app.listen({ port, host: env.listenHost });
+    console.log(`[orchestrator] mode in-memory sur ${env.listenHost}:${port}`);
     return { app, store, engine, notifier, mode: 'memory' as const };
 }
 

@@ -2,6 +2,14 @@ import { describe, it, expect } from 'vitest';
 import { loadEnv, EnvValidationError } from '../src/config/env.js';
 
 describe('loadEnv (validation des variables d\'environnement)', () => {
+    it('permet une écoute locale explicite sans changer le défaut existant', () => {
+        expect(loadEnv({ORCHESTRATOR_ALLOW_MEMORY:'1'}).listenHost).toBe('0.0.0.0');
+        expect(loadEnv({ORCHESTRATOR_ALLOW_MEMORY:'1',ORCHESTRATOR_LISTEN_HOST:'127.0.0.1'}).listenHost).toBe('127.0.0.1');
+        expect(loadEnv({ORCHESTRATOR_ALLOW_MEMORY:'1',ORCHESTRATOR_LISTEN_HOST:'::1'}).listenHost).toBe('::1');
+    });
+    it('refuse un hôte d’écoute qui n’est pas une adresse IP', () => {
+        expect(()=>loadEnv({ORCHESTRATOR_ALLOW_MEMORY:'1',ORCHESTRATOR_LISTEN_HOST:'https://localhost/path'})).toThrow(/ORCHESTRATOR_LISTEN_HOST/);
+    });
     it('scheduler requires an explicit project allowlist and authenticated circuits', () => {
         expect(loadEnv({ORCHESTRATOR_ALLOW_MEMORY:'1'}).circuitSchedulerEnabled).toBe(false);
         const base={SUPABASE_DB_URL:'postgresql://localhost/test',SUPABASE_JWT_SECRET:'test',PROJECTS_ENABLED:'true',CIRCUITS_ENABLED:'true',APP_URL:'https://example.org',CIRCUIT_SCHEDULER_ENABLED:'true'};

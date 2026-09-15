@@ -10,6 +10,7 @@ import {
 import { useOrchestratorConfig } from './useOrchestratorConfig';
 import { useWorkspaceContext } from '../contexts/WorkspaceContext';
 import { supabase } from '../lib/supabase';
+import { orchestratorApiBase } from '../lib/orchestratorApiBase';
 
 /**
  * Hook de pont entre la SPA et l'orchestrateur.
@@ -75,9 +76,7 @@ export function useOrchestratorBridge(
     let deployedBase = '';
     if (deployed) {
         try {
-            const url = new URL(deployedUrl);
-            if (url.protocol === 'https:' && !url.username && !url.password && !url.search && !url.hash &&
-                ['/', '/api', '/api/'].includes(url.pathname)) deployedBase = `${url.origin}/api`;
+            deployedBase = orchestratorApiBase(deployedUrl);
         } catch { /* Invalid deployment configuration must never fall back to browser settings. */ }
     }
     const baseUrl = deployed ? deployedBase : opts.baseUrl ?? config.baseUrl;

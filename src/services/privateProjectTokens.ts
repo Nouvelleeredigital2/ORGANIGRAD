@@ -1,3 +1,5 @@
+import { orchestratorApiBase } from '../lib/orchestratorApiBase';
+
 /** Personal credentials are never used to authenticate these human management routes. */
 export interface PrivateTokenMetadata {
     id: string; name: string; prefix: string; expiresAt: number; createdAt: string; revokedAt: string | null;
@@ -23,11 +25,7 @@ function apiBase(): string {
     // Existing deployment setting (.env.example / docs/synchronisation-livraison.md).
     // Do not trust the legacy freely editable localStorage orchestrator URL for human JWTs.
     const raw = import.meta.env.VITE_ORCHESTRATOR_URL;
-    if (!raw || typeof raw !== 'string') throw failure();
-    const url = new URL(raw);
-    if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash ||
-        !['/', '/api', '/api/'].includes(url.pathname)) throw failure();
-    return `${url.origin}/api/private-projects/tokens`;
+    return `${orchestratorApiBase(raw)}/private-projects/tokens`;
 }
 function metadata(value: unknown): PrivateTokenMetadata {
     const row = object(value);

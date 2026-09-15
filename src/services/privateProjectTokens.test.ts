@@ -24,6 +24,16 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.useRealTimers(); });
 
 describe('private project token HTTP client', () => {
+    it('uses the explicit same-origin loopback proxy for a local human request', async () => {
+        vi.stubEnv('DEV', true);
+        vi.stubEnv('VITE_ORCHESTRATOR_URL', '/api');
+        vi.stubGlobal('location', { origin: 'http://127.0.0.1:5174', hostname: '127.0.0.1', protocol: 'http:' });
+        fetcher.mockResolvedValue(new Response(JSON.stringify({ tokens: [] })));
+        expect(await (await client()).list()).toEqual({ tokens: [] });
+        expect(fetcher).toHaveBeenCalledWith(`http://127.0.0.1:5174/api/private-projects/tokens?projectId=${projectId}`, expect.objectContaining({
+            headers: expect.objectContaining({ Authorization: `Bearer ${accessToken}` }),
+        }));
+    });
     it('issues once to the configured API with human headers, seconds and secure fetch options', async () => {
         fetcher.mockResolvedValue(new Response(JSON.stringify(issued), { status: 201 }));
         const api = await client();
