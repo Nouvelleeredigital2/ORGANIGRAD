@@ -16,6 +16,8 @@ export const SCOPES = {
     nodeRead: 'node:read',
     nodeRun: 'node:run',
     executionRead: 'execution:read',
+    voiceAssign: 'voice:assign',
+    voiceResolve: 'voice:resolve',
     humanApprove: 'human:approve',
     humanReject: 'human:reject',
     nodeReset: 'node:reset',

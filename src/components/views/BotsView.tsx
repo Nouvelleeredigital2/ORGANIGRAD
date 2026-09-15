@@ -11,7 +11,7 @@ import { usePermissions } from '../../auth/usePermissions';
 import { useFeedback } from '../../feedback/FeedbackContext';
 import { messageErreurUtilisateur } from '../../utils/asyncGuard';
 import { randomUuid } from '../../utils/randomId';
-import type { BotBundle } from '../../services/orchestratorService';
+import type { BotActivationStatus, BotBundle } from '../../services/orchestratorService';
 
 /**
  * BotsView — création et paramétrage visuel des bots conversationnels Hermès.
@@ -30,6 +30,7 @@ export function BotsView() {
     const feedback = useFeedback();
     const peutEcrire = can('bots:write');
     const peutSupprimer = peutEcrire && can('workspace:admin');
+    const peutActiver = peutEcrire && can('workspace:admin');
     const peutExporter = can('bots:export');
 
     const [bots, setBots] = useState<BotProfile[]>([]);
@@ -41,6 +42,8 @@ export function BotsView() {
     const [bundle, setBundle] = useState<BotBundle | null>(null);
     const [bundleOpen, setBundleOpen] = useState(false);
     const [bundleLoading, setBundleLoading] = useState(false);
+    const [activations, setActivations] = useState<Record<string, BotActivationStatus | undefined>>({});
+    const [activationBusyId, setActivationBusyId] = useState<string | null>(null);
 
     const client = bridge.client;
     const activeClient = useRef(client);
@@ -156,6 +159,51 @@ export function BotsView() {
             feedback.error(`Export impossible : ${messageErreurUtilisateur(err)}`);
         } finally {
             setBundleLoading(false);
+        }
+    };
+
+    const handleInspectActivation = async (bot: BotProfile) => {
+        if (!client) return;
+        setActivationBusyId(bot.id);
+        try {
+            const activation = await client.fetchBotActivation(bot.id);
+            setActivations(previous => ({ ...previous, [bot.id]: activation }));
+        } catch (err) {
+            feedback.error(`Vérification impossible : ${messageErreurUtilisateur(err)}`);
+        } finally {
+            setActivationBusyId(null);
+        }
+    };
+
+    const handleActivate = async (bot: BotProfile) => {
+        if (!client) return;
+        setActivationBusyId(bot.id);
+        try {
+            const result = await client.activateBot(bot.id);
+            setActivations(previous => ({ ...previous, [bot.id]: result.verification ?? previous[bot.id] }));
+            feedback.success(`« ${bot.displayName} » est activé.`);
+            await reload(false);
+        } catch (err) {
+            feedback.error(`Activation impossible : ${messageErreurUtilisateur(err)}`);
+        } finally {
+            setActivationBusyId(null);
+        }
+    };
+
+    const handleDeactivate = async (bot: BotProfile) => {
+        if (!client) return;
+        const reason = window.prompt(`Pourquoi retirer « ${bot.displayName} » du service ?`);
+        if (reason === null) return;
+        setActivationBusyId(bot.id);
+        try {
+            await client.deactivateBot(bot.id, reason);
+            setActivations(previous => ({ ...previous, [bot.id]: { ...previous[bot.id], enabled: false } as BotActivationStatus }));
+            feedback.success(`« ${bot.displayName} » est repassé en brouillon.`);
+            await reload(false);
+        } catch (err) {
+            feedback.error(`Désactivation impossible : ${messageErreurUtilisateur(err)}`);
+        } finally {
+            setActivationBusyId(null);
         }
     };
 
@@ -277,11 +325,44 @@ export function BotsView() {
                                         <p className="line-clamp-2 text-[12px]" style={{ color: 'var(--fg-3)' }}>
                                             {bot.mission || 'Mission non renseignée.'}
                                         </p>
+                                        {activations[bot.id] && (
+                                            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-[12px]">
+                                                <div className="flex items-center justify-between gap-2">
+                                                    <strong style={{ color: activations[bot.id]?.ready ? 'var(--system-green)' : 'var(--system-orange)' }}>
+                                                        {activations[bot.id]?.ready ? 'Prêt à activer' : 'À compléter'}
+                                                    </strong>
+                                                    <span className="text-slate-500">{activations[bot.id]?.checks.filter(check => check.passed).length}/{activations[bot.id]?.checks.length}</span>
+                                                </div>
+                                                <ul className="mt-2 space-y-1 text-slate-600">
+                                                    {activations[bot.id]?.checks.map(check => <li key={check.code}>{check.passed ? '✓' : '•'} {check.label}</li>)}
+                                                </ul>
+                                                {peutActiver && !bot.enabled && activations[bot.id]?.ready && (
+                                                    <Button tone="blue" size="sm" className="mt-3" onClick={() => void handleActivate(bot)} disabled={activationBusyId === bot.id} aria-label={`Activer ${bot.displayName}`}>
+                                                        Activer
+                                                    </Button>
+                                                )}
+                                                {peutActiver && bot.enabled && (
+                                                    <Button tone="slate" variant="outline" size="sm" className="mt-3" onClick={() => void handleDeactivate(bot)} disabled={activationBusyId === bot.id} aria-label={`Désactiver ${bot.displayName}`}>
+                                                        Désactiver
+                                                    </Button>
+                                                )}
+                                            </div>
+                                        )}
                                         <div className="mt-auto flex items-center justify-between gap-2 pt-2">
                                             <code className="truncate text-[11px]" style={{ color: 'var(--fg-4)' }}>
                                                 {bot.runtimeId}
                                             </code>
                                             <div className="flex shrink-0 gap-1">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => void handleInspectActivation(bot)}
+                                                    disabled={activationBusyId === bot.id}
+                                                    title="Vérifier l’activation"
+                                                    aria-label={`Vérifier ${bot.displayName}`}
+                                                    className="rounded-full p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-[var(--accent)] disabled:opacity-40"
+                                                >
+                                                    {activationBusyId === bot.id ? <Loader2 className="animate-spin" size={14} strokeWidth={1.8} /> : <RefreshCw size={14} strokeWidth={1.8} />}
+                                                </button>
                                                 <button
                                                     type="button"
                                                     onClick={() => void handleLinkNode(bot)}
