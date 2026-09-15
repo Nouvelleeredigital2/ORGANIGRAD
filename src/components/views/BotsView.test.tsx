@@ -6,6 +6,8 @@ import type { WorkspaceRole } from '../../auth/permissions';
 import type { OrchestratorClient } from '../../services/orchestratorService';
 
 type TestClient = Pick<OrchestratorClient, 'fetchBots' | 'fetchBotActivation'>;
+// Le type exige fetchBotActivation ; les fixtures qui ne testent pas l'activation reçoivent ce stub neutre.
+const activationStub = () => vi.fn(async () => ({ enabled: true, ready: true, checks: [] }));
 
 const bridgeMock = vi.hoisted(() => ({
     connected: false,
@@ -68,7 +70,7 @@ describe('BotsView', () => {
 
     it('liste les bots une fois connecté', async () => {
         bridgeMock.connectionState = 'connected';
-        bridgeMock.client = { fetchBots: vi.fn(async () => [BOT]) };
+        bridgeMock.client = { fetchBots: vi.fn(async () => [BOT]), fetchBotActivation: activationStub() };
         render(<BotsView />);
         await waitFor(() => expect(screen.getByText('Anita')).toBeInTheDocument());
         expect(screen.getByText('Rédacteur')).toBeInTheDocument();
@@ -77,7 +79,7 @@ describe('BotsView', () => {
 
     it("affiche l'état vide avec une invitation à créer le premier bot", async () => {
         bridgeMock.connectionState = 'connected';
-        bridgeMock.client = { fetchBots: vi.fn(async () => []) };
+        bridgeMock.client = { fetchBots: vi.fn(async () => []), fetchBotActivation: activationStub() };
         render(<BotsView />);
         await waitFor(() => expect(screen.getByText(/Aucun bot pour ce workspace/i)).toBeInTheDocument());
         expect(screen.getByRole('button', { name: /Créer le premier bot/i })).toBeInTheDocument();
@@ -85,7 +87,7 @@ describe('BotsView', () => {
 
     it('allows member editing but hides admin-only deletion', async () => {
         bridgeMock.connectionState = 'connected';
-        bridgeMock.client = { fetchBots: vi.fn(async () => [BOT]) };
+        bridgeMock.client = { fetchBots: vi.fn(async () => [BOT]), fetchBotActivation: activationStub() };
         permissionsMock.can.mockImplementation((permission) => permission !== 'workspace:admin');
         render(<BotsView />);
         await waitFor(() => expect(screen.getByRole('button', { name: 'Éditer Anita' })).toBeInTheDocument());
@@ -112,9 +114,9 @@ describe('BotsView', () => {
     it('ignores an old workspace response after the new workspace has loaded', async()=>{
         let finish!: (bots:BotProfile[])=>void;
         bridgeMock.connectionState='connected';
-        bridgeMock.client={fetchBots:()=>new Promise(resolve=>{finish=resolve;})};
+        bridgeMock.client={fetchBots:()=>new Promise(resolve=>{finish=resolve;}),fetchBotActivation:activationStub()};
         const view=render(<BotsView/>);
-        bridgeMock.client={fetchBots:async()=>[{...BOT,displayName:'Bot workspace B'}]};
+        bridgeMock.client={fetchBots:async()=>[{...BOT,displayName:'Bot workspace B'}],fetchBotActivation:activationStub()};
         view.rerender(<BotsView/>);
         await screen.findByText('Bot workspace B');
         await act(async()=>{finish([BOT]);});
