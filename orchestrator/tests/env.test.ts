@@ -11,6 +11,18 @@ describe('loadEnv (validation des variables d\'environnement)', () => {
         expect(loadEnv({...base,CIRCUIT_SCHEDULER_PROJECT_IDS:id}).circuitSchedulerProjectIds).toEqual([id]);
         expect(()=>loadEnv({...base,CIRCUITS_ENABLED:'false',CIRCUIT_SCHEDULER_PROJECT_IDS:id})).toThrow(/CIRCUIT_SCHEDULER_ENABLED/);
     });
+    it('génération Engine : désactivée par défaut, exige la livraison Orvion, une origine qualifiée, un fichier de clé et un moteur explicite', () => {
+        expect(loadEnv({ORCHESTRATOR_ALLOW_MEMORY:'1'}).engineGenerationEnabled).toBe(false);
+        const delivery={SUPABASE_DB_URL:'postgresql://localhost/test',SUPABASE_JWT_SECRET:'test',PROJECTS_ENABLED:'true',CIRCUITS_ENABLED:'true',PROJECT_SERVICE_DELEGATIONS_ENABLED:'true',APP_URL:'https://example.org',
+            CIRCUIT_DELIVERY_ENABLED:'true',ORVION_BASE_URL:'https://orvion.example/',ORVION_QUALIFIED_ORIGIN:'https://orvion.example',ORVION_SERVICE_MANDATE_FILE:'/run/secrets/mandate'};
+        expect(()=>loadEnv({...delivery,CIRCUIT_DELIVERY_ENABLED:'false',ENGINE_GENERATION_ENABLED:'true'})).toThrow(/CIRCUIT_DELIVERY_ENABLED/);
+        expect(()=>loadEnv({...delivery,ENGINE_GENERATION_ENABLED:'true'})).toThrow(/ENGINE_BASE_URL[\s\S]*ENGINE_QUALIFIED_ORIGIN[\s\S]*ENGINE_API_KEY_FILE[\s\S]*ENGINE_ID/);
+        const full={...delivery,ENGINE_GENERATION_ENABLED:'true',ENGINE_BASE_URL:'https://engine.example/',ENGINE_QUALIFIED_ORIGIN:'https://engine.example',ENGINE_API_KEY_FILE:'/run/secrets/engine',ENGINE_ID:'flux-main'};
+        expect(loadEnv(full)).toMatchObject({engineGenerationEnabled:true,engineQualifiedOrigin:'https://engine.example',engineId:'flux-main'});
+        expect(()=>loadEnv({...full,ENGINE_ID:'automatic'})).toThrow(/ENGINE_ID/);
+        expect(()=>loadEnv({...full,ENGINE_BASE_URL:'http://engine.example/'})).toThrow(/ENGINE_BASE_URL/);
+        expect(()=>loadEnv({...full,ENGINE_QUALIFIED_ORIGIN:'https://other.example'})).toThrow(/ENGINE_QUALIFIED_ORIGIN/);
+    });
     it('circuits : désactivés par défaut, activation exige les projets authentifiés', () => {
         expect(loadEnv({ORCHESTRATOR_ALLOW_MEMORY:'1'}).circuitsEnabled).toBe(false);
         expect(()=>loadEnv({ORCHESTRATOR_ALLOW_MEMORY:'1',CIRCUITS_ENABLED:'true'})).toThrow(/CIRCUITS_ENABLED/);
