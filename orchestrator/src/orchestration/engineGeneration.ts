@@ -64,19 +64,10 @@ const engineUnavailable = (error: unknown) => error instanceof EngineTaskError &
 export async function submitGenerationStep(input: { key: CircuitAttemptKey; prompt: string }, deps: EngineGenerationDeps): Promise<SubmitResult> {
     if (!validKey(input.key, deps.workspaceId) || typeof input.prompt !== 'string' || !input.prompt.trim() || input.prompt.length > 2000) throw new GenerationError('INVALID_INPUT');
     const { key } = input;
-    // Forme de l'étape d'abord (lecture sans effet), puis la délégation décide.
+    // Authorize before exposing run state, including waiting_engine.
+    await deps.authorize(key);
     const run = await deps.store.getRun(key.runId);
     generationStep(run, key);
-    if (run.status === 'waiting_engine') return { kind: 'waiting_engine', run };
-    try { await deps.authorize(key); }
-    catch (error) {
-        // La délégation refuse une étape qui n'est pas prête : si c'est l'attente d'Engine, la rendre telle quelle.
-        if (error instanceof Error && error.message === 'STEP_NOT_READY') {
-            const fresh = await deps.store.getRun(key.runId);
-            if (fresh.status === 'waiting_engine' && fresh.currentStepId === key.stepId) return { kind: 'waiting_engine', run: fresh };
-        }
-        throw error;
-    }
     if (run.status !== 'ready') throw new CircuitError('STEP_NOT_READY');
     try {
         const { jobId, reused } = await dispatchEngineStep(key, { engineId: deps.engineId, prompt: input.prompt }, {
@@ -85,7 +76,10 @@ export async function submitGenerationStep(input: { key: CircuitAttemptKey; prom
         return { kind: 'submitted', jobId, reused, run };
     } catch (error) {
         // Indisponibilité constatée AVANT toute tentative durable : rien n'a été soumis.
-        if (engineUnavailable(error)) return { kind: 'waiting_engine', run: await deps.store.waitForEngine(key.runId, { stepId: key.stepId, expectedVersion: key.runVersion }) };
+        if (engineUnavailable(error)) {
+            await deps.authorize(key);
+            return { kind: 'waiting_engine', run: await deps.store.waitForEngine(key.runId, { stepId: key.stepId, expectedVersion: key.runVersion }) };
+        }
         if (error instanceof EngineDispatchError) {
             if (error.code === 'PAYLOAD_CONFLICT') throw new GenerationError('PAYLOAD_CONFLICT');
             if (error.code === 'DELIVERY_UNRESOLVED' || error.code === 'RECEIPT_UNPERSISTED') throw new GenerationError('DELIVERY_UNRESOLVED', { jobId: error.jobId });
@@ -107,19 +101,24 @@ function referenceOf(origin: string, jobId: string, results: EngineArtifactRefer
     return { sourceApp: 'ned-media-engine', id: image.fileId, kind: 'image', version: 1, canonicalUrl: image.downloadUrl };
 }
 
-export async function settleGenerationStep(input: { key: CircuitAttemptKey }, deps: EngineGenerationDeps): Promise<SettleResult> {
-    if (!validKey(input.key, deps.workspaceId)) throw new GenerationError('INVALID_INPUT');
+export async function settleGenerationStep(input: { key: CircuitAttemptKey; prompt: string }, deps: EngineGenerationDeps): Promise<SettleResult> {
+    if (!validKey(input.key, deps.workspaceId) || typeof input.prompt !== 'string' || !input.prompt.trim() || input.prompt.length > 2000) throw new GenerationError('INVALID_INPUT');
     const { key } = input;
+    const { grantId, project } = await deps.authorize(key);
     const run = await deps.store.getRun(key.runId);
     generationStep(run, key);
-    const { grantId, project } = await deps.authorize(key);
     if (!uuid.test(grantId)) throw new GenerationError('INVALID_INPUT');
     let attempt;
     try { attempt = await deps.attempts.getReceipt(key); }
     catch (error) { if (error instanceof CircuitAttemptError && error.code === 'ATTEMPT_NOT_FOUND') throw new GenerationError('GENERATION_NOT_SUBMITTED'); throw error; }
     if (attempt.status !== 'accepted' || !attempt.jobId) throw new GenerationError(attempt.status === 'reserved' ? 'GENERATION_NOT_SUBMITTED' : 'DELIVERY_UNRESOLVED');
+    const requestHash=createHash('sha256').update(JSON.stringify([deps.engine.qualifiedOrigin,deps.engineId,input.prompt])).digest('hex');
+    if (requestHash!==attempt.payloadSha256) throw new GenerationError('PAYLOAD_CONFLICT');
     const jobId = attempt.jobId;
     const job = await deps.engine.getResults(jobId);
+    const fresh=await deps.authorize(key);
+    if (fresh.grantId!==grantId || fresh.project.sourceApp!==project.sourceApp || fresh.project.projectId!==project.projectId ||
+        fresh.project.workspaceId!==project.workspaceId || fresh.project.canonicalUrl!==project.canonicalUrl) throw new GenerationError('PAYLOAD_CONFLICT');
     if (job.status === 'queued' || job.status === 'running') return { kind: 'pending', status: job.status, jobId };
     if (job.status !== 'completed') throw new GenerationError('ENGINE_JOB_FAILED', { jobId, engineCode: job.status });
     const reference = referenceOf(deps.engine.qualifiedOrigin, jobId, job.results);

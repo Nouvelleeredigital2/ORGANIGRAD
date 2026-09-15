@@ -71,7 +71,7 @@ const realAuthorize: EngineGenerationDeps['authorize'] = async (k) => {
 };
 const deps = (over: Partial<EngineGenerationDeps> = {}): EngineGenerationDeps => ({ workspaceId: ws, engineId: 'flux-main', attempts, receipts, store, engine: engine(), authorize: realAuthorize, ...over });
 const submit = (run: CircuitExecution, text = prompt, over: Partial<EngineGenerationDeps> = {}) => submitGenerationStep({ key: { runId, runVersion: run.version, stepId: 'image' }, prompt: text }, deps(over));
-const settle = (run: CircuitExecution, over: Partial<EngineGenerationDeps> = {}) => settleGenerationStep({ key: { runId, runVersion: run.version, stepId: 'image' } }, deps(over));
+const settle = (run: CircuitExecution, over: Partial<EngineGenerationDeps> = {}) => settleGenerationStep({ key: { runId, runVersion: run.version, stepId: 'image' }, prompt }, deps(over));
 const receiptRows = async () => (await db.query<{ status: string; reference: ArtifactReference | null; mandate_id: string }>('select status,reference,mandate_id from public.circuit_execution_receipts')).rows;
 const attemptRows = async () => (await db.query<{ status: string; job_id: string | null; run_version: number }>('select status,job_id,run_version from public.circuit_step_attempts order by run_version')).rows;
 
@@ -97,6 +97,39 @@ beforeEach(async () => {
     await call('create', { grantId: grant, apiKeyId: key, nodeId: node, target, actions: ['step:execute'], expiresAt: new Date(Date.now() + 3600000).toISOString() }, human, null);
 }, 30000);
 afterEach(async () => { await db.close(); });
+
+it('refuse de relire un job sur une autre origine ou un autre moteur', async () => {
+    const run=await readyForImage();
+    await submit(run);
+    const getResults=vi.fn(async()=>({jobId:randomUUID(),status:'queued' as const,results:[]}));
+    const changed={...engine(),qualifiedOrigin:'https://other-engine.example',getResults};
+    await expect(settle(run,{engine:changed})).rejects.toMatchObject({code:'PAYLOAD_CONFLICT'});
+    expect(getResults).not.toHaveBeenCalled();
+    await expect(settle(run,{engineId:'other-model'})).rejects.toMatchObject({code:'PAYLOAD_CONFLICT'});
+    await expect(settleGenerationStep({key:{runId,runVersion:run.version,stepId:'image'},prompt:prompt+' changed'},deps())).rejects.toMatchObject({code:'PAYLOAD_CONFLICT'});
+});
+
+it('une révocation pendant la lecture Engine bloque le résultat et sa persistance', async () => {
+    const run=await readyForImage();
+    await submit(run);
+    const client=engine();
+    const revoked={...client,getResults:async(jobId:string)=>{
+        const result=await client.getResults(jobId);
+        await call('revoke',{grantId:grant,expectedVersion:1},human,null);
+        return result;
+    }};
+    await expect(settle(run,{engine:revoked})).rejects.toThrow('GRANT_UNAVAILABLE');
+    expect(await receiptRows()).toHaveLength(0);
+});
+
+it('une attente Engine ne révèle pas son état à une délégation révoquée', async () => {
+    const run=await readyForImage();
+    engineStatus='unavailable';
+    await submit(run);
+    await call('revoke',{grantId:grant,expectedVersion:1},human,null);
+    await expect(submit(await current())).rejects.toThrow('GRANT_UNAVAILABLE');
+    expect(submissions).toBe(0);
+});
 
 it('(1) soumet UNE tâche Engine sous tentative durable, puis complète l’étape avec la seule référence du résultat', async () => {
     const run = await readyForImage();
@@ -143,7 +176,7 @@ it('(2) Engine indisponible : aucune soumission, l’exécution attend explicite
     expect(state.history.at(-1)).toMatchObject({ kind: 'waiting_engine', stepId: 'image', version: run.version });
     // Tant que l'attente dure : rien n'est soumis, même si Engine revient.
     engineStatus = 'available';
-    expect(await submit(state)).toMatchObject({ kind: 'waiting_engine' });
+    await expect(submit(state)).rejects.toThrow('STEP_NOT_READY');
     expect(submissions).toBe(0);
     await expect(settle(state)).rejects.toThrow('STEP_NOT_READY');
     // Un non-admin ne reprend pas ; l'admin reprend l'étape inchangée, puis la soumission repart.
@@ -176,7 +209,7 @@ it('(4) refuse hors étape de génération, sans prompt graphique livré, ou san
     let run = startExecution(runId, definition, 1);
     run = completeStep(run, 'watch', run.version, [artifact('watch'), artifact('subject')]);
     await persist(run);
-    await expect(submitGenerationStep({ key: { runId, runVersion: run.version, stepId: 'watch' }, prompt }, deps())).rejects.toMatchObject({ code: 'STEP_NOT_GENERATION' });
+    await expect(submitGenerationStep({ key: { runId, runVersion: run.version, stepId: 'watch' }, prompt }, deps())).rejects.toThrow('STEP_NOT_READY');
     run = decideStep(run, { stepId: 'select', expectedVersion: run.version, choice: 'approve', feedback: '', channel: 'organigrad', selectedArtifact: artifact('subject'), idempotencyKey: randomUUID() }, { id: human, kind: 'human' });
     run = completeStep(run, 'write', run.version, [artifact('article')]);
     // Étape image forcée sans prompt graphique : refus explicite.
@@ -201,6 +234,11 @@ it('(5) routes : clé de service seulement, corps strict, prompt jamais rendu, a
         actor.service = false;
         expect((await post('generate', { grantId: grant, target, runVersion: run.version, prompt })).json()).toEqual({ error: 'SERVICE_KEY_REQUIRED' });
         actor.service = true;
+        const otherGrant=randomUUID();
+        const otherTarget={...target,resourceId:'other-model'};
+        await call('create',{grantId:otherGrant,apiKeyId:key,nodeId:node,target:otherTarget,actions:['step:execute'],expiresAt:new Date(Date.now()+3600000).toISOString()},human,null);
+        expect((await post('generate',{grantId:otherGrant,target:otherTarget,runVersion:run.version,prompt})).json()).toEqual({error:'TARGET_MISMATCH'});
+        expect(submissions).toBe(0);
         expect((await post('generate', { grantId: grant, target, runVersion: run.version })).statusCode).toBe(400);
         expect((await post('generate', { grantId: grant, target, runVersion: run.version, prompt, extra: 1 })).statusCode).toBe(400);
         engineStatus = 'unavailable';
@@ -213,15 +251,15 @@ it('(5) routes : clé de service seulement, corps strict, prompt jamais rendu, a
         expect(ok.statusCode).toBe(200);
         expect(ok.json()).toEqual({ jobId: expect.any(String), reused: false, runVersion: resumed.version });
         expect(JSON.stringify(ok.json())).not.toContain('ILLUSTRATION');
-        const pending = await post('generation-result', { grantId: grant, target, runVersion: resumed.version });
+        const pending = await post('generation-result', { grantId: grant, target, runVersion: resumed.version, prompt });
         expect(pending.statusCode).toBe(202);
         const fileId = randomUUID();
         jobs.set(ok.json().jobId, { status: 'completed', results: [{ fileId, role: 'output', type: 'image/png', downloadUrl: `/api/v1/files/${fileId}` }] });
-        const done = await post('generation-result', { grantId: grant, target, runVersion: resumed.version });
+        const done = await post('generation-result', { grantId: grant, target, runVersion: resumed.version, prompt });
         expect(done.statusCode).toBe(200);
         expect(done.json()).toMatchObject({ reused: false, runVersion: resumed.version + 1, reference: { id: fileId, kind: 'image' } });
         // Rejeu après avancement : la délégation (SQL) refuse la version périmée, aucun second reçu.
-        const replay = await post('generation-result', { grantId: grant, target, runVersion: resumed.version });
+        const replay = await post('generation-result', { grantId: grant, target, runVersion: resumed.version, prompt });
         expect(replay.statusCode).toBe(409); expect(replay.json()).toEqual({ error: 'STALE_EXECUTION' });
         expect(await receiptRows()).toHaveLength(1);
     } finally { await app.close(); }

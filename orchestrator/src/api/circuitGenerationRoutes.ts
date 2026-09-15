@@ -16,12 +16,12 @@ import type { PgCircuitStore } from '../state/pgCircuitStore.js';
  * corps et n'est jamais journalisé ni stocké.
  *
  *   POST /api/circuit-runs/:runId/steps/:stepId/generate           { grantId, target, runVersion, prompt }
- *   POST /api/circuit-runs/:runId/steps/:stepId/generation-result   { grantId, target, runVersion }
+ *   POST /api/circuit-runs/:runId/steps/:stepId/generation-result   { grantId, target, runVersion, prompt }
  */
 const target = z.object({ appId: z.string().regex(/^[a-z][a-z0-9-]{1,63}$/), workspaceId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/), resourceId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/) }).strict();
 const base = { grantId: z.string().uuid(), target, runVersion: z.number().int().positive() };
 const submitBody = z.object({ ...base, prompt: z.string().min(1).max(2000) }).strict();
-const settleBody = z.object(base).strict();
+const settleBody = submitBody;
 const params = z.object({ runId: z.string().uuid(), stepId: z.string().min(1).max(128).regex(/^[a-zA-Z0-9_.:-]+$/) }).strict();
 const conflicts = new Set(['STALE_EXECUTION', 'STEP_NOT_READY', 'EXECUTION_NOT_ACTIVE', 'INVALID_STEP_OUTPUT', 'DOSSIER_INCOMPLETE', 'ENGINE_WAIT_NOT_ALLOWED']);
 const denied = new Set(['RUN_UNAVAILABLE', 'GRANT_UNAVAILABLE', 'GRANT_REVOKED', 'GRANT_EXPIRED', 'STEP_FORBIDDEN', 'ACTION_FORBIDDEN', 'TARGET_MISMATCH', 'PROJECT_UNAVAILABLE', 'RUN_NOT_FOUND', 'MANDATE_UNAVAILABLE']);
@@ -47,6 +47,7 @@ export function registerCircuitGenerationRoutes(app: FastifyInstance, deps: Circ
             const workspaceId = req.workspaceId, apiKeyId = req.apiKeyId;
             const route = params.parse(req.params);
             const input = (settle ? settleBody : submitBody).parse(req.body) as z.infer<typeof submitBody>;
+            if (input.target.appId !== 'ned-media-engine' || input.target.resourceId !== deps.engineId) throw new Error('TARGET_MISMATCH');
             const key: CircuitAttemptKey = { runId: route.runId, runVersion: input.runVersion, stepId: route.stepId };
             const runs = await deps.sql<{ project_id: string | null }[]>`select state#>>'{definition,project,projectId}' as project_id from public.circuit_executions where id=${route.runId} and workspace_id=${workspaceId}`;
             const projectId = runs[0]?.project_id;
@@ -63,7 +64,7 @@ export function registerCircuitGenerationRoutes(app: FastifyInstance, deps: Circ
             };
             const generation: EngineGenerationDeps = { workspaceId, engineId: deps.engineId, engine: deps.engine, attempts: deps.attemptsFor(workspaceId), receipts: deps.receiptsFor(workspaceId), store: deps.storeFor(workspaceId), authorize };
             if (settle) {
-                const result = await settleGenerationStep({ key }, generation);
+                const result = await settleGenerationStep({ key, prompt: input.prompt }, generation);
                 if (result.kind === 'pending') return reply.code(202).send({ status: result.status, jobId: result.jobId });
                 return { reference: result.reference, receiptId: result.receipt.id, runVersion: result.run.version, reused: result.reused };
             }

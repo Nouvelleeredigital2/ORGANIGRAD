@@ -27,10 +27,20 @@ Sur le code de cette branche, orchestrator :
 PGlite exécute les migrations existantes localement ; Orvion répond par un simulateur derrière son vrai client.
 Ces résultats ne prouvent ni la passe 1 réelle sous mandat, ni une image Engine réelle, ni un parcours LINK authentifié.
 
+## Intégration locale revue (17:27 Paris)
+
+La branche integrate/boreal-reviewed-20260915 assemble le correctif de lot et #33 nettoyée (4ba899c), sans modifier master.
+La recette locale simule maintenant veille + sujets, sélection signée, article, brief, Engine, contrôle du Gardien et validation humaine finale.
+Engine exige la cible autorisée exacte et, à la récupération, l'empreinte de l'origine, du moteur et du prompt initial. L'autorisation est revérifiée avant consultation et après la réponse externe.
+
+- Suite intégrée : 752 tests réussis, 63 ignorés, zéro échec. Rapport JSON : output/boreal-integrated-tests-20260915.json à la racine Applications 2026.
+- Typecheck réussi ; revue indépendante favorable sur les corrections Engine.
+- Ces recettes emploient PGlite et des services simulés. Elles ne constituent pas un parcours authentifié entre les applications déployées.
+
 ## Intégration restante
 
-1. Assembler localement les décisions signées et Engine de #33 nettoyée (4ba899c).
-2. Rejouer la recette simulée intégrée, avec le lot veille+sujets.
+1. Faire relire la branche intégrée et son contrat de récupération Engine.
+2. Conserver les PR en brouillon tant que le reçu réel requis manque.
 3. Obtenir et conserver le reçu réel de passe 1 avant fusion de passe 2, selon la priorité existante.
 4. Après qualification LINK/projet et mandat, exécuter la recette authentifiée distincte.
 

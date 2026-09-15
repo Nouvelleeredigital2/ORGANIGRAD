@@ -141,7 +141,7 @@ const linkList = (app: App, organigradUserId: string) => app.inject({ method: 'G
 const deliver = (app: App, bot: keyof typeof KEYS, runId: string, stepId: string, runVersion: number, operation: string, payload: Record<string, unknown>) =>
     app.inject({ method: 'POST', url: `/api/circuit-runs/${runId}/steps/${stepId}/deliver`, headers: asBot(bot), payload: { grantId: GRANTS[bot], target: target(bot), runVersion, operation, editorial: { boardId, dossierId }, payload } });
 const generate = (app: App, runId: string, runVersion: number, prompt = CONTENT.prompt) => app.inject({ method: 'POST', url: `/api/circuit-runs/${runId}/steps/step-5/generate`, headers: asBot('engine'), payload: { grantId: GRANTS.engine, target: target('engine'), runVersion, prompt } });
-const settle = (app: App, runId: string, runVersion: number) => app.inject({ method: 'POST', url: `/api/circuit-runs/${runId}/steps/step-5/generation-result`, headers: asBot('engine'), payload: { grantId: GRANTS.engine, target: target('engine'), runVersion } });
+const settle = (app: App, runId: string, runVersion: number) => app.inject({ method: 'POST', url: `/api/circuit-runs/${runId}/steps/step-5/generation-result`, headers: asBot('engine'), payload: { grantId: GRANTS.engine, target: target('engine'), runVersion, prompt: CONTENT.prompt } });
 const control = (app: App, runId: string, action: string, expectedVersion: number) => app.inject({ method: 'POST', url: `/api/circuit-runs/${runId}/control`, headers: asHuman(), payload: { action, expectedVersion, idempotencyKey: randomUUID() } });
 const run = (res: { json: () => unknown }) => (res.json() as { run: CircuitExecution }).run;
 
@@ -195,7 +195,7 @@ it('parcourt le dossier fictif de bout en bout (circuit 1C) : un seul dossier, u
         expect(engineSubmissions).toBe(0);
         expect(await attempts()).toHaveLength(0);
         expect((await state(runId)).outputs['step-4']!.map((r) => r.kind)).toEqual(['visual_prompt']);
-        expect((await generate(app, runId, 5)).json()).toMatchObject({ error: 'ENGINE_UNAVAILABLE', status: 'waiting_engine' });
+        expect((await generate(app, runId, 5)).json()).toEqual({ error: 'STEP_NOT_READY' });
         engineStatus = 'available';
         expect((await app.inject({ method: 'POST', url: `/api/circuit-runs/${runId}/control`, headers: asBot('engine'), payload: { action: 'retry_engine', expectedVersion: 5, idempotencyKey: randomUUID() } })).statusCode).toBe(401);
         const resumed = await control(app, runId, 'retry_engine', 5);
@@ -279,6 +279,57 @@ it('parcourt le dossier fictif de bout en bout (circuit 1C) : un seul dossier, u
         expect((await app.inject({ method: 'POST', url: `/api/circuit-runs/${runId}/publish`, headers: asHuman(), payload: {} })).statusCode).toBe(404);
     } finally { await app.close(); }
 }, 120000);
+
+it('passe 2 simulée : lot veille+sujet, choix signé, article, prompt, Engine et validation humaine', async () => {
+    const selectedDefinition= CircuitDefinitionSchema.parse({...definition,steps:[
+        definition.steps[0],{id:'step-2',kind:'selection',assigneeId:OWNER,validatorKind:'human',instructions:'Choisir un sujet',correctionStepId:'step-1'},
+        ...definition.steps.slice(1),
+    ]});
+    await db.query('update public.team_circuits set definition=$1 where id=$2',[JSON.stringify(selectedDefinition),CIRCUIT]);
+    const app=await server();
+    try {
+        const started=await app.inject({method:'POST',url:`/api/circuits/${CIRCUIT}/runs`,headers:asHuman(),payload:{idempotencyKey:randomUUID()}});
+        expect(started.statusCode).toBe(201);
+        const runId=run(started).id;
+        const delivered=await app.inject({method:'POST',url:`/api/circuit-runs/${runId}/steps/step-1/deliver`,headers:asBot('eric'),payload:{
+            grantId:GRANTS.eric,target:target('eric'),runVersion:1,editorial:{boardId,dossierId},deliveries:[
+                {operation:'watch:create',payload:{content:CONTENT.watch,sources:['https://source.example.invalid/a']}},
+                {operation:'version:create',payload:{content:'SUJET FICTIF sourcé',kind:'subject',sources:['https://source.example.invalid/a']}},
+            ],
+        }});
+        expect(delivered.statusCode).toBe(200);
+        const refs=delivered.json().references as ArtifactReference[];
+        expect(refs.map(ref=>ref.kind)).toEqual(['watch','subject']);
+        expect((await state(runId))).toMatchObject({version:2,status:'waiting_approval',currentStepId:'step-2'});
+        const decision={stepId:'step-2',choice:'approve',expectedVersion:2,idempotencyKey:randomUUID(),selectedArtifact:refs[1]};
+        expect((await linkDecide(app,runId,OWNER,decision)).statusCode).toBe(200);
+        expect((await linkDecide(app,runId,OWNER,decision)).json()).toMatchObject({replayed:true});
+        expect(orvionPosts).toHaveLength(2);
+        expect((await deliver(app,'eric',runId,'step-3',3,'article:create',{content:CONTENT.article})).statusCode).toBe(200);
+        expect((await deliver(app,'design',runId,'step-4',4,'version:create',{content:CONTENT.prompt,kind:'visual_prompt'})).statusCode).toBe(200);
+        const wrongTarget=await app.inject({method:'POST',url:`/api/circuit-runs/${runId}/steps/step-5/generate`,headers:asBot('engine'),payload:{
+            grantId:GRANTS.engine,target:{...target('engine'),resourceId:'other-model'},runVersion:5,prompt:CONTENT.prompt,
+        }});
+        expect(wrongTarget.statusCode).toBe(403);
+        expect(engineSubmissions).toBe(0);
+        const submission=await generate(app,runId,5);
+        expect(submission.statusCode).toBe(200);
+        const fileId=randomUUID();
+        jobs.set(submission.json().jobId,{status:'completed',results:[{fileId,role:'output',type:'image/png',downloadUrl:`/api/v1/files/${fileId}`}]});
+        expect((await settle(app,runId,5)).statusCode).toBe(200);
+        expect((await deliver(app,'guardian',runId,'step-6',6,'review:create',{content:CONTENT.review})).statusCode).toBe(200);
+        const approve={stepId:'step-7',choice:'approve',expectedVersion:7,idempotencyKey:randomUUID()};
+        expect((await linkDecide(app,runId,GUARDIAN,approve)).statusCode).toBe(403);
+        expect((await linkDecide(app,runId,OWNER,approve)).statusCode).toBe(200);
+        const final=await state(runId);
+        expect(final.status).toBe('ready_to_publish');
+        expect(final.outputs['step-1']).toEqual(refs);
+        expect(final.outputs['step-2']).toEqual([refs[1]]);
+        expect(engineSubmissions).toBe(1);
+        expect(orvionPosts).toHaveLength(5);
+        for(const post of orvionPosts) expect(post.project).toEqual(definition.project);
+    } finally {await app.close();}
+},60000);
 
 it('une réponse Orvion perdue laisse le reçu incertain : aucun second POST, le dossier reste en attente d’une résolution humaine', async () => {
     const app = await server();
