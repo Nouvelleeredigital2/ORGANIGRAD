@@ -19,6 +19,7 @@ const VIEWS: readonly AppView[] = [
     'dashboard',
     'orchestration',
     'bots',
+    'circuits',
     'projects',
     'members',
     'api-keys',

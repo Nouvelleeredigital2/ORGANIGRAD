@@ -18,8 +18,9 @@ function signJwt(payload: Record<string, unknown>): string {
     const s = createHmac('sha256', JWT_SECRET).update(`${h}.${p}`).digest('base64url');
     return `${h}.${p}.${s}`;
 }
-const MEMBER_JWT = signJwt({ sub: 'user-member', exp: FUTURE });
-const VIEWER_JWT = signJwt({ sub: 'user-viewer', exp: FUTURE });
+const MEMBER_ID = '00000000-0000-4000-8000-000000000010';
+const MEMBER_JWT = signJwt({ sub: MEMBER_ID, exp: FUTURE });
+const VIEWER_JWT = signJwt({ sub: '00000000-0000-4000-8000-000000000011', exp: FUTURE });
 
 const BOT_ROW = {
     id: '00000000-0000-4000-8000-000000000001',
@@ -54,9 +55,24 @@ function makeSql(role: string, opts: { insertRow?: typeof BOT_ROW | null } = {})
     const fn = vi.fn((strings: TemplateStringsArray) => {
         const q = String(strings.join(' ')).toLowerCase();
         if (q.includes('workspace_members')) return Promise.resolve([{ role }]);
+        if (q.includes('bot_activation_status')) return Promise.resolve([{
+            result: {
+                botId: BOT_ROW.id,
+                ready: true,
+                enabled: false,
+                checks: [{ code: 'mission', label: 'Mission définie', passed: true }],
+            },
+        }]);
+        if (q.includes('activate_verified_bot')) return Promise.resolve([{
+            result: { status: 'activated', botId: BOT_ROW.id, actorId: MEMBER_ID },
+        }]);
+        if (q.includes('deactivate_bot')) return Promise.resolve([{
+            result: { status: 'draft', botId: BOT_ROW.id, actorId: MEMBER_ID },
+        }]);
         if (q.includes('insert into public.bot_profiles')) {
             return Promise.resolve(opts.insertRow === null ? [] : [opts.insertRow ?? BOT_ROW]);
         }
+        if (q.includes('update public.bot_profiles')) return Promise.resolve([BOT_ROW]);
         if (q.includes('from public.bot_profiles') && q.includes('order by')) {
             return Promise.resolve([BOT_ROW]);
         }
@@ -96,6 +112,7 @@ function makeSql(role: string, opts: { insertRow?: typeof BOT_ROW | null } = {})
     // PgGraphStore.upsertNode (appelé par POST /api/bots/:id/link-node) type
     // les compétences via `sql.array(...)`.
     (fn as unknown as { array: (v: unknown) => unknown }).array = (v: unknown) => v;
+    Object.assign(fn, { begin: vi.fn(async (callback: (sql: unknown) => unknown) => callback(fn)) });
     return { sql: fn as unknown as import('postgres').Sql, jsonCalls };
 }
 
@@ -160,6 +177,32 @@ describe('/api/bots', () => {
         expect(res.json().error).toBe('BOT_NOT_FOUND');
     });
 
+    it('exposes activation checks to a workspace member without permitting activation', async () => {
+        await build('member');
+        const status = await inject('GET', `/api/bots/${VALID_BODY.id}/activation`, MEMBER_JWT);
+        expect(status.statusCode).toBe(200);
+        expect(status.json().activation).toMatchObject({ ready: true, enabled: false });
+
+        const attempt = await inject('POST', `/api/bots/${VALID_BODY.id}/activation`, MEMBER_JWT, {});
+        expect(attempt.statusCode).toBe(403);
+        expect(attempt.json().error).toBe('INSUFFICIENT_SCOPE');
+    });
+
+    it('lets an administrator activate and deactivate through dedicated human routes', async () => {
+        const sql = await build('admin');
+        const activate = await inject('POST', `/api/bots/${VALID_BODY.id}/activation`, MEMBER_JWT, {});
+        expect(activate.statusCode).toBe(200);
+        expect(activate.json().activation).toMatchObject({ status: 'activated', botId: VALID_BODY.id });
+
+        const deactivate = await inject('DELETE', `/api/bots/${VALID_BODY.id}/activation`, MEMBER_JWT, { reason: 'Révision demandée' });
+        expect(deactivate.statusCode).toBe(200);
+        expect(deactivate.json().activation).toMatchObject({ status: 'draft', botId: VALID_BODY.id });
+
+        const queries = (sql as unknown as ReturnType<typeof vi.fn>).mock.calls.map(call => String(call[0]).toLowerCase());
+        expect(queries.some(query => query.includes('activate_verified_bot'))).toBe(true);
+        expect(queries.some(query => query.includes('deactivate_bot'))).toBe(true);
+    });
+
     it('POST /api/bots — 400 avant tout accès SQL si le corps est invalide', async () => {
         const sql = await build('member');
         const res = await inject('POST', '/api/bots', MEMBER_JWT, { ...VALID_BODY, runtimeId: 'Anita Invalide' });
@@ -188,6 +231,15 @@ describe('/api/bots', () => {
         expect(res.json().error).toBe('INSUFFICIENT_SCOPE');
     });
 
+    it('creates the graph node in the bot creation transaction', async () => {
+        const sql = await build('member');
+        const res = await inject('POST', '/api/bots', MEMBER_JWT, VALID_BODY);
+        expect(res.statusCode).toBe(201);
+        expect(sql.begin).toHaveBeenCalledOnce();
+        const queries = (sql as unknown as ReturnType<typeof vi.fn>).mock.calls.map(call => String(call[0]));
+        expect(queries.some(query => query.includes('insert into public.hybrid_nodes'))).toBe(true);
+    });
+
     it('DELETE /api/bots/:id — un member ne peut pas supprimer', async () => {
         await build('member');
         const res = await inject('DELETE', `/api/bots/${VALID_BODY.id}`, MEMBER_JWT);
@@ -206,6 +258,15 @@ describe('/api/bots', () => {
         expect(put.statusCode).toBe(400);
         const post = await inject('POST', '/api/bots', MEMBER_JWT, { ...VALID_BODY, updated_at: BOT_ROW.updated_at });
         expect(post.statusCode).toBe(400);
+    });
+
+    it('updates the owned node identity in the persona update transaction', async () => {
+        const sql = await build('member');
+        const res = await inject('PUT', `/api/bots/${VALID_BODY.id}`, MEMBER_JWT, { ...VALID_BODY, updated_at: BOT_ROW.updated_at });
+        expect(res.statusCode).toBe(200);
+        expect(sql.begin).toHaveBeenCalledOnce();
+        const queries = (sql as unknown as ReturnType<typeof vi.fn>).mock.calls.map(call => String(call[0]));
+        expect(queries.some(query => query.includes('update public.hybrid_nodes') && query.includes("external_app = 'organigrad-bots'"))).toBe(true);
     });
 
     it('POST collision returns 409 instead of replacing the existing bot', async () => {

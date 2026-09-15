@@ -13,6 +13,16 @@ import { validPrivateIssuer, validPrivateOrigin } from '../api/privateProjectRou
 export interface OrchestratorEnv {
     mode: OrchestratorMode;
     projectsEnabled: boolean;
+    circuitsEnabled: boolean;
+    projectServiceDelegationsEnabled: boolean;
+    /** Livraison Orvion sous reçu : exige délégations + circuits, une origine Orvion qualifiée et un fichier de mandat. */
+    circuitDeliveryEnabled: boolean;
+    orvionBaseUrl?: string;
+    orvionQualifiedOrigin?: string;
+    /** Chemin du fichier contenant l'UUID du mandat Orvion ; son contenu n'est jamais journalisé. */
+    orvionServiceMandateFile?: string;
+    circuitSchedulerEnabled: boolean;
+    circuitSchedulerProjectIds: string[];
     privateProjectsEnabled: boolean;
     privateProjectsIssuer?: string;
     port: number;
@@ -34,6 +44,20 @@ export interface OrchestratorEnv {
     linkBaseUrl?: string;
     /** Token Bearer du pont LINK (GET /api/bridge/agents), jamais exposé au client. */
     linkBridgeToken?: string;
+    /**
+     * Pont LINK ↔ hub Synapse (décisions relayées par acteur signé, attestations
+     * d'identité). `LINK_BRIDGE_ENABLED=1` exige les quatre variables ci-dessous ;
+     * les fichiers sont lus par le bootstrap (`loadLinkBridgeConfig`).
+     */
+    linkBridgeEnabled: boolean;
+    /** Fichier JSON `{kid: pem}` des clés publiques Ed25519 épinglées du hub. */
+    linkBridgeHubPublicKeysFile?: string;
+    /** `kid` des attestations OrganiGrad. */
+    organigradIdentitySigningKid?: string;
+    /** Fichier PEM PKCS8 de la clé privée Ed25519 d'OrganiGrad. ⚠️ SECRET (chemin seulement ici). */
+    organigradIdentitySigningPrivateKeyFile?: string;
+    /** Base https du hub pour `POST /api/identity-links/<action>`. */
+    identityLinksHubUrl?: string;
 }
 
 export class EnvValidationError extends Error {
@@ -147,6 +171,55 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): OrchestratorEn
         }
     }
 
+    const circuitsRaw=source.CIRCUITS_ENABLED?.trim() || 'false';
+    const circuitsEnabled=circuitsRaw==='true';
+    if(!['true','false'].includes(circuitsRaw))issues.push('CIRCUITS_ENABLED doit valoir true ou false');
+    if(circuitsEnabled && (!projectsEnabled || mode!=='pg' || !source.APP_URL?.startsWith('https://')))issues.push('CIRCUITS_ENABLED exige les projets authentifiés, Postgres et APP_URL HTTPS');
+
+    const delegationsRaw=source.PROJECT_SERVICE_DELEGATIONS_ENABLED?.trim() || 'false';
+    const projectServiceDelegationsEnabled=delegationsRaw==='true';
+    if(!['true','false'].includes(delegationsRaw))issues.push('PROJECT_SERVICE_DELEGATIONS_ENABLED doit valoir true ou false');
+    if(projectServiceDelegationsEnabled&&!circuitsEnabled)issues.push('PROJECT_SERVICE_DELEGATIONS_ENABLED exige CIRCUITS_ENABLED');
+
+    const deliveryRaw=source.CIRCUIT_DELIVERY_ENABLED?.trim() || 'false';
+    const circuitDeliveryEnabled=deliveryRaw==='true';
+    const orvionBaseUrl=source.ORVION_BASE_URL?.trim() || undefined;
+    const orvionQualifiedOrigin=source.ORVION_QUALIFIED_ORIGIN?.trim() || undefined;
+    const orvionServiceMandateFile=source.ORVION_SERVICE_MANDATE_FILE?.trim() || undefined;
+    if(!['true','false'].includes(deliveryRaw))issues.push('CIRCUIT_DELIVERY_ENABLED doit valoir true ou false');
+    if(circuitDeliveryEnabled) {
+        if(!projectServiceDelegationsEnabled||!circuitsEnabled)issues.push('CIRCUIT_DELIVERY_ENABLED exige PROJECT_SERVICE_DELEGATIONS_ENABLED et CIRCUITS_ENABLED');
+        let base:URL|undefined;
+        try { base=new URL(orvionBaseUrl??''); } catch { base=undefined; }
+        if(!base||base.protocol!=='https:'||base.username||base.password||base.search||base.hash||base.pathname!=='/')issues.push('ORVION_BASE_URL doit être une origine HTTPS nue (https://hote[:port]/)');
+        if(!orvionQualifiedOrigin||!base||orvionQualifiedOrigin!==base.origin)issues.push("ORVION_QUALIFIED_ORIGIN doit être exactement l'origine d'ORVION_BASE_URL");
+        if(!orvionServiceMandateFile)issues.push('ORVION_SERVICE_MANDATE_FILE doit désigner le fichier contenant le mandat Orvion');
+    }
+    const schedulerRaw=source.CIRCUIT_SCHEDULER_ENABLED?.trim() || 'false';
+    const circuitSchedulerEnabled=schedulerRaw==='true';
+    const circuitSchedulerProjectIds=[...new Set((source.CIRCUIT_SCHEDULER_PROJECT_IDS??'').split(',').map(id=>id.trim().toLowerCase()).filter(Boolean))];
+    if(!['true','false'].includes(schedulerRaw))issues.push('CIRCUIT_SCHEDULER_ENABLED doit valoir true ou false');
+    if(circuitSchedulerEnabled&&!circuitsEnabled)issues.push('CIRCUIT_SCHEDULER_ENABLED exige CIRCUITS_ENABLED');
+    if(circuitSchedulerProjectIds.some(id=>! /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id)) || (circuitSchedulerEnabled&&!circuitSchedulerProjectIds.length))issues.push('CIRCUIT_SCHEDULER_PROJECT_IDS exige une liste explicite de UUID de projets');
+
+    // Pont LINK ↔ hub Synapse : opt-in explicite, configuration complète ou échec.
+    const linkBridgeRaw=source.LINK_BRIDGE_ENABLED?.trim() || '0';
+    const linkBridgeEnabled=linkBridgeRaw==='1';
+    if(!['0','1'].includes(linkBridgeRaw))issues.push('LINK_BRIDGE_ENABLED doit valoir 0 ou 1');
+    const linkBridgeHubPublicKeysFile=source.LINK_BRIDGE_HUB_PUBLIC_KEYS_FILE?.trim() || undefined;
+    const organigradIdentitySigningKid=source.ORGANIGRAD_IDENTITY_SIGNING_KID?.trim() || undefined;
+    const organigradIdentitySigningPrivateKeyFile=source.ORGANIGRAD_IDENTITY_SIGNING_PRIVATE_KEY_FILE?.trim() || undefined;
+    const identityLinksHubUrl=source.IDENTITY_LINKS_HUB_URL?.trim() || undefined;
+    if(linkBridgeEnabled){
+        if(mode!=='pg')issues.push('LINK_BRIDGE_ENABLED exige Postgres');
+        if(!source.APP_URL?.trim().startsWith('https://'))issues.push('LINK_BRIDGE_ENABLED exige APP_URL HTTPS (référence canonique de projet)');
+        if(!(source.SUPABASE_JWT_SECRET?.trim() || source.SUPABASE_JWKS_URL?.trim()))issues.push('LINK_BRIDGE_ENABLED exige une vérification des sessions humaines (SUPABASE_JWT_SECRET ou SUPABASE_JWKS_URL)');
+        if(!linkBridgeHubPublicKeysFile)issues.push('LINK_BRIDGE_HUB_PUBLIC_KEYS_FILE est requise quand LINK_BRIDGE_ENABLED=1');
+        if(!organigradIdentitySigningKid||organigradIdentitySigningKid.length>128)issues.push('ORGANIGRAD_IDENTITY_SIGNING_KID est requise (≤ 128 caractères) quand LINK_BRIDGE_ENABLED=1');
+        if(!organigradIdentitySigningPrivateKeyFile)issues.push('ORGANIGRAD_IDENTITY_SIGNING_PRIVATE_KEY_FILE est requise quand LINK_BRIDGE_ENABLED=1');
+        if(!identityLinksHubUrl||!isHttpUrl(identityLinksHubUrl)||!identityLinksHubUrl.startsWith('https://'))issues.push('IDENTITY_LINKS_HUB_URL doit être une URL https quand LINK_BRIDGE_ENABLED=1');
+    }
+
     if (issues.length > 0) {
         throw new EnvValidationError(issues);
     }
@@ -154,6 +227,14 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): OrchestratorEn
     return {
         mode,
         projectsEnabled,
+        circuitsEnabled,
+        projectServiceDelegationsEnabled,
+        circuitDeliveryEnabled,
+        orvionBaseUrl,
+        orvionQualifiedOrigin,
+        orvionServiceMandateFile,
+        circuitSchedulerEnabled,
+        circuitSchedulerProjectIds,
         privateProjectsEnabled,
         privateProjectsIssuer,
         port,
@@ -172,5 +253,10 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): OrchestratorEn
         supabaseJwksUrl: source.SUPABASE_JWKS_URL?.trim() || undefined,
         linkBaseUrl,
         linkBridgeToken,
+        linkBridgeEnabled,
+        linkBridgeHubPublicKeysFile,
+        organigradIdentitySigningKid,
+        organigradIdentitySigningPrivateKeyFile,
+        identityLinksHubUrl,
     };
 }

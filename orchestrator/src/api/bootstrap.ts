@@ -16,6 +16,10 @@ import { getSql } from '../state/pgGraphStore.js';
 import { loadEnv } from '../config/env.js';
 import { createSupabaseJwtVerifier } from './userAuth.js';
 import { pathToFileURL } from 'node:url';
+import { PgCircuitScheduler } from '../state/pgCircuitScheduler.js';
+import { registerCircuitWorker } from './circuitWorker.js';
+import { loadLinkBridgeConfig } from './linkBridgeConfig.js';
+import { createOrvionServiceClient, readOrvionMandateFile } from '../integrations/orvionServiceClient.js';
 
 export async function startOrchestrator() {
     // Validation centralisée — échoue tôt avec un message clair si config invalide.
@@ -35,9 +39,21 @@ export async function startOrchestrator() {
                       jwksUrl: env.supabaseJwksUrl,
                   })
                 : undefined;
+        // Livraison Orvion sous reçu : le mandat est lu depuis un fichier au démarrage et n'est
+        // jamais journalisé ; toute configuration incomplète fait échouer le démarrage.
+        const circuitDelivery = env.circuitDeliveryEnabled ? {
+            orvion: createOrvionServiceClient({
+                baseUrl: env.orvionBaseUrl ?? '', qualifiedOrigin: env.orvionQualifiedOrigin ?? '',
+                mandateId: readOrvionMandateFile(env.orvionServiceMandateFile ?? ''),
+                originHeader: new URL(appUrl ?? '').origin,
+            }),
+        } : undefined;
         const app = buildPgServer({
             sql,
+            circuitDelivery,
             projectsEnabled: env.projectsEnabled,
+            circuitsEnabled: env.circuitsEnabled,
+            projectServiceDelegationsEnabled: env.projectServiceDelegationsEnabled,
             privateProjectsEnabled: env.privateProjectsEnabled,
             privateProjectsIssuer: env.privateProjectsIssuer,
             privateProjectsVerifyUserToken: env.privateProjectsEnabled ? createSupabaseJwtVerifier({
@@ -50,6 +66,9 @@ export async function startOrchestrator() {
             verifyUserToken,
             linkBaseUrl: env.linkBaseUrl,
             linkBridgeToken: env.linkBridgeToken,
+            // Pont LINK ↔ hub : lecture des clés au démarrage, échec explicite
+            // si LINK_BRIDGE_ENABLED=1 et qu'un fichier est absent ou invalide.
+            linkBridge: loadLinkBridgeConfig(env),
             notifierOptions: {
                 validationsWebhook: env.slackValidations,
                 fluxWebhook: env.slackFlux,
@@ -68,6 +87,9 @@ export async function startOrchestrator() {
         // Proxy vocal (SDK @apps2026/voice-client) — 503 tant que le gateway
         // n'est pas configuré (NED_VOICE_GATEWAY_URL / NED_VOICE_GATEWAY_TOKEN).
         registerVoiceGatewayRoutes(app);
+        if(env.circuitSchedulerEnabled) {
+            registerCircuitWorker(app,new PgCircuitScheduler(sql,env.circuitSchedulerProjectIds));
+        }
         if (process.env.SYNAPSE_CONSUMER === '1') {
             registerSynapseConsumer(app);
             console.log('[orchestrator] consumer Synapse ACTIF (mode pg)');

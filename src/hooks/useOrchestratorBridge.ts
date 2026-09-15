@@ -68,10 +68,20 @@ export function useOrchestratorBridge(
     const clientRef = useRef<OrchestratorClient | null>(null);
 
     // Configuration persistée (Paramètres). Les options explicites priment.
-    const { config, isConfigured } = useOrchestratorConfig();
-    const { activeId } = useWorkspaceContext();
-    const baseUrl = opts.baseUrl ?? config.baseUrl;
-    const apiKey = opts.apiKey ?? config.apiKey;
+    const { config } = useOrchestratorConfig();
+    const { activeId, userId } = useWorkspaceContext();
+    const deployedUrl = import.meta.env.VITE_ORCHESTRATOR_URL;
+    const deployed = opts.baseUrl === undefined && typeof deployedUrl === 'string' && deployedUrl.length > 0;
+    let deployedBase = '';
+    if (deployed) {
+        try {
+            const url = new URL(deployedUrl);
+            if (url.protocol === 'https:' && !url.username && !url.password && !url.search && !url.hash &&
+                ['/', '/api', '/api/'].includes(url.pathname)) deployedBase = `${url.origin}/api`;
+        } catch { /* Invalid deployment configuration must never fall back to browser settings. */ }
+    }
+    const baseUrl = deployed ? deployedBase : opts.baseUrl ?? config.baseUrl;
+    const apiKey = deployed ? '' : opts.apiKey ?? config.apiKey;
     const { clientFactory, enabled } = opts;
 
     // Session utilisateur (JWT) pour les actions humaines — l'orchestrateur exige
@@ -79,15 +89,16 @@ export function useOrchestratorBridge(
     const getUserAuth = useCallback(async (): Promise<UserAuth | null> => {
         if (!supabase || !activeId) return null;
         const { data } = await supabase.auth.getSession();
+        if (userId && data.session?.user.id !== userId) return null;
         const token = data.session?.access_token;
         return token ? { token, workspaceId: activeId } : null;
-    }, [activeId]);
+    }, [activeId, userId]);
 
     useEffect(() => {
         const disabled =
             enabled === false ||
             // Sans config ni clientFactory de test → pas de tentative
-            (!clientFactory && !(baseUrl && (apiKey || !isConfigured)));
+            (!clientFactory && !baseUrl);
 
         let cancelled = false;
         let unsubscribe = () => {};
@@ -95,6 +106,14 @@ export function useOrchestratorBridge(
         // Tous les setState se font dans ce callback async (jamais de setState
         // synchrone dans le corps de l'effet).
         (async () => {
+            setConnected(false);
+            setActiveClient(null);
+            setNodes([]);
+            clientRef.current = null;
+            if (deployed && !deployedBase) {
+                setConnected(false); setActiveClient(null); setNodes([]); setConnectionState('failed');
+                return;
+            }
             if (disabled) {
                 setConnected(false);
                 setConnectionState('local');
@@ -104,7 +123,6 @@ export function useOrchestratorBridge(
             const client = clientFactory
                 ? clientFactory()
                 : new OrchestratorClient({ baseUrl, apiKey, getUserAuth });
-            clientRef.current = client;
 
             const reachable = await client.isReachable();
             if (cancelled) return;
@@ -121,6 +139,7 @@ export function useOrchestratorBridge(
                 setConnected(true);
                 setConnectionState('connected');
                 setActiveClient(client);
+                clientRef.current = client;
                 unsubscribe = client.subscribe(
                     (evt: SseStatusEvent) => {
                         setNodes((prev) => applyTransitionPatch(prev, evt));
@@ -142,10 +161,11 @@ export function useOrchestratorBridge(
 
         return () => {
             cancelled = true;
+            clientRef.current = null;
             setActiveClient(null);
             unsubscribe();
         };
-    }, [baseUrl, apiKey, clientFactory, enabled, isConfigured, getUserAuth]);
+    }, [baseUrl, apiKey, clientFactory, enabled, deployed, deployedBase, getUserAuth]);
 
     return {
         connected,
