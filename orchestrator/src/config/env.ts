@@ -21,6 +21,14 @@ export interface OrchestratorEnv {
     orvionQualifiedOrigin?: string;
     /** Chemin du fichier contenant l'UUID du mandat Orvion ; son contenu n'est jamais journalisé. */
     orvionServiceMandateFile?: string;
+    /** Génération d'images (étape generation) : exige CIRCUIT_DELIVERY_ENABLED, une origine Engine qualifiée, un fichier de clé et un moteur. */
+    engineGenerationEnabled: boolean;
+    engineBaseUrl?: string;
+    engineQualifiedOrigin?: string;
+    /** Chemin du fichier contenant la clé API Engine ; jamais journalisée. */
+    engineApiKeyFile?: string;
+    /** Identifiant du moteur de génération d'image chez Engine (jamais « automatic »). */
+    engineId?: string;
     circuitSchedulerEnabled: boolean;
     circuitSchedulerProjectIds: string[];
     privateProjectsEnabled: boolean;
@@ -195,6 +203,22 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): OrchestratorEn
         if(!orvionQualifiedOrigin||!base||orvionQualifiedOrigin!==base.origin)issues.push("ORVION_QUALIFIED_ORIGIN doit être exactement l'origine d'ORVION_BASE_URL");
         if(!orvionServiceMandateFile)issues.push('ORVION_SERVICE_MANDATE_FILE doit désigner le fichier contenant le mandat Orvion');
     }
+    const engineRaw=source.ENGINE_GENERATION_ENABLED?.trim() || 'false';
+    const engineGenerationEnabled=engineRaw==='true';
+    const engineBaseUrl=source.ENGINE_BASE_URL?.trim() || undefined;
+    const engineQualifiedOrigin=source.ENGINE_QUALIFIED_ORIGIN?.trim() || undefined;
+    const engineApiKeyFile=source.ENGINE_API_KEY_FILE?.trim() || undefined;
+    const engineId=source.ENGINE_ID?.trim() || undefined;
+    if(!['true','false'].includes(engineRaw))issues.push('ENGINE_GENERATION_ENABLED doit valoir true ou false');
+    if(engineGenerationEnabled) {
+        if(!circuitDeliveryEnabled)issues.push('ENGINE_GENERATION_ENABLED exige CIRCUIT_DELIVERY_ENABLED');
+        let base:URL|undefined;
+        try { base=new URL(engineBaseUrl??''); } catch { base=undefined; }
+        if(!base||base.protocol!=='https:'||base.username||base.password||base.search||base.hash||base.pathname!=='/')issues.push('ENGINE_BASE_URL doit être une origine HTTPS nue (https://hote[:port]/)');
+        if(!engineQualifiedOrigin||!base||engineQualifiedOrigin!==base.origin)issues.push("ENGINE_QUALIFIED_ORIGIN doit être exactement l'origine d'ENGINE_BASE_URL");
+        if(!engineApiKeyFile)issues.push('ENGINE_API_KEY_FILE doit désigner le fichier contenant la clé API Engine');
+        if(!engineId||!/^[a-z][a-z0-9-]{0,63}$/.test(engineId)||engineId==='automatic')issues.push('ENGINE_ID doit nommer un moteur explicite (jamais automatic)');
+    }
     const schedulerRaw=source.CIRCUIT_SCHEDULER_ENABLED?.trim() || 'false';
     const circuitSchedulerEnabled=schedulerRaw==='true';
     const circuitSchedulerProjectIds=[...new Set((source.CIRCUIT_SCHEDULER_PROJECT_IDS??'').split(',').map(id=>id.trim().toLowerCase()).filter(Boolean))];
@@ -233,6 +257,11 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): OrchestratorEn
         orvionBaseUrl,
         orvionQualifiedOrigin,
         orvionServiceMandateFile,
+        engineGenerationEnabled,
+        engineBaseUrl,
+        engineQualifiedOrigin,
+        engineApiKeyFile,
+        engineId,
         circuitSchedulerEnabled,
         circuitSchedulerProjectIds,
         privateProjectsEnabled,

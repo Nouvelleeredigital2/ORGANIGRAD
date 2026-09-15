@@ -15,11 +15,14 @@ import { registerProjectServiceTargetRoutes } from './projectServiceTargets.js';
 import { registerProjectServiceMissionRoutes } from './projectServiceMissions.js';
 import { registerCircuitRoutes } from './circuitRoutes.js';
 import { registerCircuitDeliveryRoutes } from './circuitDeliveryRoutes.js';
+import { registerCircuitGenerationRoutes, type CircuitGenerationDeps } from './circuitGenerationRoutes.js';
+import { PgCircuitAttempts } from '../state/pgCircuitAttempts.js';
 import { PgCircuitReceipts } from '../state/pgCircuitReceipts.js';
 import { PgCircuitStore } from '../state/pgCircuitStore.js';
 import type { OrvionServiceClient } from '../integrations/orvionServiceClient.js';
 import { isPrivateProjectPath, isPrivateProjectRoute, registerPrivateProjectRoutes } from './privateProjectRoutes.js';
-import { isLinkBridgeDecisionPath, registerLinkBridgeRoutes, type LinkBridgeConfig, type NodeDecisionResult } from './linkBridgeRoutes.js';
+import { isLinkBridgeDecisionPath, registerLinkBridgeRoutes, ReplayGuard, type LinkBridgeConfig, type NodeDecisionResult } from './linkBridgeRoutes.js';
+import { registerLinkCircuitBridgeRoutes } from './linkCircuitBridgeRoutes.js';
 import type { JsonObject } from '../domain/types.js';
 import { verifySupabaseJwt } from './userAuth.js';
 import type { UserTokenVerifier } from './userAuth.js';
@@ -60,8 +63,9 @@ export interface PgServerDeps {
     /** Circuit APIs stay absent until the additive SQL and project bindings are qualified. */
     circuitsEnabled?: boolean;
     projectServiceDelegationsEnabled?: boolean;
-    /** Livraison Orvion sous reçu : présent seulement quand CIRCUIT_DELIVERY_ENABLED et la configuration sont complets. */
-    circuitDelivery?: { orvion: OrvionServiceClient };
+    /** Livraison Orvion sous reçu : présent seulement quand CIRCUIT_DELIVERY_ENABLED et la configuration sont complets.
+     * `engine` (optionnel) ajoute l'étape de génération sous tentative durable ; absent → routes de génération en 404. */
+    circuitDelivery?: { orvion: OrvionServiceClient; engine?: { client: CircuitGenerationDeps['engine']; engineId: string } };
     /** Independent opt-in; no legacy authentication or graph authority is delegated. */
     privateProjectsEnabled?: boolean;
     privateProjectsIssuer?: string;
@@ -252,6 +256,12 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
         if (deps.projectServiceDelegationsEnabled !== true || deps.projectsEnabled !== true || deps.circuitsEnabled !== true || !deps.notifierOptions?.appUrl?.startsWith('https://')) throw new Error('CIRCUIT_DELIVERY_CONFIG_INCOMPLETE');
         registerCircuitDeliveryRoutes(app, {
             sql: deps.sql, appUrl: deps.notifierOptions.appUrl, orvion: deps.circuitDelivery.orvion,
+            receiptsFor: workspaceId => new PgCircuitReceipts(deps.sql, workspaceId),
+            storeFor: workspaceId => new PgCircuitStore(deps.sql, workspaceId),
+        });
+        if (deps.circuitDelivery.engine) registerCircuitGenerationRoutes(app, {
+            sql: deps.sql, appUrl: deps.notifierOptions.appUrl, engine: deps.circuitDelivery.engine.client, engineId: deps.circuitDelivery.engine.engineId,
+            attemptsFor: workspaceId => new PgCircuitAttempts(deps.sql, workspaceId),
             receiptsFor: workspaceId => new PgCircuitReceipts(deps.sql, workspaceId),
             storeFor: workspaceId => new PgCircuitStore(deps.sql, workspaceId),
         });
@@ -875,6 +885,7 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
     );
 
     // --- Pont LINK : décisions relayées par acteur signé + attestations ------
+    const linkBridgeReplays = new ReplayGuard();
     registerLinkBridgeRoutes(app, {
         sql: deps.sql,
         config: deps.linkBridge,
@@ -882,6 +893,17 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
         decideNode: decideNodeHttp,
         fetchImpl: deps.fetchImpl,
         fetchLookup: deps.fetchLookup,
+        now: deps.linkBridgeNow,
+        replays: linkBridgeReplays,
+    });
+    // --- Pont LINK : dossiers et décisions de CIRCUIT (recette Atelier Boréal).
+    // Même assertion d'acteur, même garde anti-rejeu ; exige les circuits.
+    registerLinkCircuitBridgeRoutes(app, {
+        sql: deps.sql,
+        config: deps.circuitsEnabled === true ? deps.linkBridge : undefined,
+        appUrl: deps.notifierOptions?.appUrl,
+        storeFor: (workspaceId) => new PgCircuitStore(deps.sql, workspaceId),
+        replays: linkBridgeReplays,
         now: deps.linkBridgeNow,
     });
 
