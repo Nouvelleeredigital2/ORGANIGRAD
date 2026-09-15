@@ -94,6 +94,12 @@ describe('loadEnv (validation des variables d\'environnement)', () => {
         expect(env.linkBridgeToken).toBe('t');
     });
 
+    it('configure séparément le secret des décisions de circuit LINK', () => {
+        const env = loadEnv({ ORCHESTRATOR_ALLOW_MEMORY: '1', LINK_BASE_URL: 'https://link.nouvelleeredigital.fr', LINK_CIRCUIT_BRIDGE_TOKEN: 'circuit-secret' });
+        expect(env.linkCircuitBridgeToken).toBe('circuit-secret');
+        expect(() => loadEnv({ ORCHESTRATOR_ALLOW_MEMORY: '1', LINK_CIRCUIT_BRIDGE_TOKEN: 'bad\nsecret' })).toThrow(/LINK_CIRCUIT_BRIDGE_TOKEN/);
+    });
+
     it('ne révèle jamais les valeurs dans le message d\'erreur', () => {
         try {
             loadEnv({ SUPABASE_DB_URL: 'https://secret-host-value' });

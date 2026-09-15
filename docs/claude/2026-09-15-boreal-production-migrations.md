@@ -47,7 +47,7 @@ Créer un mandat de service distinct des sessions humaines. Il doit :
 
 - être borné à **un** `ProjectRef` immutable et à **un** board Orvion déjà lié à ce `ProjectRef` ;
 - être créé/révoqué par le propriétaire humain du board ;
-- accepter uniquement `watch:create`, `article:create`, `brief:create`, `version:create` et `image:attach` ;
+- accepter uniquement `watch:create`, `article:create`, `brief:create`, `review:create`, `version:create` et `image:attach` ;
 - porter une expiration courte, un identifiant de mandat, un numéro de version et une clé d'idempotence ;
 - vérifier le mandat à nouveau après tout verrou et immédiatement avant l'écriture ;
 - permettre la création d'un dossier et d'artefacts versionnés seulement par une nouvelle RPC `SECURITY DEFINER` dédiée ;
@@ -95,9 +95,10 @@ revoke all on table public.<nouvelle_table> from public, anon, authenticated, se
 3. board ou `ProjectRef` différent → refus ;
 4. mandat expiré ou révoqué avant l'effet → refus ;
 5. correction article v2 → article v1 conservé, version exacte retournée ;
-6. `service_role`, `anon` et `authenticated` n'obtiennent aucun accès direct aux nouvelles tables ;
-7. propriétaire humain peut créer/révoquer ; non-membre ne peut ni lire ni écrire ;
-8. migration réexécutée dans une base neuve → état identique, sans modification d'objets historiques.
+6. le contrôle Gardien crée un rapport `review` versionné, mais aucune opération ne peut valider ou publier le dossier ;
+7. `service_role`, `anon` et `authenticated` n'obtiennent aucun accès direct aux nouvelles tables ;
+8. propriétaire humain peut créer/révoquer ; non-membre ne peut ni lire ni écrire ;
+9. migration réexécutée dans une base neuve → état identique, sans modification d'objets historiques.
 
 ### 5. Livrables de Claude
 

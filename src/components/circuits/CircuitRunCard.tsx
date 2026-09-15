@@ -3,10 +3,10 @@ import type { CircuitDecision } from '@apps2026/contracts';
 import { Button,Pill,Surface } from '../../design/ui';
 import { STEP_LABELS,type CircuitRun } from '../../types/circuit';
 
-const labels:Record<CircuitRun['status'],string>={ready:'À exécuter',waiting_approval:'Décision attendue',paused:'En pause',cancelled:'Annulé',ready_to_publish:'Validé — prêt à publier',blocked:'Bloqué'};
+const labels:Record<CircuitRun['status'],string>={ready:'À exécuter',waiting_approval:'Décision attendue',waiting_engine:'En attente d’Engine',paused:'En pause',cancelled:'Annulé',ready_to_publish:'Validé — prêt à publier',blocked:'Bloqué'};
 const artifactLabels:Record<string,string>={watch:'Veille',subject:'Sujet',brief:'Brief',article:'Article',visual_prompt:'Prompt graphique',image:'Visuel',review:'Contrôle'};
-const historyLabels:Record<string,string>={completed:'Livrable enregistré',approved:'Version approuvée',revised:'Correction demandée',paused:'Mise en pause',resumed:'Reprise',cancelled:'Annulation'};
-export type CircuitControl={action:'pause'|'resume'|'cancel';expectedVersion:number;idempotencyKey:string};
+const historyLabels:Record<string,string>={completed:'Livrable enregistré',approved:'Version approuvée',revised:'Correction demandée',paused:'Mise en pause',resumed:'Reprise',cancelled:'Annulation',waiting_engine:'Engine indisponible',engine_resumed:'Reprise Engine demandée'};
+export type CircuitControl={action:'pause'|'resume'|'cancel'|'retry_engine';expectedVersion:number;idempotencyKey:string};
 type CircuitRunCardProps={run:CircuitRun;userId:string|null;admin:boolean;onDecision:(decision:CircuitDecision)=>Promise<unknown>;onControl:(input:CircuitControl)=>Promise<unknown>};
 export function CircuitRunCard(props:CircuitRunCardProps) {
  const {run,userId,admin}=props;
@@ -53,7 +53,7 @@ function CircuitRunRevision({run,userId,admin,onDecision,onControl}:CircuitRunCa
   </div>}
   {run.status==='waiting_approval'&&!mayDecide&&<p className="text-sm text-[var(--fg-3)]">En attente du responsable désigné.</p>}
   {error&&<p role="alert" className="text-sm text-[var(--color-error)]">{error}</p>}
-  {admin&&!['cancelled','ready_to_publish'].includes(run.status)&&<div className="flex gap-2"><Button size="sm" variant="outline" disabled={busy} onClick={()=>void control(run.status==='paused'?'resume':'pause')}>{run.status==='paused'?'Reprendre':'Mettre en pause'}</Button><Button size="sm" variant="outline" disabled={busy} onClick={()=>void control('cancel')}>Annuler le dossier</Button></div>}
+  {admin&&!['cancelled','ready_to_publish'].includes(run.status)&&<div className="flex gap-2">{run.status==='waiting_engine'?<Button size="sm" variant="outline" disabled={busy} onClick={()=>void control('retry_engine')}>Réessayer Engine</Button>:<Button size="sm" variant="outline" disabled={busy} onClick={()=>void control(run.status==='paused'?'resume':'pause')}>{run.status==='paused'?'Reprendre':'Mettre en pause'}</Button>}<Button size="sm" variant="outline" disabled={busy} onClick={()=>void control('cancel')}>Annuler le dossier</Button></div>}
   {!!run.history.length&&<details className="text-sm"><summary className="cursor-pointer">Historique ({run.history.length})</summary><ol className="mt-3 space-y-2">{run.history.map((event,index)=><li key={index}>{STEP_LABELS[run.definition.steps.find(step=>step.id===event.stepId)?.kind??'control']} · {historyLabels[event.kind]??'Événement'} · révision {event.version}{event.feedback&&<p className="mt-1 text-[var(--fg-3)]">{event.feedback}</p>}</li>)}</ol></details>}
  </Surface>;
 }

@@ -132,7 +132,7 @@ export function registerCircuitRoutes(app:FastifyInstance,deps:{sql:Sql;appUrl?:
  }));
  app.post('/api/circuit-runs/:id/control',route(async req=>{
   const auth=await authorize(req,'workspace:admin');
-  const input=z.object({action:z.enum(['pause','resume','cancel']),expectedVersion:z.number().int().positive(),idempotencyKey:z.string().uuid()}).strict().parse(req.body);
+  const input=z.object({action:z.enum(['pause','resume','cancel','retry_engine']),expectedVersion:z.number().int().positive(),idempotencyKey:z.string().uuid()}).strict().parse(req.body);
   return {run:await auth.store.control(id((req.params as {id:string}).id),input,auth.actorId)};
  }));
 }

@@ -10,7 +10,7 @@ export interface ScheduleAuthorization {grantId:string;nextDueAt:string;expiresA
 export interface ScheduleOccurrence {id:string;scheduledFor:string;definitionVersion:number;status:'started'|'missed';runId:string|null;recoveredRunId:string|null}
 export interface CircuitRun {
  id:string; definition:CircuitDefinition; definitionVersion:number; version:number;
- status:'ready'|'waiting_approval'|'paused'|'cancelled'|'ready_to_publish'|'blocked';
+ status:'ready'|'waiting_approval'|'waiting_engine'|'paused'|'cancelled'|'ready_to_publish'|'blocked';
  currentStepId:string; outputs:Record<string,ArtifactReference[]>;
  history:Array<{stepId:string;version:number;kind:string;feedback?:string;actorId?:string}>;
 }

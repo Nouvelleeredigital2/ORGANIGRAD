@@ -54,6 +54,7 @@ export async function startOrchestrator() {
             verifyUserToken,
             linkBaseUrl: env.linkBaseUrl,
             linkBridgeToken: env.linkBridgeToken,
+            linkCircuitBridgeToken: env.linkCircuitBridgeToken,
             notifierOptions: {
                 validationsWebhook: env.slackValidations,
                 fluxWebhook: env.slackFlux,

@@ -78,7 +78,7 @@ export class PgCircuitStore {
    return state;
   }) as unknown as CircuitExecution;
  }
- async control(id:string,input:{action:'pause'|'resume'|'cancel';expectedVersion:number;idempotencyKey:string},actorId:string):Promise<CircuitExecution> {
+ async control(id:string,input:{action:'pause'|'resume'|'cancel'|'retry_engine';expectedVersion:number;idempotencyKey:string},actorId:string):Promise<CircuitExecution> {
   return await this.sql.begin(async tx=>{
    await this.member(tx,actorId,true);
    const rows=await tx<{state:CircuitExecution}[]>`select state from public.circuit_executions where id=${id} and workspace_id=${this.workspaceId} for update`;

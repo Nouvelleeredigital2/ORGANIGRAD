@@ -44,3 +44,11 @@ it('une réponse perdue sur un autre dossier ne pollue pas le nouveau',async()=>
  expect(screen.queryByRole('alert')).toBeNull();
  expect(screen.getByLabelText('Sujet à retenir')).toHaveValue('');
 });
+it('affiche l’attente Engine et permet à un administrateur de demander une reprise explicite',async()=>{
+ const control=vi.fn().mockResolvedValue(undefined);
+ const waiting={...run,status:'waiting_engine',currentStepId:'final'} as CircuitRun;
+ render(<CircuitRunCard run={waiting} userId={id} admin onDecision={vi.fn()} onControl={control}/>);
+ expect(screen.getByText('En attente d’Engine')).toBeDefined();
+ fireEvent.click(screen.getByRole('button',{name:'Réessayer Engine'}));
+ await waitFor(()=>expect(control).toHaveBeenCalledWith(expect.objectContaining({action:'retry_engine',expectedVersion:2})));
+});

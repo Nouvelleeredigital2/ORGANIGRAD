@@ -5,7 +5,7 @@ import { ArtifactReferenceSchema, CircuitDecisionSchema, CircuitDefinitionSchema
 export class CircuitError extends Error {
     constructor(readonly code: string, readonly status = 409) { super(code); }
 }
-export type ExecutionStatus = 'ready' | 'waiting_approval' | 'paused' | 'cancelled' | 'ready_to_publish' | 'blocked';
+export type ExecutionStatus = 'ready' | 'waiting_approval' | 'waiting_engine' | 'paused' | 'cancelled' | 'ready_to_publish' | 'blocked';
 export interface CircuitExecution {
     id: string;
     scheduleOrigin?: { occurrenceId: string; scheduledFor: string; recoveredBy: string };
@@ -16,7 +16,7 @@ export interface CircuitExecution {
     suspendedStatus?: Exclude<ExecutionStatus,'paused'|'cancelled'|'ready_to_publish'>;
     currentStepId: string;
     outputs: Record<string, ArtifactReference[]>;
-    history: Array<{ stepId: string; version: number; kind: 'completed' | 'approved' | 'revised' | 'paused' | 'resumed' | 'cancelled'; outputs?: ArtifactReference[]; actorId?: string; feedback?: string; channel?: string }>;
+    history: Array<{ stepId: string; version: number; kind: 'completed' | 'approved' | 'revised' | 'paused' | 'resumed' | 'cancelled' | 'waiting_engine' | 'engine_resumed'; outputs?: ArtifactReference[]; actorId?: string; feedback?: string; channel?: string }>;
     decisions: Record<string, string>;
 }
 function stepOf(run: CircuitExecution) {
@@ -63,6 +63,26 @@ export function completeStep(run: CircuitExecution, stepId: string, version: num
     next.history.push({stepId,version,kind:'completed',outputs:parsed});
     next.version++;advance(next);return next;
 }
+/** Engine failures are durable execution states, not generated placeholder files. */
+export function waitForEngine(run: CircuitExecution, stepId: string, version: number): CircuitExecution {
+    assertCurrent(run,stepId,version);
+    if(run.status!=='ready' || stepOf(run).kind!=='generation')throw new CircuitError('ENGINE_WAIT_NOT_ALLOWED');
+    const next=structuredClone(run);
+    next.status='waiting_engine';
+    next.history.push({stepId,version,kind:'waiting_engine'});
+    next.version++;
+    return next;
+}
+/** A human or qualified worker explicitly resumes the unchanged generation step. */
+export function resumeEngine(run: CircuitExecution, stepId: string, version: number): CircuitExecution {
+    if(run.version!==version || run.currentStepId!==stepId)throw new CircuitError('STALE_EXECUTION');
+    if(run.status!=='waiting_engine' || stepOf(run).kind!=='generation')throw new CircuitError('ENGINE_NOT_WAITING');
+    const next=structuredClone(run);
+    next.status='ready';
+    next.history.push({stepId,version,kind:'engine_resumed'});
+    next.version++;
+    return next;
+}
 export function decideStep(run: CircuitExecution, input: CircuitDecision, actor: { id: string; kind: 'human' | 'bot' }): CircuitExecution {
     const decision=CircuitDecisionSchema.parse(input);
     const fingerprint=createHash('sha256').update(JSON.stringify({decision,actor})).digest('hex');
@@ -96,7 +116,12 @@ export function decideStep(run: CircuitExecution, input: CircuitDecision, actor:
     next.history.push({stepId:step.id,version:run.version,kind:decision.choice==='approve'?'approved':'revised',actorId:actor.id,feedback:decision.feedback,channel:decision.channel});
     next.decisions[decision.idempotencyKey]=fingerprint;next.version++;return next;
 }
-export function controlExecution(run:CircuitExecution, action:'pause'|'resume'|'cancel', expectedVersion:number, actorId:string):CircuitExecution {
+export function controlExecution(run:CircuitExecution, action:'pause'|'resume'|'cancel'|'retry_engine', expectedVersion:number, actorId:string):CircuitExecution {
+    if(action==='retry_engine') {
+        const next=resumeEngine(run,run.currentStepId,expectedVersion);
+        next.history[next.history.length-1]!.actorId=actorId;
+        return next;
+    }
     if(run.version!==expectedVersion)throw new CircuitError('STALE_EXECUTION');
     if(run.status==='cancelled'||run.status==='ready_to_publish')throw new CircuitError('EXECUTION_TERMINAL');
     const next=structuredClone(run);

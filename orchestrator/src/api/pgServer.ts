@@ -14,6 +14,7 @@ import { registerProjectServiceDelegationRoutes } from './projectServiceDelegati
 import { registerProjectServiceTargetRoutes } from './projectServiceTargets.js';
 import { registerProjectServiceMissionRoutes } from './projectServiceMissions.js';
 import { registerCircuitRoutes } from './circuitRoutes.js';
+import { registerLinkCircuitBridgeRoutes } from './linkCircuitBridgeRoutes.js';
 import { isPrivateProjectPath, isPrivateProjectRoute, registerPrivateProjectRoutes } from './privateProjectRoutes.js';
 import { verifySupabaseJwt } from './userAuth.js';
 import type { UserTokenVerifier } from './userAuth.js';
@@ -78,6 +79,8 @@ export interface PgServerDeps {
     linkBaseUrl?: string;
     /** Token Bearer du pont LINK (GET /api/bridge/agents). */
     linkBridgeToken?: string;
+    /** Secret dédié aux décisions de circuit validées côté serveur LINK. */
+    linkCircuitBridgeToken?: string;
     /** fetch injectable pour les tests (défaut : safeFetch réel). */
     fetchImpl?: typeof fetch;
     /** Résolution DNS injectable pour les tests de safeFetch (défaut : DNS réel). */
@@ -220,6 +223,9 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
         registerProjectServiceMissionRoutes(app, deps.sql, deps.notifierOptions?.appUrl);
     }
     if (deps.circuitsEnabled === true) registerCircuitRoutes(app, { ...deps, appUrl: deps.notifierOptions?.appUrl });
+    if (deps.circuitsEnabled === true && deps.linkCircuitBridgeToken) {
+        registerLinkCircuitBridgeRoutes(app,{sql:deps.sql,bridgeToken:deps.linkCircuitBridgeToken});
+    }
     if (deps.privateProjectsEnabled === true) registerPrivateProjectRoutes(app, {
         sql: deps.sql,
         issuer: deps.privateProjectsIssuer ?? '',

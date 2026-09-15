@@ -1,6 +1,6 @@
 import { describe,it,expect } from 'vitest';
 import { CircuitDefinitionSchema } from '@apps2026/contracts';
-import { startExecution, completeStep, decideStep, controlExecution, CircuitError, nextOccurrences } from '../src/orchestration/circuits.js';
+import { startExecution, completeStep, decideStep, controlExecution, waitForEngine, resumeEngine, CircuitError, nextOccurrences } from '../src/orchestration/circuits.js';
 const person='11111111-1111-4111-8111-111111111111';
 const definition=CircuitDefinitionSchema.parse({name:'Veille',project:{projectId:person,workspaceId:person,sourceApp:'organigrad',canonicalUrl:'https://example.org/project'},steps:[{id:'watch',kind:'watch',assigneeId:person,instructions:'Chercher'},{id:'validate',kind:'approval',assigneeId:person,instructions:'Valider',correctionStepId:'watch'}]});
 const artifact={id:'article1',sourceApp:'atelier-orvion',canonicalUrl:'https://example.org/doc',version:1,kind:'watch' as const};
@@ -61,6 +61,23 @@ describe('exécutions séparées et versions',()=>{
   const a=completeStep(startExecution('a',definition,1),'watch',1,[artifact]);
   const b=decideStep(a,{choice:'revise',expectedVersion:2,stepId:'validate',channel:'link',idempotencyKey:person,feedback:'Sources manquantes'},actor);
   expect(b.currentStepId).toBe('watch');expect(b.outputs).toEqual({});expect(b.history).toHaveLength(2);expect(b.version).toBe(3);
+ });
+ it('conserve le prompt et attend Engine sans inventer de visuel',()=>{
+  const def=CircuitDefinitionSchema.parse({...definition,steps:[
+   {...definition.steps[0],id:'brief',kind:'visual_brief'},
+   {id:'image',kind:'generation',assigneeId:person,instructions:'Générer'},
+   {...definition.steps[1],correctionStepId:'brief'},
+  ]});
+  const prompt={...artifact,id:'prompt-1',kind:'visual_prompt' as const};
+  const ready=completeStep(startExecution('engine-wait',def,1),'brief',1,[prompt]);
+  const waiting=waitForEngine(ready,'image',2);
+  expect(waiting.status).toBe('waiting_engine');
+  expect(waiting.outputs.brief).toEqual([prompt]);
+  expect(()=>completeStep(waiting,'image',3,[{...artifact,kind:'image'}])).toThrow('STEP_NOT_READY');
+  const resumed=resumeEngine(waiting,'image',3);
+  expect(resumed.status).toBe('ready');
+  expect(resumed.currentStepId).toBe('image');
+  expect(resumed.version).toBe(4);
  });
  it('finit une sélection humaine sans artefact inventé',()=>{
   const def=CircuitDefinitionSchema.parse({...definition,steps:[{...definition.steps[0],kind:'selection'},definition.steps[1]]});

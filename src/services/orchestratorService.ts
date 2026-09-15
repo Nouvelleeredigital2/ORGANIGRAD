@@ -392,7 +392,7 @@ export class OrchestratorClient {
     async decideCircuitRun(id:string,decision:CircuitDecision):Promise<CircuitRun> {
         return (await this.circuitRequest<{run:CircuitRun}>(`/circuit-runs/${encodeURIComponent(id)}/decisions`,decision,'POST')).run;
     }
-    async controlCircuitRun(id:string,input:{action:'pause'|'resume'|'cancel';expectedVersion:number;idempotencyKey:string}):Promise<CircuitRun> {
+    async controlCircuitRun(id:string,input:{action:'pause'|'resume'|'cancel'|'retry_engine';expectedVersion:number;idempotencyKey:string}):Promise<CircuitRun> {
         return (await this.circuitRequest<{run:CircuitRun}>(`/circuit-runs/${encodeURIComponent(id)}/control`,input,'POST')).run;
     }
     async saveCircuit(definition:CircuitDefinition,existing?:StoredCircuit):Promise<StoredCircuit> {

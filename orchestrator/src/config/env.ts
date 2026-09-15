@@ -38,6 +38,8 @@ export interface OrchestratorEnv {
     linkBaseUrl?: string;
     /** Token Bearer du pont LINK (GET /api/bridge/agents), jamais exposé au client. */
     linkBridgeToken?: string;
+    /** Secret du pont LINK → Organigrad pour les décisions de circuit. */
+    linkCircuitBridgeToken?: string;
 }
 
 export class EnvValidationError extends Error {
@@ -114,8 +116,12 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): OrchestratorEn
     // Pont LINK : le token n'a de sens qu'avec une base URL.
     const linkBaseUrl = source.LINK_BASE_URL?.trim() || undefined;
     const linkBridgeToken = source.LINK_BRIDGE_TOKEN?.trim() || undefined;
+    const linkCircuitBridgeToken = source.LINK_CIRCUIT_BRIDGE_TOKEN?.trim() || undefined;
     if (linkBridgeToken && !linkBaseUrl) {
         issues.push('LINK_BASE_URL est requise quand LINK_BRIDGE_TOKEN est défini');
+    }
+    if (linkCircuitBridgeToken && (!linkBaseUrl || /[\r\n]/.test(linkCircuitBridgeToken))) {
+        issues.push('LINK_CIRCUIT_BRIDGE_TOKEN exige LINK_BASE_URL et ne doit contenir aucun retour à la ligne');
     }
 
     // Clé de chiffrement des secrets (optionnelle) : si présente, doit décoder
@@ -197,5 +203,6 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): OrchestratorEn
         supabaseJwksUrl: source.SUPABASE_JWKS_URL?.trim() || undefined,
         linkBaseUrl,
         linkBridgeToken,
+        linkCircuitBridgeToken,
     };
 }
