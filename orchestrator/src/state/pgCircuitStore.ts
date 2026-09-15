@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { Sql, TransactionSql } from 'postgres';
-import { CircuitDefinitionSchema, type CircuitDefinition, type CircuitDecision } from '@apps2026/contracts';
-import { CircuitError, startExecution, decideStep, controlExecution, nextOccurrences, type CircuitExecution } from '../orchestration/circuits.js';
+import { CircuitDefinitionSchema, type ArtifactReference, type CircuitDefinition, type CircuitDecision } from '@apps2026/contracts';
+import { CircuitError, startExecution, decideStep, controlExecution, completeStep, nextOccurrences, type CircuitExecution } from '../orchestration/circuits.js';
 
 export interface StoredCircuit { id:string; version:number; definition:CircuitDefinition; enabled:boolean; }
 export class PgCircuitStore {
@@ -74,6 +74,16 @@ export class PgCircuitStore {
    const rows=await tx<{state:CircuitExecution}[]>`select state from public.circuit_executions where id=${id} and workspace_id=${this.workspaceId} for update`;
    if(!rows[0])throw new CircuitError('RUN_NOT_FOUND',404);
    const state=decideStep(rows[0].state,input,actor);
+   await tx`update public.circuit_executions set state=${tx.json(state as unknown as Record<string,never>)},version=${state.version},updated_at=clock_timestamp() where id=${id} and workspace_id=${this.workspaceId}`;
+   return state;
+  }) as unknown as CircuitExecution;
+ }
+ /** Frontière service : l'appelant a déjà vérifié la délégation et détient un reçu accepté pour ces sorties. */
+ async complete(id:string,stepId:string,expectedVersion:number,outputs:ArtifactReference[]):Promise<CircuitExecution> {
+  return await this.sql.begin(async tx=>{
+   const rows=await tx<{state:CircuitExecution}[]>`select state from public.circuit_executions where id=${id} and workspace_id=${this.workspaceId} for update`;
+   if(!rows[0])throw new CircuitError('RUN_NOT_FOUND',404);
+   const state=completeStep(rows[0].state,stepId,expectedVersion,outputs);
    await tx`update public.circuit_executions set state=${tx.json(state as unknown as Record<string,never>)},version=${state.version},updated_at=clock_timestamp() where id=${id} and workspace_id=${this.workspaceId}`;
    return state;
   }) as unknown as CircuitExecution;
