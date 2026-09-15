@@ -76,3 +76,39 @@ describe('programmation locale',()=>{
   expect(times).toEqual(['2026-10-25T00:30:00.000Z','2026-11-01T01:30:00.000Z']);
  });
 });
+
+describe('attente Engine et livrables d’accompagnement (recette Atelier Boréal)', () => {
+ const boreal=CircuitDefinitionSchema.parse({name:'Boréal',project:{projectId:person,workspaceId:person,sourceApp:'organigrad',canonicalUrl:'https://example.org/project'},steps:[
+  {id:'brief',kind:'visual_brief',assigneeId:person,instructions:'Brief'},{id:'image',kind:'generation',assigneeId:person,instructions:'Image'},
+  {id:'validate',kind:'approval',assigneeId:person,instructions:'Valider',correctionStepId:'brief'}]});
+ const ref=(kind:'brief'|'visual_prompt'|'image'|'review')=>({...artifact,id:kind,kind});
+ it('visual_brief exige le prompt graphique et tolère le brief à côté, jamais à sa place',()=>{
+  const run=startExecution('b',boreal,1);
+  expect(()=>completeStep(run,'brief',1,[ref('brief')])).toThrow('INVALID_STEP_OUTPUT');
+  expect(()=>completeStep(run,'brief',1,[ref('visual_prompt'),ref('review')])).toThrow('INVALID_STEP_OUTPUT');
+  const both=completeStep(run,'brief',1,[ref('visual_prompt'),ref('brief')]);
+  expect(both.outputs.brief).toEqual([ref('visual_prompt'),ref('brief')]);
+  expect(completeStep(run,'brief',1,[ref('visual_prompt')]).outputs.brief).toEqual([ref('visual_prompt')]);
+ });
+ it('Engine indisponible : état durable, aucune image ; seule une reprise explicite rend l’étape prête',async()=>{
+  const {waitForEngine,resumeEngine}=await import('../src/orchestration/circuits.js');
+  let run=completeStep(startExecution('b',boreal,1),'brief',1,[ref('visual_prompt'),ref('brief')]);
+  expect(()=>waitForEngine(run,'brief',run.version)).toThrow('STALE_EXECUTION');
+  const waiting=waitForEngine(run,'image',run.version);
+  expect(waiting).toMatchObject({status:'waiting_engine',currentStepId:'image',version:run.version+1});
+  expect(waiting.outputs.image).toBeUndefined();
+  expect(waiting.history.at(-1)).toMatchObject({kind:'waiting_engine',stepId:'image'});
+  expect(()=>waitForEngine(waiting,'image',waiting.version)).toThrow('ENGINE_WAIT_NOT_ALLOWED');
+  expect(()=>completeStep(waiting,'image',waiting.version,[ref('image')])).toThrow('STEP_NOT_READY');
+  expect(()=>resumeEngine(run,'image',run.version)).toThrow('ENGINE_NOT_WAITING');
+  expect(()=>controlExecution(waiting,'retry_engine',waiting.version-1,person)).toThrow('STALE_EXECUTION');
+  const resumed=controlExecution(waiting,'retry_engine',waiting.version,person);
+  expect(resumed).toMatchObject({status:'ready',currentStepId:'image',version:waiting.version+1});
+  expect(resumed.history.at(-1)).toMatchObject({kind:'engine_resumed',actorId:person});
+  // La pause reste possible pendant l'attente et la reprise rend l'attente, pas « prêt ».
+  const paused=controlExecution(waiting,'pause',waiting.version,person);
+  expect(controlExecution(paused,'resume',paused.version,person).status).toBe('waiting_engine');
+  // Le dossier n'est jamais terminé sans image réelle.
+  expect(()=>decideStep({...resumed,currentStepId:'validate',status:'waiting_approval'},{choice:'approve',expectedVersion:resumed.version,stepId:'validate',channel:'link',idempotencyKey:'33333333-3333-4333-8333-333333333333',feedback:''},actor)).toThrow('DOSSIER_INCOMPLETE');
+ });
+});

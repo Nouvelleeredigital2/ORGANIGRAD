@@ -18,8 +18,11 @@ const httpsUrl = z.string().max(4096).url().refine(value => { try { const u = ne
 const body = z.object({
     grantId: z.string().uuid(), target, runVersion: z.number().int().positive(), operation: z.enum(orvionOperations),
     editorial: z.object({ boardId: z.string().uuid(), dossierId: z.string().uuid() }).strict(),
-    payload: z.object({ content: z.string().min(1).max(200000), sources: z.array(httpsUrl).max(100).optional(), expectedVersion: z.number().int().min(0).optional(), kind: z.enum(orvionArtifactKinds).optional() }).strict(),
-}).strict();
+    payload: z.object({ content: z.string().min(1).max(200000), sources: z.array(httpsUrl).max(100).optional(), expectedVersion: z.number().int().min(0).optional(), kind: z.enum(orvionArtifactKinds).optional(),
+        brief: z.object({ content: z.string().min(1).max(200000), sources: z.array(httpsUrl).max(100).optional(), expectedVersion: z.number().int().min(0).optional() }).strict().optional(),
+        subjects: z.array(z.object({ content: z.string().min(1).max(200000), sources: z.array(httpsUrl).max(100).optional() }).strict()).min(1).max(10).optional() }).strict(),
+}).strict().refine(value => (value.operation === 'visual_prompt:create') === (value.payload.brief !== undefined), 'brief_iff_visual_prompt')
+    .refine(value => value.payload.subjects === undefined || value.operation === 'watch:create', 'subjects_only_with_watch');
 const params = z.object({ runId: z.string().uuid(), stepId: z.string().min(1).max(128).regex(/^[a-zA-Z0-9_.:-]+$/) }).strict();
 const conflicts = new Set(['PAYLOAD_CONFLICT', 'DELIVERY_UNRESOLVED', 'STALE_EXECUTION', 'STEP_NOT_READY', 'IDEMPOTENCY_CONFLICT', 'STALE_GRANT', 'RECEIPT_UNCERTAIN', 'RECEIPT_CONFLICT', 'RECEIPT_ACCEPTED_STATE_UNPERSISTED', 'RECEIPT_UNCERTAIN_UNPERSISTED', 'EXECUTION_NOT_ACTIVE', 'INVALID_STEP_OUTPUT', 'DOSSIER_INCOMPLETE']);
 const denied = new Set(['HUMAN_SESSION_REQUIRED', 'SERVICE_KEY_REQUIRED', 'PROJECT_UNAVAILABLE', 'GRANT_UNAVAILABLE', 'GRANT_REVOKED', 'KEY_UNAVAILABLE', 'NODE_UNAVAILABLE', 'KEY_SCOPE_REQUIRED', 'TARGET_MISMATCH', 'ACTION_FORBIDDEN', 'GRANTOR_REVOKED', 'RUN_UNAVAILABLE', 'STEP_FORBIDDEN', 'GRANT_EXPIRED', 'MANDATE_UNAVAILABLE', 'RUN_NOT_FOUND']);
@@ -64,7 +67,7 @@ export function registerCircuitDeliveryRoutes(app: FastifyInstance, deps: Circui
                 { receipts: deps.receiptsFor(workspaceId), orvion: deps.orvion, authorize, store: deps.storeFor(workspaceId), workspaceId },
             );
             const run: CircuitExecution = delivered.run;
-            return { receiptId: delivered.receipt.id, reference: delivered.reference, runVersion: run.version, reused: delivered.reused };
+            return { receiptId: delivered.receipt.id, reference: delivered.reference, companions: delivered.companions, runVersion: run.version, reused: delivered.reused };
         } catch (error) {
             if (error instanceof z.ZodError) return reply.code(400).send({ error: 'INVALID_DELIVERY_INPUT' });
             if (error instanceof ReceiptedDeliveryError) {

@@ -36,7 +36,7 @@ const definition = CircuitDefinitionSchema.parse({ name: 'TEST FICTIF — Atelie
     { id: 'control', kind: 'control', assigneeId: node, instructions: 'Relire' },
     { id: 'approve', kind: 'approval', assigneeId: human, instructions: 'Valider', correctionStepId: 'write' }] });
 // Genres produits par Orvion (migration 20260915100000) ; version:create prend le genre du payload.
-const kindOf: Record<string, OrvionArtifactKind> = { 'watch:create': 'watch', 'article:create': 'article', 'brief:create': 'brief', 'review:create': 'review', 'image:attach': 'image' };
+const kindOf: Record<string, OrvionArtifactKind> = { 'watch:create': 'watch', 'article:create': 'article', 'brief:create': 'brief', 'visual_prompt:create': 'visual_prompt', 'review:create': 'review', 'image:attach': 'image' };
 type Row = { id: string; status: string; mandate_id: string | null; reference: ArtifactReference | null; payload_sha256: string; superseded_by: string | null; run_version: number; step_id: string };
 
 let db: PGlite, sql: Sql, runId: string, store: PgCircuitStore, receipts: PgCircuitReceipts;
@@ -53,8 +53,12 @@ const fetchImpl = vi.fn(async (_url: unknown, init?: RequestInit) => {
     if (mode === 'lost') throw new Error('socket hang up');
     if (mode === 'reject') return Response.json({ success: false, error: { code: 'MANDATE_REVOKED', message: 'refus' } }, { status: 403 });
     const payload = body.payload as { dossierId: string };
+    // visual_prompt:create : Orvion rend le prompt ET la version du brief créée dans la même commande.
+    const brief = body.operation === 'visual_prompt:create' ? { brief: { id: randomUUID(), kind: 'brief', version: ++versions } } : {};
+    const subjects = body.operation === 'watch:create' && Array.isArray((body.payload as { subjects?: unknown[] }).subjects)
+        ? { subjects: (body.payload as { subjects: unknown[] }).subjects.map((_, index) => ({ id: randomUUID(), kind: 'subject', version: index + 1 })) } : {};
     return Response.json({ success: true, data: { sourceApp: 'atelier-orvion', objectType: 'editorial_version', id: randomUUID(), kind: kindOf[String(body.operation)] ?? (body.payload as { kind?: string }).kind, version: ++versions,
-        dossierId: payload.dossierId, boardId: body.boardId, replayed: false, canonicalUrl: `${orvionOrigin}/boards/${body.boardId}/view/editorial` } });
+        dossierId: payload.dossierId, boardId: body.boardId, replayed: false, canonicalUrl: `${orvionOrigin}/boards/${body.boardId}/view/editorial`, ...brief, ...subjects } });
 });
 const orvion = () => createOrvionServiceClient({ baseUrl: orvionOrigin + '/', qualifiedOrigin: orvionOrigin, mandateId: mandate, originHeader: appUrl, fetchImpl: fetchImpl as unknown as typeof fetch });
 const posts = () => fetchImpl.mock.calls.length;
@@ -81,7 +85,7 @@ function realAuthorize(grantId = grant, apiKeyId = key): ReceiptedDeliveryDeps['
 function deps(overrides: Partial<ReceiptedDeliveryDeps> = {}): ReceiptedDeliveryDeps {
     return { receipts, orvion: orvion(), authorize: realAuthorize(), store, workspaceId: ws, ...overrides };
 }
-type Operation = 'watch:create' | 'article:create' | 'brief:create' | 'review:create' | 'version:create' | 'image:attach';
+type Operation = 'watch:create' | 'article:create' | 'brief:create' | 'visual_prompt:create' | 'review:create' | 'version:create' | 'image:attach';
 const deliver = (stepId: string, runVersion: number, operation: Operation, content = secret, extra: Partial<ReceiptedDeliveryDeps> = {}, kind?: OrvionArtifactKind) =>
     deliverProductionStep({ key: { runId, runVersion, stepId }, editorial: { boardId, dossierId }, operation, payload: { content, ...(kind ? { kind } : {}) } }, deps(extra));
 
@@ -265,7 +269,7 @@ it('(8) route : clé de service seulement, grant requis, corps strict, réponse 
         expect(stale.statusCode).toBe(409); expect(stale.json()).toEqual({ error: 'STALE_EXECUTION' });
         const ok = await post('write', body(run.version));
         expect(ok.statusCode).toBe(200); expect(ok.headers['cache-control']).toBe('private, no-store');
-        expect(ok.json()).toEqual({ receiptId: expect.any(String), reference: expect.objectContaining({ kind: 'article' }), runVersion: run.version + 1, reused: false });
+        expect(ok.json()).toEqual({ receiptId: expect.any(String), reference: expect.objectContaining({ kind: 'article' }), companions: [], runVersion: run.version + 1, reused: false });
         expect(ok.body).not.toContain(secret); expect(ok.body).not.toContain(mandate);
         const conflict = await post('write', body(run.version, { payload: { content: 'autre' } }));
         expect(conflict.statusCode).toBe(409); expect(conflict.json()).toEqual({ error: 'STALE_EXECUTION' });
@@ -367,3 +371,46 @@ it('configuration : drapeau fermé par défaut, exigences explicites, mandat lu 
     expect(() => buildPgServer({ sql: stub, circuitDelivery: { orvion: orvion() }, projectsEnabled: true, circuitsEnabled: true, projectServiceDelegationsEnabled: false, notifierOptions: { appUrl } })).toThrow('CIRCUIT_DELIVERY_CONFIG_INCOMPLETE');
     expect(() => buildPgServer({ sql: stub, circuitDelivery: { orvion: orvion() }, projectsEnabled: true, circuitsEnabled: true, projectServiceDelegationsEnabled: true, notifierOptions: { appUrl: 'http://organigrad.example' } })).toThrow('CIRCUIT_DELIVERY_CONFIG_INCOMPLETE');
 });
+
+it('(10) visual_prompt:create livre DEUX références distinctes (prompt requis + brief d’accompagnement) en un seul POST, sans jamais substituer l’un à l’autre', async () => {
+    let run = await readyToWrite();
+    run = (await deliver('write', run.version, 'article:create')).run;
+    expect(run.currentStepId).toBe('brief');
+    // Le brief est obligatoire avec cette opération, interdit avec les autres ; brief:create seul reste refusé pour visual_brief.
+    const stub = { authorize: async () => ({ grantId: grant, project: definition.project }) };
+    await expect(deliver('brief', run.version, 'visual_prompt:create', 'PROMPT DE TEST', stub)).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+    await expect(deliverProductionStep({ key: { runId, runVersion: run.version, stepId: 'brief' }, editorial: { boardId, dossierId }, operation: 'article:create', payload: { content: 'x', brief: { content: 'y' } } }, deps(stub))).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+    await expect(deliver('brief', run.version, 'brief:create', 'BRIEF DE TEST', stub)).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+    expect(posts()).toBe(1);
+    const result = await deliverProductionStep({ key: { runId, runVersion: run.version, stepId: 'brief' }, editorial: { boardId, dossierId }, operation: 'visual_prompt:create',
+        payload: { content: 'ILLUSTRATION DE TEST : atelier imaginaire.', brief: { content: 'BRIEF DE TEST : ton chaleureux, palette boréale.', sources: ['https://source.example/charte'] } } }, deps());
+    expect(posts()).toBe(2);
+    expect(calls[1]!.body).toMatchObject({ operation: 'visual_prompt:create', payload: { dossierId, content: 'ILLUSTRATION DE TEST : atelier imaginaire.', brief: { content: 'BRIEF DE TEST : ton chaleureux, palette boréale.', sources: ['https://source.example/charte'] } } });
+    expect(result.reference.kind).toBe('visual_prompt');
+    expect(result.companions).toEqual([{ sourceApp: 'atelier-orvion', id: expect.any(String), kind: 'brief', version: expect.any(Number), canonicalUrl: result.reference.canonicalUrl }]);
+    expect(result.run.currentStepId).toBe('image');
+    expect(result.run.outputs.brief).toEqual([result.reference, result.companions[0]]);
+    // Le reçu durable ne porte que la référence principale ; rien du contenu.
+    const receipt = (await rows()).find(r => r.step_id === 'brief')!;
+    expect(receipt).toMatchObject({ status: 'accepted', reference: result.reference });
+    expect(JSON.stringify(await rows()) + JSON.stringify(result.run)).not.toContain('DE TEST');
+});
+
+it('(11) watch:create avec sujets livre la veille ET ses sujets sourcés en un seul POST ; la sélection humaine choisit alors un sujet réellement présent', async () => {
+    const stub = { authorize: async () => ({ grantId: grant, project: definition.project }) };
+    await expect(deliverProductionStep({ key: { runId, runVersion: 1, stepId: 'watch' }, editorial: { boardId, dossierId }, operation: 'article:create', payload: { content: 'x', subjects: [{ content: 'y' }] } }, deps(stub))).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+    await expect(deliverProductionStep({ key: { runId, runVersion: 1, stepId: 'watch' }, editorial: { boardId, dossierId }, operation: 'watch:create', payload: { content: 'x', subjects: [] } }, deps(stub))).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+    expect(posts()).toBe(0);
+    const result = await deliverProductionStep({ key: { runId, runVersion: 1, stepId: 'watch' }, editorial: { boardId, dossierId }, operation: 'watch:create',
+        payload: { content: 'VEILLE DE TEST : trois pistes.', sources: ['https://source.example/a'], subjects: [{ content: 'SUJET 1', sources: ['https://source.example/a'] }, { content: 'SUJET 2' }] } }, deps());
+    expect(posts()).toBe(1);
+    expect(result.reference.kind).toBe('watch');
+    expect(result.companions.map(c => c.kind)).toEqual(['subject', 'subject']);
+    expect(result.run.outputs.watch).toEqual([result.reference, ...result.companions]);
+    expect(result.run.currentStepId).toBe('select'); expect(result.run.status).toBe('waiting_approval');
+    const chosen = decideStep(result.run, { stepId: 'select', expectedVersion: result.run.version, choice: 'approve', feedback: '', channel: 'link', selectedArtifact: result.companions[1]!, idempotencyKey: randomUUID() }, { id: human, kind: 'human' });
+    expect(chosen.outputs.select).toEqual([result.companions[1]]);
+    expect(() => decideStep(result.run, { stepId: 'select', expectedVersion: result.run.version, choice: 'approve', feedback: '', channel: 'link', selectedArtifact: { ...result.companions[1]!, id: 'subject-inconnu' }, idempotencyKey: randomUUID() }, { id: human, kind: 'human' })).toThrow('SUBJECT_NOT_IN_DOSSIER');
+    expect(JSON.stringify(await rows()) + JSON.stringify(result.run)).not.toContain('DE TEST');
+});
+
