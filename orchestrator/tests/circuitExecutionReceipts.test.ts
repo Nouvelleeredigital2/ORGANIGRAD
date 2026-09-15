@@ -13,6 +13,11 @@ const otherRun = '00000000-0000-4000-8000-000000000003';
 const mandate = '00000000-0000-4000-8000-000000000004';
 const revokedMandate = '00000000-0000-4000-8000-000000000005';
 const project = { sourceApp: 'organigrad', workspaceId: workspace, projectId: 'p', canonicalUrl: 'https://organigrad.example/p' };
+type Receipt = {
+    id: string; workspace_id: string; run_id: string; run_version: number; step_id: string; status: string;
+    mandate_id: string | null; reference: Record<string, unknown> | null; superseded_by: string | null;
+    accepted_at: string | null; payload_sha256: string; version?: number;
+};
 const reference = (kind: string, id = randomUUID()) => ({ sourceApp: 'atelier-orvion', id, kind, version: 1, canonicalUrl: 'https://orvion.example/boards/b/view/editorial' });
 
 async function setup() {
@@ -27,7 +32,7 @@ async function setup() {
     `);
     await db.exec(migration);
     const call = async (fn: string, args: unknown[]) =>
-        (await db.query<{ r: Record<string, any> }>(`select public.${fn}(${args.map((_, i) => '$' + (i + 1)).join(',')}) as r`, args)).rows[0]!.r;
+        (await db.query<{ r: Receipt }>(`select public.${fn}(${args.map((_, i) => '$' + (i + 1)).join(',')}) as r`, args)).rows[0]!.r;
     return {
         db,
         reserve: (key: string, payloadSha: string, opts: { run?: string; step?: string; mandate?: string | null; version?: number } = {}) =>
