@@ -1,0 +1,50 @@
+# Banc local d'OrganiGrad — ajouté le 21/09/2026.
+#
+# Il n'en existait aucun : les 37 migrations du dépôt n'avaient donc jamais été
+# rejouées à neuf, et aucun parcours authentifié ne pouvait être exercé sans
+# toucher à la base de production.
+#
+# Ports en 575xx et NON 543xx : Windows réserve des plages entières
+# (54233-54332, 54414-54613 au relevé du 21/09) dans lesquelles tombent les
+# ports par défaut de Supabase. Le symptôme est trompeur — « ports are not
+# available » sans qu'aucun processus ne les occupe — et ces plages SE
+# DÉPLACENT d'un relevé à l'autre. Vérifier par une ouverture effective, pas en
+# lisant la liste : `netsh int ipv4 show excludedportrange protocol=tcp`.
+project_id = "organigrad-banc-local"
+
+[api]
+enabled = true
+port = 57501
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 57502
+shadow_port = 57500
+major_version = 17
+
+[studio]
+enabled = true
+port = 57503
+
+[inbucket]
+enabled = true
+port = 57504
+
+[auth]
+enabled = true
+site_url = "http://127.0.0.1:57511"
+additional_redirect_urls = ["http://127.0.0.1:57511"]
+jwt_expiry = 3600
+enable_signup = true
+
+[auth.email]
+enable_signup = true
+double_confirm_changes = false
+enable_confirmations = false
+
+[analytics]
+enabled = true
+port = 57507
+backend = "postgres"
