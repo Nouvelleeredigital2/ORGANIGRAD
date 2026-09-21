@@ -61,11 +61,15 @@ manquait. Marche exacte suivie, sur une base vierge :
 1. `baseline_2026-08-03.sql` → appliquée **sans une seule erreur** ;
 2. les **30** migrations datées après le 2026-08-03 → **30 appliquées, 0 échec**.
 
-Contrôle d'usage ensuite : un compte créé par l'API d'administration se connecte
-par mot de passe, le déclencheur `handle_new_user()` le rend **propriétaire**
-d'un espace, et la lecture de `workspaces` rend sa ligne avec un jeton, une
-liste vide sans jeton — la protection par ligne et la policy `ws read members`
-font leur travail.
+Contrôle d'usage ensuite, refait le 21/09 avec **deux** comptes et non un seul :
+chacun est créé par l'API d'administration, se connecte par mot de passe, et le
+déclencheur `handle_new_user()` le rend **propriétaire** d'un espace. La base
+porte alors deux espaces ; chaque compte **ne voit que le sien**, et sans jeton
+la liste est vide.
+
+Deux comptes, parce qu'avec un seul propriétaire une liste non vide ne prouve
+rien : elle est compatible avec une absence totale de cloisonnement. C'est la
+contre-épreuve qui donne sa valeur au contrôle, pas la lecture réussie.
 
 Confirmé au passage : rejouer les migrations **sans** la base de référence
 échoue bien, comme annoncé plus haut (`workspace_role_of` puis le type
