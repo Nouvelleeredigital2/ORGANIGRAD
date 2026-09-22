@@ -2,14 +2,36 @@ import { describe, it, expect } from 'vitest';
 import { loadEnv, EnvValidationError } from '../src/config/env.js';
 
 describe('loadEnv (validation des variables d\'environnement)', () => {
-    it('mode memory sans SUPABASE_DB_URL', () => {
-        const env = loadEnv({});
+    it('scheduler requires an explicit project allowlist and authenticated circuits', () => {
+        expect(loadEnv({ORCHESTRATOR_ALLOW_MEMORY:'1'}).circuitSchedulerEnabled).toBe(false);
+        const base={SUPABASE_DB_URL:'postgresql://localhost/test',SUPABASE_JWT_SECRET:'test',PROJECTS_ENABLED:'true',CIRCUITS_ENABLED:'true',APP_URL:'https://example.org',CIRCUIT_SCHEDULER_ENABLED:'true'};
+        expect(()=>loadEnv(base)).toThrow(/CIRCUIT_SCHEDULER_PROJECT_IDS/);
+        expect(()=>loadEnv({...base,CIRCUIT_SCHEDULER_PROJECT_IDS:'*'})).toThrow(/CIRCUIT_SCHEDULER_PROJECT_IDS/);
+        const id='22222222-2222-4222-8222-222222222222';
+        expect(loadEnv({...base,CIRCUIT_SCHEDULER_PROJECT_IDS:id}).circuitSchedulerProjectIds).toEqual([id]);
+        expect(()=>loadEnv({...base,CIRCUITS_ENABLED:'false',CIRCUIT_SCHEDULER_PROJECT_IDS:id})).toThrow(/CIRCUIT_SCHEDULER_ENABLED/);
+    });
+    it('circuits : désactivés par défaut, activation exige les projets authentifiés', () => {
+        expect(loadEnv({ORCHESTRATOR_ALLOW_MEMORY:'1'}).circuitsEnabled).toBe(false);
+        expect(()=>loadEnv({ORCHESTRATOR_ALLOW_MEMORY:'1',CIRCUITS_ENABLED:'true'})).toThrow(/CIRCUITS_ENABLED/);
+    });
+    it('mode memory sans SUPABASE_DB_URL — uniquement sur opt-in explicite', () => {
+        const env = loadEnv({ ORCHESTRATOR_ALLOW_MEMORY: '1' });
         expect(env.mode).toBe('memory');
         expect(env.port).toBe(3001);
     });
 
+    it('refuse le mode memory implicite (SUPABASE_DB_URL absente sans opt-in)', () => {
+        // Le mode in-memory n'a aucune auth : il ne doit jamais être atteint
+        // par l'absence accidentelle d'une variable en production.
+        expect(() => loadEnv({})).toThrow(/ORCHESTRATOR_ALLOW_MEMORY/);
+    });
+
     it('mode pg avec une connection string postgres valide', () => {
-        const env = loadEnv({ SUPABASE_DB_URL: 'postgresql://u:p@h:5432/db' });
+        // Hôte `localhost` volontaire : un DSN de test ne doit pas ressembler à
+        // une chaîne de connexion réelle, sous peine de faire hurler le contrôle
+        // anti-secrets de la CI pour rien.
+        const env = loadEnv({ SUPABASE_DB_URL: 'postgresql://user:pass@localhost:5432/db' });
         expect(env.mode).toBe('pg');
         expect(env.supabaseDbUrl).toContain('postgresql://');
     });
@@ -33,6 +55,7 @@ describe('loadEnv (validation des variables d\'environnement)', () => {
         ).toThrow(/SERVICE_ROLE/);
         expect(
             loadEnv({
+                ORCHESTRATOR_ALLOW_MEMORY: '1',
                 EMAIL_EDGE_FUNCTION_URL: 'https://x.functions.supabase.co/notify-email',
                 SUPABASE_SERVICE_ROLE_KEY: 'k',
             }).emailEdgeFunctionUrl,
@@ -40,8 +63,35 @@ describe('loadEnv (validation des variables d\'environnement)', () => {
     });
 
     it('parse CORS_ALLOWED_ORIGINS en liste', () => {
-        const env = loadEnv({ CORS_ALLOWED_ORIGINS: 'https://a.com, https://b.com ,' });
+        const env = loadEnv({
+            ORCHESTRATOR_ALLOW_MEMORY: '1',
+            CORS_ALLOWED_ORIGINS: 'https://a.com, https://b.com ,',
+        });
         expect(env.corsAllowedOrigins).toEqual(['https://a.com', 'https://b.com']);
+    });
+
+    it('LINK_BASE_URL/TOKEN absents : pont désactivé, pas d\'erreur', () => {
+        const env = loadEnv({ ORCHESTRATOR_ALLOW_MEMORY: '1' });
+        expect(env.linkBaseUrl).toBeUndefined();
+        expect(env.linkBridgeToken).toBeUndefined();
+    });
+
+    it('exige LINK_BASE_URL si LINK_BRIDGE_TOKEN est défini', () => {
+        expect(() => loadEnv({ LINK_BRIDGE_TOKEN: 't' })).toThrow(/LINK_BASE_URL/);
+    });
+
+    it('rejette une LINK_BASE_URL non http', () => {
+        expect(() => loadEnv({ LINK_BASE_URL: 'ftp://x' })).toThrow(EnvValidationError);
+    });
+
+    it('accepte LINK_BASE_URL + LINK_BRIDGE_TOKEN valides', () => {
+        const env = loadEnv({
+            ORCHESTRATOR_ALLOW_MEMORY: '1',
+            LINK_BASE_URL: 'https://link.nouvelleeredigital.fr',
+            LINK_BRIDGE_TOKEN: 't',
+        });
+        expect(env.linkBaseUrl).toBe('https://link.nouvelleeredigital.fr');
+        expect(env.linkBridgeToken).toBe('t');
     });
 
     it('ne révèle jamais les valeurs dans le message d\'erreur', () => {

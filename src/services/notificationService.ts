@@ -4,7 +4,8 @@
  * Drivers actifs :
  *  - slackWebhook  → POST JSON au webhook Slack (fetch natif)
  *  - email         → Supabase Edge Function `notify-email`
- *  - whatsappId    → no-op (canal déclaré, aucune API configurée)
+ *  - telegram      → no-op (informatif : canal d'écoute d'un bot importé de
+ *                    LINK, Organigrad n'émet jamais VERS Telegram)
  */
 import type { HybridNode, NotificationChannels } from '../types/hybridNode';
 
@@ -58,10 +59,14 @@ const drivers: Record<NotificationChannelKey, NotificationDriver> = {
         );
     },
 
-    /** WhatsApp Business — canal déclaré dans le schéma, aucune API configurée. */
-    whatsappId: (_to, { node, message }) => {
-        console.warn(
-            `[notify:whatsapp] Driver non implémenté — message ignoré : "${message}" (nœud ${node.id})`,
+    /**
+     * Telegram — purement informatif (canal d'écoute d'un bot importé de LINK,
+     * ex. 'telegram-hermes'). Organigrad n'a aucune API pour émettre vers
+     * Telegram : c'est LINK/Hermes qui restent responsables de ce canal.
+     */
+    telegram: (_channel, { node, message }) => {
+        console.info(
+            `[notify:telegram] canal informatif uniquement — message ignoré : "${message}" (nœud ${node.id})`,
         );
     },
 };
@@ -71,9 +76,24 @@ export const NOTIFICATION_EVENT = 'organigrad:notification';
 export interface NotificationEventDetail {
     node: HybridNode;
     message: string;
+    /** Canaux dont l'envoi a RÉELLEMENT abouti. */
     channels: Array<{ key: NotificationChannelKey; target: string }>;
+    /** Canaux configurés dont l'envoi a échoué, avec la raison. */
+    failed: Array<{ key: NotificationChannelKey; reason: string }>;
+    /**
+     * Canaux configurés qui ne partent pas depuis le navigateur : l'e-mail est
+     * délégué à l'orchestrateur. Le compter
+     * comme « notifiés » laisserait croire que l'humain a été prévenu.
+     */
+    deferred: Array<{ key: NotificationChannelKey; reason: string }>;
     timestamp: number;
 }
+
+/** Canaux qui n'émettent rien depuis la SPA — cf. en-tête de fichier. */
+const NON_EMETTEURS: Partial<Record<NotificationChannelKey, string>> = {
+    email: "délégué à l'orchestrateur, rien n'est envoyé depuis le navigateur",
+    telegram: "informatif — canal du bot, LINK/Hermes reste l'émetteur",
+};
 
 /**
  * Notifie l'humain sur tous ses canaux configurés.
@@ -84,15 +104,29 @@ export async function notifyHuman(payload: NotificationPayload): Promise<Notific
     const channels = node.notificationChannels ?? {};
 
     const used: NotificationEventDetail['channels'] = [];
+    const failed: NotificationEventDetail['failed'] = [];
+    const deferred: NotificationEventDetail['deferred'] = [];
 
     await Promise.all(
         (Object.keys(channels) as NotificationChannelKey[]).map(async (key) => {
+            if (!(key in drivers)) return;
             const target = channels[key];
             if (!target) return;
-            used.push({ key, target });
+
+            const raison = NON_EMETTEURS[key];
+            if (raison) {
+                deferred.push({ key, reason: raison });
+                return;
+            }
+
             try {
                 await drivers[key](target, payload);
+                // Le canal n'est compté comme utilisé qu'APRÈS un envoi abouti :
+                // l'inscrire avant faisait affirmer « Canaux : … » alors qu'un
+                // webhook en 404 produisait exactement le même affichage.
+                used.push({ key, target });
             } catch (err) {
+                failed.push({ key, reason: err instanceof Error ? err.message : String(err) });
                 console.warn(`[notify:${key}] échec`, err);
             }
         }),
@@ -102,6 +136,8 @@ export async function notifyHuman(payload: NotificationPayload): Promise<Notific
         node,
         message: payload.message,
         channels: used,
+        failed,
+        deferred,
         timestamp: Date.now(),
     };
 

@@ -39,7 +39,7 @@ describe('Migration idempotence — archived_decisions', () => {
     expect([200, 201]).toContain(r2.status);
     // Vérifier qu'il n'y a qu'une seule ligne
     const check = await mvFetch(`/archived_decisions?correlation_key=eq.${testKey}&select=count`);
-    const data = await check.json();
+    const data = (await check.json()) as Array<{ count?: string }>;
     expect(data[0]?.count ?? 1).toBe('1');
   });
 

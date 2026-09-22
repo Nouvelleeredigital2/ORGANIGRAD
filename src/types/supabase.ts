@@ -3,6 +3,8 @@
  * À régénérer après chaque migration.
  */
 
+import type { Project, ProjectTask, NewProject, NewTask, ProjectChanges, TaskChanges } from './project';
+
 export type Json =
     | string
     | number
@@ -18,10 +20,24 @@ export type Database = {
     __InternalSupabase: { PostgrestVersion: '14.5' };
     public: {
         Tables: {
+            // Local projects pilot contract; this does not imply a deployed migration.
+            projects: {
+                Row: Project;
+                Insert: NewProject & { workspace_id: string };
+                Update: ProjectChanges & { version: number };
+                Relationships: [];
+            };
+            project_tasks: {
+                Row: ProjectTask;
+                Insert: NewTask & { workspace_id: string; project_id: string };
+                Update: TaskChanges & { version: number };
+                Relationships: [];
+            };
             hybrid_nodes: {
                 Row: {
                     avatar_url: string | null;
                     created_at: string;
+                    external_app: string | null;
                     grade_id: string;
                     id: string;
                     mcp_config: Json | null;
@@ -35,10 +51,15 @@ export type Database = {
                     type: string;
                     updated_at: string;
                     workspace_id: string;
+                    /** Observation externe (migration 20260912100000). */
+                    presence: string | null;
+                    presence_observed_at: string | null;
+                    cadence: string | null;
                 };
                 Insert: {
                     avatar_url?: string | null;
                     created_at?: string;
+                    external_app?: string | null;
                     grade_id?: string;
                     id?: string;
                     mcp_config?: Json | null;
@@ -52,8 +73,71 @@ export type Database = {
                     type: string;
                     updated_at?: string;
                     workspace_id: string;
+                    // `presence`, `presence_observed_at` et `cadence` sont
+                    // VOLONTAIREMENT absents : seul l'import LINK les écrit, via
+                    // l'orchestrateur. Les omettre ici fait refuser par le
+                    // compilateur toute tentative de les réécrire depuis la SPA,
+                    // qui effacerait l'observation à chaque enregistrement.
                 };
                 Update: Partial<Database['public']['Tables']['hybrid_nodes']['Insert']>;
+                Relationships: [];
+            };
+            /**
+             * Fiches RH de l'organigramme (migration 20260803120000_org_agents).
+             * Migration appliquée en production le 2026-08-03 ; ce bloc a été
+             * confronté à `generate_typescript_types` — colonnes, nullabilité et
+             * valeurs par défaut concordent.
+             */
+            org_agents: {
+                Row: {
+                    id: string;
+                    workspace_id: string;
+                    source_kind: string;
+                    source_ref: string;
+                    external_key: string;
+                    nom: string;
+                    prenom: string;
+                    fonction: string;
+                    titre: string;
+                    service: string;
+                    pole: string;
+                    rattachement_id: string | null;
+                    grade_style: string;
+                    type_temps: string;
+                    nbi: string | null;
+                    avatar_url: string | null;
+                    email: string | null;
+                    phone: string | null;
+                    created_by: string | null;
+                    updated_by: string | null;
+                    created_at: string;
+                    updated_at: string;
+                };
+                Insert: {
+                    id?: string;
+                    workspace_id: string;
+                    source_kind?: string;
+                    source_ref?: string;
+                    external_key: string;
+                    nom?: string;
+                    prenom?: string;
+                    fonction?: string;
+                    titre?: string;
+                    service?: string;
+                    pole?: string;
+                    rattachement_id?: string | null;
+                    grade_style?: string;
+                    type_temps?: string;
+                    nbi?: string | null;
+                    avatar_url?: string | null;
+                    email?: string | null;
+                    phone?: string | null;
+                    created_by?: string | null;
+                    updated_by?: string | null;
+                    created_at?: string;
+                    updated_at?: string;
+                };
+                Update: Partial<Database['public']['Tables']['org_agents']['Insert']>;
                 Relationships: [];
             };
             profiles: {
@@ -118,6 +202,8 @@ export type Database = {
                     last_used_at: string | null;
                     name: string;
                     revoked_at: string | null;
+                    scopes: string[];
+                    expires_at: string | null;
                     workspace_id: string;
                 };
                 Insert: {
@@ -129,6 +215,8 @@ export type Database = {
                     last_used_at?: string | null;
                     name: string;
                     revoked_at?: string | null;
+                    scopes?: string[];
+                    expires_at?: string | null;
                     workspace_id: string;
                 };
                 Update: Partial<Database['public']['Tables']['workspace_api_keys']['Insert']>;
@@ -195,7 +283,7 @@ export type Database = {
                     id: string;
                     workspace_id: string;
                     node_id: string | null;
-                    channel: 'slack_webhook' | 'email' | 'whatsapp';
+                    channel: 'slack_webhook' | 'email';
                     target: string;
                     subject: string | null;
                     message: string;
@@ -203,12 +291,13 @@ export type Database = {
                     error: string | null;
                     created_at: string;
                     sent_at: string | null;
+                    idempotency_key: string | null;
                 };
                 Insert: {
                     id?: string;
                     workspace_id: string;
                     node_id?: string | null;
-                    channel: 'slack_webhook' | 'email' | 'whatsapp';
+                    channel: 'slack_webhook' | 'email';
                     target: string;
                     subject?: string | null;
                     message: string;
@@ -216,6 +305,7 @@ export type Database = {
                     error?: string | null;
                     created_at?: string;
                     sent_at?: string | null;
+                    idempotency_key?: string | null;
                 };
                 Update: Partial<Database['public']['Tables']['notifications']['Insert']>;
                 Relationships: [];
@@ -244,9 +334,31 @@ export type Database = {
                     created_at: string;
                 }>;
             };
+            /** Clé technique à scopes explicites (20260911120000) — jamais de scope humain. */
+            create_scoped_workspace_api_key: {
+                Args: { p_name: string; p_workspace_id: string; p_scopes: string[] };
+                Returns: Array<{
+                    id: string;
+                    raw_key: string;
+                    key_prefix: string;
+                    created_at: string;
+                }>;
+            };
             invite_workspace_member: {
                 Args: { p_workspace_id: string; p_email: string; p_role?: WorkspaceRole };
                 Returns: Array<{ id: string; token: string; expires_at: string }>;
+            };
+            /** Import transactionnel de fiches RH (20260803120200). */
+            import_org_agents: {
+                Args: {
+                    p_workspace_id: string;
+                    p_source_kind: string;
+                    p_source_ref: string;
+                    p_agents: Json;
+                    p_mode?: string;
+                    p_expected_updated_at?: string | null;
+                };
+                Returns: Array<{ inserted: number; updated: number; deleted: number }>;
             };
             accept_workspace_invitation: {
                 Args: { p_token: string };

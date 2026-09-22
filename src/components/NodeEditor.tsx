@@ -11,6 +11,7 @@ const GLYPH_ICON: Record<'disc' | 'aperture' | 'chiclet', string> = {
 };
 import { useEscapeClose } from '../hooks/useEscapeClose';
 import { randomUuid } from '../utils/randomId';
+import { useFeedback } from '../feedback/FeedbackContext';
 
 /**
  * Éditeur de HybridNode — création ou édition. Construit sur les primitives
@@ -23,7 +24,9 @@ interface NodeEditorProps {
     /** Liste des nœuds disponibles comme parents. */
     availableNodes?: HybridNode[];
     onClose: () => void;
-    onSave: (node: HybridNode) => void;
+    /** Peut renvoyer une Promise : NodeEditor désactive alors le bouton
+     * jusqu'à sa résolution (voir `isSaving` ci-dessous). */
+    onSave: (node: HybridNode) => void | Promise<void>;
 }
 
 function emptyNode(type: NodeType = 'AGENT_IA'): HybridNode {
@@ -39,10 +42,46 @@ function emptyNode(type: NodeType = 'AGENT_IA'): HybridNode {
     };
 }
 
+/**
+ * Champ dont la valeur est chiffrée côté serveur : la SPA n'a pas la clé.
+ *
+ * On n'affiche donc aucun champ de saisie tant que l'utilisateur n'a pas
+ * demandé un remplacement explicite — et tant qu'il ne l'a pas fait, la valeur
+ * n'est pas envoyée au serveur, donc conservée.
+ */
+function EncryptedFieldNotice({ label, onReplace }: { label: string; onReplace: () => void }) {
+    // Volontairement PAS dans un <FormField> : celui-ci enveloppe son contenu
+    // dans un <label>, ce qui absorberait le nom accessible du bouton. Il n'y a
+    // d'ailleurs aucun champ de saisie à étiqueter tant que rien n'est remplacé.
+    return (
+        <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <p className="text-xs font-semibold text-slate-500">
+                    Configuré (chiffré) · la valeur n'est pas lisible depuis le navigateur.
+                </p>
+                <Button tone="slate" variant="soft" size="sm" onClick={onReplace}>
+                    Remplacer
+                </Button>
+            </div>
+        </div>
+    );
+}
+
+/** Champs chiffrables, pour typer l'état de remplacement. */
+type SecretField = 'systemPrompt' | 'mcpConfig' | 'notificationChannels';
+
 export function NodeEditor({ isOpen, node, availableNodes = [], onClose, onSave }: NodeEditorProps) {
+    const feedback = useFeedback();
     const parentOptions: HybridNode[] = useMemo(() => availableNodes, [availableNodes]);
     const [draft, setDraft] = useState<HybridNode>(() => node ?? emptyNode());
     const [skillsInput, setSkillsInput] = useState<string>((node?.skills ?? []).join(', '));
+    // Champs chiffrés que l'utilisateur a choisi de remplacer. Tant qu'un champ
+    // n'y figure pas, sa valeur n'est pas envoyée et le serveur la conserve.
+    const [replacing, setReplacing] = useState<Partial<Record<SecretField, boolean>>>({});
+    // Anti double-soumission : le bouton n'était pas désactivé pendant l'appel
+    // async d'`onSave` — un double-clic déclenchait deux upserts. Audit P2.
+    const [isSaving, setIsSaving] = useState(false);
 
     // Réinitialise le brouillon quand la modale s'ouvre sur un nœud différent —
     // ajustement d'état PENDANT le rendu (pattern React recommandé) plutôt qu'un
@@ -54,6 +93,8 @@ export function NodeEditor({ isOpen, node, availableNodes = [], onClose, onSave 
         if (isOpen) {
             setDraft(node ?? emptyNode());
             setSkillsInput((node?.skills ?? []).join(', '));
+            setReplacing({});
+            setIsSaving(false);
         }
     }
 
@@ -67,6 +108,12 @@ export function NodeEditor({ isOpen, node, availableNodes = [], onClose, onSave 
     const update = <K extends keyof HybridNode>(key: K, value: HybridNode[K]) =>
         setDraft((d) => ({ ...d, [key]: value }));
 
+    /** Champ chiffré côté serveur ET non encore remplacé : on ne le montre pas. */
+    const isSecret = (field: SecretField): boolean =>
+        Boolean(draft.encrypted?.[field]) && !replacing[field];
+
+    const startReplacing = (field: SecretField) => setReplacing((r) => ({ ...r, [field]: true }));
+
     const parseSkills = (raw: string) =>
         raw
             .split(',')
@@ -77,21 +124,45 @@ export function NodeEditor({ isOpen, node, availableNodes = [], onClose, onSave 
         try { new URL(url); return true; } catch { return false; }
     };
 
-    const handleSave = () => {
-        const finalNode: HybridNode = { ...draft, skills: parseSkills(skillsInput) };
+    const handleSave = async () => {
+        if (isSaving) return; // re-entrance : un clic déjà en vol
+        // Un champ remplacé cesse d'être « chiffré non lisible » : on retire son
+        // drapeau pour que la nouvelle valeur soit bien transmise. Les autres
+        // gardent le leur, donc restent omis de la charge — et conservés.
+        const encrypted = { ...(draft.encrypted ?? {}) };
+        (Object.keys(replacing) as SecretField[]).forEach((field) => {
+            if (replacing[field]) delete encrypted[field];
+        });
+        const stillEncrypted = Object.keys(encrypted).length > 0;
+
+        const finalNode: HybridNode = {
+            ...draft,
+            skills: parseSkills(skillsInput),
+            ...(stillEncrypted ? { encrypted } : { encrypted: undefined }),
+        };
         if (!finalNode.nom.trim() || !finalNode.roleTitre.trim()) return;
-        // Validation URLs
+        // Validation URLs — `alert()` natif remplacé par le canal feedback
+        // commun à tout le reste de l'application (bloquant le thread et hors
+        // du design system, contrairement au reste des erreurs). Audit P3.
         const mcpUrl = finalNode.mcpConfig?.serverUrl;
         if (mcpUrl && !isValidUrl(mcpUrl)) {
-            alert('URL du serveur MCP invalide.');
+            feedback.error('URL du serveur MCP invalide.');
             return;
         }
         const slackUrl = finalNode.notificationChannels?.slackWebhook;
         if (slackUrl && !isValidUrl(slackUrl)) {
-            alert('URL du webhook Slack invalide.');
+            feedback.error('URL du webhook Slack invalide.');
             return;
         }
-        onSave(finalNode);
+        setIsSaving(true);
+        try {
+            await onSave(finalNode);
+        } finally {
+            // Si `onSave` a fermé la modale (succès), `isOpen` est déjà false
+            // au prochain rendu et ce setState n'a plus d'effet visible ; s'il
+            // a échoué, l'éditeur reste ouvert et redevient utilisable.
+            setIsSaving(false);
+        }
     };
 
     return (
@@ -211,33 +282,59 @@ export function NodeEditor({ isOpen, node, availableNodes = [], onClose, onSave 
                         </FormField>
                     )}
 
-                    {draft.type === 'AGENT_IA' && (
-                        <FormField label="Prompt système" hint="Visible au survol de la carte">
-                            <Textarea
-                                value={draft.systemPrompt ?? ''}
-                                onChange={(e) => update('systemPrompt', e.target.value)}
-                                rows={3}
-                                placeholder="Tu es un expert en…"
+                    {draft.type === 'AGENT_IA' &&
+                        (isSecret('systemPrompt') ? (
+                            <EncryptedFieldNotice
+                                label="Prompt système"
+                                onReplace={() => startReplacing('systemPrompt')}
                             />
-                        </FormField>
-                    )}
-
-                    {draft.type === 'SOFTWARE_MCP' && (
-                        <FormField label="URL du serveur MCP">
-                            <Input
-                                value={draft.mcpConfig?.serverUrl ?? ''}
-                                onChange={(e) =>
-                                    update('mcpConfig', {
-                                        serverUrl: e.target.value,
-                                        connectedTo: draft.mcpConfig?.connectedTo ?? [],
-                                    })
+                        ) : (
+                            <FormField
+                                label="Prompt système"
+                                hint={
+                                    replacing.systemPrompt
+                                        ? 'La valeur saisie remplacera définitivement la précédente'
+                                        : 'Visible au survol de la carte'
                                 }
-                                placeholder="mcp://brand-guard.local"
+                            >
+                                <Textarea
+                                    value={draft.systemPrompt ?? ''}
+                                    onChange={(e) => update('systemPrompt', e.target.value)}
+                                    rows={3}
+                                    placeholder="Tu es un expert en…"
+                                />
+                            </FormField>
+                        ))}
+
+                    {draft.type === 'SOFTWARE_MCP' &&
+                        (isSecret('mcpConfig') ? (
+                            <EncryptedFieldNotice
+                                label="URL du serveur MCP"
+                                onReplace={() => startReplacing('mcpConfig')}
                             />
-                        </FormField>
+                        ) : (
+                            <FormField label="URL du serveur MCP">
+                                <Input
+                                    value={draft.mcpConfig?.serverUrl ?? ''}
+                                    onChange={(e) =>
+                                        update('mcpConfig', {
+                                            serverUrl: e.target.value,
+                                            connectedTo: draft.mcpConfig?.connectedTo ?? [],
+                                        })
+                                    }
+                                    placeholder="mcp://brand-guard.local"
+                                />
+                            </FormField>
+                        ))}
+
+                    {draft.type === 'HUMAN' && isSecret('notificationChannels') && (
+                        <EncryptedFieldNotice
+                            label="Canaux de notification"
+                            onReplace={() => startReplacing('notificationChannels')}
+                        />
                     )}
 
-                    {draft.type === 'HUMAN' && (
+                    {draft.type === 'HUMAN' && !isSecret('notificationChannels') && (
                         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                             <FormField label="Email (HITL)">
                                 <Input
@@ -274,10 +371,10 @@ export function NodeEditor({ isOpen, node, availableNodes = [], onClose, onSave 
                     </Button>
                     <Button
                         tone={archetype.tone}
-                        onClick={handleSave}
-                        disabled={!draft.nom.trim() || !draft.roleTitre.trim()}
+                        onClick={() => void handleSave()}
+                        disabled={isSaving || !draft.nom.trim() || !draft.roleTitre.trim()}
                     >
-                        {node ? 'Enregistrer' : 'Créer'}
+                        {isSaving ? 'Enregistrement…' : node ? 'Enregistrer' : 'Créer'}
                     </Button>
                 </footer>
             </Surface>

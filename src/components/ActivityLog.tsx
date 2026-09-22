@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { onActivity, type ActivityEvent } from '../services/activityBus';
 import { NOTIFICATION_EVENT, type NotificationEventDetail } from '../services/notificationService';
 import { transitionsRepo, type TransitionRecord } from '../services/transitionsRepo';
@@ -40,6 +40,21 @@ export function ActivityLog() {
     const { activeId: workspaceId } = useWorkspaceContext();
     const [events, setEvents] = useState<DisplayEvent[]>([]);
     const [nodeNameById, setNodeNameById] = useState<Map<string, string>>(new Map());
+    /** Vrai uniquement quand le canal Realtime est réellement établi. */
+    const [realtimeOn, setRealtimeOn] = useState(false);
+    const [journalError, setJournalError] = useState<string | null>(null);
+    /**
+     * Date du dernier « Effacer ». Les enregistrements antérieurs sont ignorés :
+     * sans cela, le prochain rejeu de `listRecent` les faisait réapparaître et
+     * le bouton semblait sans effet.
+     */
+    const clearedAtRef = useRef(0);
+    // La map de noms change à chaque événement de nœud. La lire via un ref
+    // évite de relancer l'abonnement (et le rejeu du snapshot) à chaque fois.
+    const nodeNamesRef = useRef(nodeNameById);
+    useEffect(() => {
+        nodeNamesRef.current = nodeNameById;
+    }, [nodeNameById]);
 
     // Map de résolution `node_id` → nom — alimentée par le repo
     useEffect(() => {
@@ -76,7 +91,21 @@ export function ActivityLog() {
                         kind: 'notify',
                         nodeId: detail.node.id,
                         nodeName: detail.node.nom,
-                        message: `${detail.message} · ${detail.channels.map((c) => c.key).join(', ') || 'aucun canal'}`,
+                        // Le journal dit ce qui est parti, pas ce qui était configuré.
+                        message: [
+                            detail.message,
+                            detail.channels.length
+                                ? `envoyé : ${detail.channels.map((c) => c.key).join(', ')}`
+                                : 'aucun envoi depuis le navigateur',
+                            detail.failed.length
+                                ? `échec : ${detail.failed.map((c) => c.key).join(', ')}`
+                                : null,
+                            detail.deferred.length
+                                ? `délégué : ${detail.deferred.map((c) => c.key).join(', ')}`
+                                : null,
+                        ]
+                            .filter(Boolean)
+                            .join(' · '),
                         timestamp: detail.timestamp,
                         source: 'local',
                     } as DisplayEvent,
@@ -97,10 +126,13 @@ export function ActivityLog() {
 
         let cancelled = false;
         // Snapshot initial : les 30 dernières transitions persistées
-        void transitionsRepo.listRecent(workspaceId, 30).then((rows) => {
+        void transitionsRepo.listRecent(workspaceId, 30).then(({ rows, error }) => {
             if (cancelled) return;
+            setJournalError(error ?? null);
             setEvents((prev) => {
-                const fromRealtime = rows.map((r) => recordToEvent(r, nodeNameById));
+                const fromRealtime = rows
+                    .filter((r) => r.timestamp > clearedAtRef.current)
+                    .map((r) => recordToEvent(r, nodeNamesRef.current));
                 // Merge sans doublons (par id)
                 const seen = new Set(prev.map((e) => e.id));
                 const merged = [...prev, ...fromRealtime.filter((e) => !seen.has(e.id))];
@@ -110,20 +142,27 @@ export function ActivityLog() {
             });
         });
 
-        const off = transitionsRepo.subscribe(workspaceId, (rec) => {
-            setEvents((prev) => {
-                if (prev.some((e) => e.id === rec.id)) return prev;
-                return [recordToEvent(rec, nodeNameById), ...prev].slice(0, 30);
-            });
-        });
+        const off = transitionsRepo.subscribe(
+            workspaceId,
+            (rec) => {
+                setEvents((prev) => {
+                    if (prev.some((e) => e.id === rec.id)) return prev;
+                    return [recordToEvent(rec, nodeNamesRef.current), ...prev].slice(0, 30);
+                });
+            },
+            setRealtimeOn,
+        );
 
         return () => {
             cancelled = true;
+            setRealtimeOn(false);
             off();
         };
-    }, [workspaceId, nodeNameById]);
+    }, [workspaceId]);
 
-    const isRealtimeOn = Boolean(workspaceId);
+    // Le badge ne dépend plus de la simple présence d'un workspace : il
+    // reflète l'abonnement réel et s'éteint si la lecture a échoué.
+    const isRealtimeOn = realtimeOn && !journalError;
 
     return (
         <Surface variant="card" className="flex h-full flex-col p-4">
@@ -153,7 +192,10 @@ export function ActivityLog() {
                 {events.length > 0 && (
                     <button
                         type="button"
-                        onClick={() => setEvents([])}
+                        onClick={() => {
+                            clearedAtRef.current = Date.now();
+                            setEvents([]);
+                        }}
                         className="text-[10px] font-semibold uppercase tracking-widest text-slate-400 hover:text-slate-600"
                     >
                         Effacer

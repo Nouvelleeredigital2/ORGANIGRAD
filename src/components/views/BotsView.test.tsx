@@ -1,0 +1,126 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { BotsView } from './BotsView';
+import type { BotProfile } from '../../types/botProfile';
+import type { WorkspaceRole } from '../../auth/permissions';
+import type { OrchestratorClient } from '../../services/orchestratorService';
+
+type TestClient = Pick<OrchestratorClient, 'fetchBots' | 'fetchBotActivation'>;
+// Le type exige fetchBotActivation ; les fixtures qui ne testent pas l'activation reçoivent ce stub neutre.
+const activationStub = () => vi.fn(async () => ({ enabled: true, ready: true, checks: [] }));
+
+const bridgeMock = vi.hoisted(() => ({
+    connected: false,
+    connectionState: 'local' as 'local' | 'connecting' | 'connected' | 'degraded' | 'failed',
+    nodes: [],
+    client: null as null | TestClient,
+}));
+
+vi.mock('../../hooks/useOrchestratorBridge', () => ({
+    useOrchestratorBridge: () => bridgeMock,
+}));
+
+const permissionsMock = vi.hoisted(() => ({
+    can: vi.fn((permission: string) => Boolean(permission)),
+    role: null as WorkspaceRole | null,
+    isLocalMode: true,
+    isAdmin: true,
+}));
+
+vi.mock('../../auth/usePermissions', () => ({
+    usePermissions: () => permissionsMock,
+}));
+
+const BOT: BotProfile = {
+    id: '00000000-0000-4000-8000-000000000001',
+    runtimeId: 'anita.instagram.bot',
+    fileName: 'anita.instagram.bot.txt',
+    displayName: 'Anita',
+    avatarUrl: 'https://images.example.org/anita.png',
+    family: 'redacteur',
+    brand: 'Nature & Tech',
+    network: 'instagram',
+    telegramUsername: null,
+    mission: 'Adapter un sujet validé à Instagram.',
+    personality: '',
+    research: '',
+    watch: '',
+    deliverables: '',
+    method: '',
+    limits: '',
+    usefulContext: '',
+    sources: [],
+    model: {},
+    enabled: true,
+    compiledPrompt: 'texte compilé',
+    compiledSha256: 'a'.repeat(64),
+};
+
+describe('BotsView', () => {
+    beforeEach(() => {
+        bridgeMock.connectionState = 'local';
+        bridgeMock.client = null;
+        permissionsMock.can.mockImplementation(() => true);
+    });
+
+    it("invite à configurer l'orchestrateur quand aucun n'est connecté", () => {
+        render(<BotsView />);
+        expect(screen.getByText(/besoin d'un orchestrateur connecté/i)).toBeInTheDocument();
+    });
+
+    it('liste les bots une fois connecté', async () => {
+        bridgeMock.connectionState = 'connected';
+        bridgeMock.client = { fetchBots: vi.fn(async () => [BOT]), fetchBotActivation: activationStub() };
+        render(<BotsView />);
+        await waitFor(() => expect(screen.getByText('Anita')).toBeInTheDocument());
+        expect(screen.getByText('Rédacteur')).toBeInTheDocument();
+        expect(screen.getByRole('img', { name: 'Portrait de Anita' })).toHaveAttribute('src', BOT.avatarUrl);
+    });
+
+    it("affiche l'état vide avec une invitation à créer le premier bot", async () => {
+        bridgeMock.connectionState = 'connected';
+        bridgeMock.client = { fetchBots: vi.fn(async () => []), fetchBotActivation: activationStub() };
+        render(<BotsView />);
+        await waitFor(() => expect(screen.getByText(/Aucun bot pour ce workspace/i)).toBeInTheDocument());
+        expect(screen.getByRole('button', { name: /Créer le premier bot/i })).toBeInTheDocument();
+    });
+
+    it('allows member editing but hides admin-only deletion', async () => {
+        bridgeMock.connectionState = 'connected';
+        bridgeMock.client = { fetchBots: vi.fn(async () => [BOT]), fetchBotActivation: activationStub() };
+        permissionsMock.can.mockImplementation((permission) => permission !== 'workspace:admin');
+        render(<BotsView />);
+        await waitFor(() => expect(screen.getByRole('button', { name: 'Éditer Anita' })).toBeInTheDocument());
+        expect(screen.queryByRole('button', { name: 'Supprimer Anita' })).not.toBeInTheDocument();
+    });
+
+    it('shows a verified activation decision to an administrator', async () => {
+        bridgeMock.connectionState = 'connected';
+        bridgeMock.client = {
+            fetchBots: vi.fn(async () => [{ ...BOT, enabled: false }]),
+            fetchBotActivation: vi.fn(async () => ({
+                ready: true,
+                enabled: false,
+                checks: [{ code: 'mission', label: 'Mission définie', passed: true }],
+            })),
+        };
+        render(<BotsView />);
+        await screen.findByText('Anita');
+        fireEvent.click(screen.getByRole('button', { name: 'Vérifier Anita' }));
+        expect(await screen.findByText('Prêt à activer')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Activer Anita' })).toBeInTheDocument();
+    });
+
+    it('ignores an old workspace response after the new workspace has loaded', async()=>{
+        let finish!: (bots:BotProfile[])=>void;
+        bridgeMock.connectionState='connected';
+        bridgeMock.client={fetchBots:()=>new Promise(resolve=>{finish=resolve;}),fetchBotActivation:activationStub()};
+        const view=render(<BotsView/>);
+        bridgeMock.client={fetchBots:async()=>[{...BOT,displayName:'Bot workspace B'}],fetchBotActivation:activationStub()};
+        view.rerender(<BotsView/>);
+        await screen.findByText('Bot workspace B');
+        await act(async()=>{finish([BOT]);});
+        await waitFor(()=>expect(screen.queryByText('Anita')).not.toBeInTheDocument());
+        expect(screen.getByText('Bot workspace B')).toBeInTheDocument();
+    });
+});

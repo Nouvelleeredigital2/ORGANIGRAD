@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { souscrirePartage } from './realtimeShared';
 import type { Database } from '../types/supabase';
 import type { NodeStatus } from '../types/hybridNode';
 
@@ -38,9 +39,18 @@ function rowToRecord(r: Row): TransitionRecord {
 }
 
 export const transitionsRepo = {
-    /** Renvoie les N transitions les plus récentes du workspace. */
-    async listRecent(workspaceId: string, limit = 30): Promise<TransitionRecord[]> {
-        if (!supabase) return [];
+    /**
+     * Renvoie les N transitions les plus récentes du workspace.
+     *
+     * L'erreur est REMONTÉE et non avalée : sans cela, un échec de lecture
+     * (RLS, réseau) était indiscernable d'un journal vide, alors que le badge
+     * « Live » restait allumé.
+     */
+    async listRecent(
+        workspaceId: string,
+        limit = 30,
+    ): Promise<{ rows: TransitionRecord[]; error?: string }> {
+        if (!supabase) return { rows: [] };
         const { data, error } = await supabase
             .from('node_transitions')
             .select('*')
@@ -49,32 +59,43 @@ export const transitionsRepo = {
             .limit(limit);
         if (error) {
             console.warn('[transitionsRepo] listRecent failed:', error.message);
-            return [];
+            return { rows: [], error: error.message };
         }
-        return (data ?? []).map(rowToRecord);
+        return { rows: (data ?? []).map(rowToRecord) };
     },
 
     /**
      * S'abonne en Realtime aux nouvelles transitions du workspace.
      * Renvoie une fonction de cleanup.
      */
-    subscribe(workspaceId: string, onInsert: (rec: TransitionRecord) => void): () => void {
-        if (!supabase) return () => {};
-        const channel = supabase
-            .channel(`node_transitions:${workspaceId}`)
-            .on(
-                'postgres_changes',
-                {
-                    event: 'INSERT',
-                    schema: 'public',
-                    table: 'node_transitions',
-                    filter: `workspace_id=eq.${workspaceId}`,
-                },
-                (payload) => onInsert(rowToRecord(payload.new as Row)),
-            )
-            .subscribe();
-        return () => {
-            void supabase?.removeChannel(channel);
-        };
+    subscribe(
+        workspaceId: string,
+        onInsert: (rec: TransitionRecord) => void,
+        /** Statut réel du canal — le badge « Live » doit en dépendre. */
+        onStatus?: (subscribed: boolean) => void,
+    ): () => void {
+        // Passe par le registre partagé (`realtimeShared.ts`), comme
+        // hybrid_nodes. Ce canal n'a aujourd'hui qu'un seul consommateur, donc
+        // le crash « .on() après .subscribe() » ne s'y est jamais manifesté —
+        // mais le motif était identique, et `removeChannel` étant asynchrone,
+        // un démontage suivi d'un remontage rapide suffisait à retomber sur
+        // l'instance déjà souscrite. Un second consommateur aurait, lui,
+        // reproduit le crash à l'identique.
+        return souscrirePartage<TransitionRecord>(
+            `node_transitions:${workspaceId}`,
+            (channel, emettre) =>
+                channel.on(
+                    'postgres_changes',
+                    {
+                        event: 'INSERT',
+                        schema: 'public',
+                        table: 'node_transitions',
+                        filter: `workspace_id=eq.${workspaceId}`,
+                    },
+                    (payload) => emettre(rowToRecord(payload.new as Row)),
+                ),
+            onInsert,
+            onStatus,
+        );
     },
 };

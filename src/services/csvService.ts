@@ -34,4 +34,9 @@ export const exportToCsv = (data: TreeNode[] | Agent[]) => {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    // `URL.createObjectURL` n'est jamais révoquée par ailleurs — fuite mémoire
+    // à chaque export (le blob reste alloué pour la durée de vie du document).
+    // Délai court : laisse le temps au navigateur de démarrer le
+    // téléchargement avant de libérer l'URL. Audit P3.
+    setTimeout(() => URL.revokeObjectURL(url), 0);
 };

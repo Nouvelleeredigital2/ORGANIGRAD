@@ -5,6 +5,8 @@ import { Button } from '../design/ui';
 import { cx } from '../design/cx';
 import { ARCHETYPE } from '../design/tokens';
 import { useEscapeClose } from '../hooks/useEscapeClose';
+import { VoiceMicButton } from './VoiceMicButton';
+import type { VoiceCapture } from '@apps2026/voice-client';
 
 /**
  * Validation Center — refonte v2 (bundle Design System Apple-style).
@@ -30,9 +32,26 @@ interface ValidationCenterProps {
     isOpen: boolean;
     items: ValidationItem[];
     onClose: () => void;
-    onApprove: (node: HybridNode) => void;
-    onReject?: (node: HybridNode, feedback: string) => void;
+    /**
+     * Renvoyer `false` (ou une promesse résolue à `false`) signale un échec :
+     * le panneau reste ouvert et la saisie est conservée. Une décision humaine
+     * ne doit jamais être perdue parce que l'appel distant a échoué.
+     */
+    onApprove: (node: HybridNode) => void | Promise<boolean>;
+    onReject?: (node: HybridNode, feedback: string) => void | Promise<boolean>;
     onShowDetails?: (node: HybridNode) => void;
+    /**
+     * Mode d'exécution, pour que le pied de panneau dise la vérité :
+     * en local rien n'est persisté, en distant un appel réel est émis.
+     */
+    mode?: 'local' | 'remote';
+    /**
+     * Base du proxy vocal de l'orchestrateur (ex. `${baseUrl}/voice/gateway`).
+     * Absente → pas de bouton micro (mode local sans orchestrateur).
+     */
+    voiceProxyBasePath?: string;
+    /** Injection de la capture micro pour les tests (jsdom n'a pas de micro). */
+    voiceCapture?: VoiceCapture;
 }
 
 const GLYPH_CLASS: Record<HybridNode['type'], 'human' | 'ai' | 'mcp'> = {
@@ -48,19 +67,35 @@ export function ValidationCenter({
     onApprove,
     onReject,
     onShowDetails,
+    mode = 'local',
+    voiceProxyBasePath,
+    voiceCapture,
 }: ValidationCenterProps) {
     const [rejectingId, setRejectingId] = useState<string | null>(null);
     const [rejectFeedback, setRejectFeedback] = useState('');
+    const [pendingId, setPendingId] = useState<string | null>(null);
 
     useEscapeClose(isOpen, onClose);
     if (!isOpen) return null;
 
-    const handleRejectConfirm = (node: HybridNode) => {
+    const handleRejectConfirm = async (node: HybridNode) => {
+        if (pendingId === node.id) return;
         const fb = rejectFeedback.trim();
         if (!fb) return;
-        onReject?.(node, fb);
+        setPendingId(node.id);
+        const outcome = await onReject?.(node, fb);
+        setPendingId(null);
+        // On ne vide le motif QUE si le rejet a abouti — sinon l'utilisateur
+        // devrait le ressaisir alors que rien n'a été enregistré.
+        if (outcome === false) return;
         setRejectingId(null);
         setRejectFeedback('');
+    };
+
+    const handleApprove = async (node: HybridNode) => {
+        setPendingId(node.id);
+        await onApprove(node);
+        setPendingId(null);
     };
 
     const count = items.length;
@@ -124,9 +159,11 @@ export function ValidationCenter({
                                         <Button
                                             tone="blue"
                                             size="sm"
-                                            onClick={() => onApprove(it.node)}
+                                            disabled={pendingId === it.node.id}
+                                            onClick={() => void handleApprove(it.node)}
                                         >
-                                            <Check size={12} strokeWidth={2} /> Valider
+                                            <Check size={12} strokeWidth={2} />{' '}
+                                            {pendingId === it.node.id ? 'Envoi…' : 'Valider'}
                                         </Button>
                                         {onReject && rejectingId !== it.node.id && (
                                             <button
@@ -155,7 +192,7 @@ export function ValidationCenter({
                                                 value={rejectFeedback}
                                                 onChange={(e) => setRejectFeedback(e.target.value)}
                                                 onKeyDown={(e) => {
-                                                    if (e.key === 'Enter') handleRejectConfirm(it.node);
+                                                    if (e.key === 'Enter') void handleRejectConfirm(it.node);
                                                     if (e.key === 'Escape') { setRejectingId(null); setRejectFeedback(''); }
                                                 }}
                                                 placeholder="Motif du rejet…"
@@ -170,9 +207,15 @@ export function ValidationCenter({
                                                     color: 'var(--fg-1)',
                                                 }}
                                             />
+                                            {voiceProxyBasePath && (
+                                                <VoiceMicButton
+                                                    proxyBasePath={voiceProxyBasePath}
+                                                    capture={voiceCapture}
+                                                />
+                                            )}
                                             <button
-                                                onClick={() => handleRejectConfirm(it.node)}
-                                                disabled={!rejectFeedback.trim()}
+                                                onClick={() => void handleRejectConfirm(it.node)}
+                                                disabled={!rejectFeedback.trim() || pendingId === it.node.id}
                                                 style={{
                                                     background: 'var(--system-red)',
                                                     color: '#fff',
@@ -181,8 +224,8 @@ export function ValidationCenter({
                                                     padding: '5px 10px',
                                                     fontSize: 11,
                                                     fontWeight: 600,
-                                                    cursor: rejectFeedback.trim() ? 'pointer' : 'not-allowed',
-                                                    opacity: rejectFeedback.trim() ? 1 : 0.5,
+                                                    cursor: rejectFeedback.trim() && pendingId !== it.node.id ? 'pointer' : 'not-allowed',
+                                                    opacity: rejectFeedback.trim() && pendingId !== it.node.id ? 1 : 0.5,
                                                 }}
                                             >
                                                 <XCircle size={12} style={{ display: 'inline', marginRight: 4 }} />
@@ -203,8 +246,9 @@ export function ValidationCenter({
                 </div>
 
                 <p className="dsm-vc-foot">
-                    Les approbations sont enregistrées localement. Aucune action distante n'est exécutée
-                    tant qu'une source distante n'est pas configurée.
+                    {mode === 'remote'
+                        ? "Les décisions sont transmises à l'orchestrateur."
+                        : 'Mode local · les décisions ne sont pas persistées et seront perdues au rechargement.'}
                 </p>
             </div>
         </div>

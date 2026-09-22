@@ -2,17 +2,21 @@ import React, { useState } from 'react';
 import { BaseModal } from './BaseModal';
 import type { Agent } from '../types/agent';
 import { Mail, Phone, MapPin, Globe, MessageSquare } from 'lucide-react';
+import { useFeedback } from '../feedback/FeedbackContext';
 
 interface ContactModalProps {
     isOpen: boolean;
     onClose: () => void;
     agent: Agent | null;
     isEditMode?: boolean;
-    onSave?: (id: string, updates: Partial<Agent>) => void;
+    onSave?: (id: string, updates: Partial<Agent>) => Promise<{ ok: boolean; message?: string }>;
 }
 
 export const ContactModal: React.FC<ContactModalProps> = ({ isOpen, onClose, agent, isEditMode = false, onSave }) => {
+    const feedback = useFeedback();
     const [draftsByAgentId, setDraftsByAgentId] = useState<Record<string, Partial<Agent>>>({});
+    const [isSaving, setIsSaving] = useState(false);
+    const [saveError, setSaveError] = useState<string | null>(null);
 
     if (!agent) return null;
 
@@ -34,9 +38,21 @@ export const ContactModal: React.FC<ContactModalProps> = ({ isOpen, onClose, age
         }));
     };
 
-    const handleSave = () => {
+    const handleSave = async () => {
         if (onSave && agent.id) {
-            onSave(agent.id, formData);
+            if (formData.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
+                setSaveError('Adresse email invalide.');
+                return;
+            }
+            setSaveError(null);
+            setIsSaving(true);
+            const result = await onSave(agent.id, formData);
+            setIsSaving(false);
+            if (!result.ok) {
+                setSaveError(result.message ?? 'Modification non enregistrée. Réessayez.');
+                return;
+            }
+            feedback.success(`Fiche mise a jour · ${agent.prenom} ${agent.nom}.`);
             setDraftsByAgentId((current) => {
                 const next = { ...current };
                 delete next[agent.id];
@@ -108,11 +124,24 @@ export const ContactModal: React.FC<ContactModalProps> = ({ isOpen, onClose, age
                             />
                         </div>
                     ) : (
-                        <div className="rounded-3xl border border-slate-200 bg-white p-6">
-                            <Phone className="mb-4 h-8 w-8 text-blue-600" />
-                            <h4 className="mb-1 text-xs font-black uppercase tracking-widest text-slate-400">Telephone Direct</h4>
-                            <p className="text-sm font-bold text-slate-900">{phoneDisplay}</p>
-                        </div>
+                        phoneDisplay === 'Non renseigne' ? (
+                            <div className="rounded-3xl border border-slate-200 bg-white p-6">
+                                <Phone className="mb-4 h-8 w-8 text-blue-600" />
+                                <h4 className="mb-1 text-xs font-black uppercase tracking-widest text-slate-400">Telephone Direct</h4>
+                                <p className="text-sm font-bold text-slate-900">{phoneDisplay}</p>
+                            </div>
+                        ) : (
+                            // Meme traitement que le courriel : dans une interface de
+                            // contact, un numero doit etre actionnable (surtout mobile).
+                            <a
+                                href={`tel:${phoneDisplay.replace(/[^+0-9]/g, '')}`}
+                                className="group rounded-3xl border border-slate-200 bg-white p-6 transition-all duration-300 hover:border-blue-500 hover:shadow-xl hover:shadow-blue-200/50"
+                            >
+                                <Phone className="mb-4 h-8 w-8 text-blue-600 transition-transform group-hover:scale-110" />
+                                <h4 className="mb-1 text-xs font-black uppercase tracking-widest text-slate-400 transition-colors group-hover:text-blue-600">Telephone Direct</h4>
+                                <p className="text-sm font-bold text-slate-900">{phoneDisplay}</p>
+                            </a>
+                        )
                     )}
 
                     {isEditMode ? (
@@ -144,14 +173,17 @@ export const ContactModal: React.FC<ContactModalProps> = ({ isOpen, onClose, age
 
                 {isEditMode ? (
                     <div className="flex gap-3 pt-4">
+                        {saveError && <p className="w-full text-sm font-medium text-red-600">{saveError}</p>}
                         <button
-                            onClick={handleSave}
+                            onClick={() => void handleSave()}
+                            disabled={isSaving}
                             className="h-12 flex-1 rounded-2xl bg-blue-600 text-xs font-black uppercase tracking-widest text-white shadow-xl shadow-blue-200 transition-all hover:bg-blue-700"
                         >
-                            Enregistrer
+                            {isSaving ? 'Enregistrement…' : 'Enregistrer'}
                         </button>
                         <button
                             onClick={onClose}
+                            disabled={isSaving}
                             className="h-12 flex-1 rounded-2xl bg-slate-100 text-xs font-black uppercase tracking-widest text-slate-500 transition-all hover:bg-slate-200"
                         >
                             Annuler

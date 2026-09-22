@@ -7,10 +7,13 @@ import type { SearchResultItem } from '../../utils/treeSearch';
 interface SpotlightModuleProps {
     data: TreeNode[];
     onSelectAgent: (agentId: string, path: string[]) => void;
+    /** Voir `UseSpotlightOptions.disableShortcut` — évite le conflit ⌘K avec
+     * le Spotlight local de la vue Orchestration. */
+    disableShortcut?: boolean;
 }
 
-export const SpotlightSearch: React.FC<SpotlightModuleProps> = ({ data, onSelectAgent }) => {
-    const { isOpen, onOpen, onClose } = useSpotlight();
+export const SpotlightSearch: React.FC<SpotlightModuleProps> = ({ data, onSelectAgent, disableShortcut }) => {
+    const { isOpen, onOpen, onClose } = useSpotlight({ disableShortcut });
 
     return (
         <div className="relative w-full max-w-xl mx-auto print:hidden">

@@ -8,6 +8,7 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
+.worktrees/
 dist
 dist-ssr
 *.local
@@ -17,6 +18,9 @@ dist-ssr
 .env.*
 !.env.example
 !.env.test
+# Gabarit de l'E2E connectée : sans valeurs. `.env.connected`, lui, reste ignoré
+# par la règle ci-dessus — il porte les identifiants d'un projet Supabase réel.
+!.env.connected.example
 
 # Editor directories and files
 .vscode/*
@@ -36,6 +40,10 @@ test-results/
 playwright-report/
 coverage/
 
+# Supabase CLI local state and generated Edge runtime
+supabase/.temp/
+supabase/.branches/
+
 # Misc
 lint-out.txt
 lint-results.json
@@ -48,3 +56,20 @@ vite-dev.log
 *.tar.gz
 *.tgz
 
+# Exception : le contrat partagé est distribué par tarball vendorée (cf.
+# CLAUDE.md racine §4). Sans elle, `npm ci` tente un clone SSH du dépôt privé
+# apps2026-contracts et échoue sur un runner sans clé.
+# La tarball actuelle était déjà versionnée ; cette règle évite qu'une montée
+# de version soit silencieusement ignorée par `git add`.
+!orchestrator/vendor/*.tgz
+# Même raison côté SPA : @apps2026/voice-client (VoiceMicButton) est aussi
+# distribué en tarball vendorée. Absente du dépôt racine jusqu'ici → npm ci
+# échouait en CI (ENOENT), invisible en local car le fichier existait sur le
+# poste sans jamais avoir été commité.
+!vendor/*.tgz
+
+_e2e/captures/
+_e2e/fixtures/
+
+# Preuves locales du lot projets, synthétisées dans la documentation versionnée.
+/reports/projets-*.json

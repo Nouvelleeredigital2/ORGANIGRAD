@@ -13,6 +13,7 @@
  */
 import { createEvent, type SynapseEvent } from "@apps2026/contracts";
 import { log } from "../lib/logger.js";
+import { synapseAuthHeaders } from "./serviceAuth.js";
 
 /** Forme minimale d'un nœud HUMAN (structurellement compatible avec HybridNode). */
 export interface HumanGateNode {
@@ -125,9 +126,13 @@ export function createSynapseProducer(opts: {
   const post = async (evt: SynapseEvent): Promise<void> => {
     if (!base) return;
     try {
+      // SYNAPSE_AUTH_MODE=required (2026-08-09) : jeton porteur obligatoire,
+      // même en émission. {} si le compte de service n'est pas configuré —
+      // Synapse renverra 401, avalé plus bas (best-effort, jamais bloquant).
+      const authHeaders = await synapseAuthHeaders();
       const res = await fetch(`${base}/api/events`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...authHeaders },
         body: JSON.stringify(evt),
         // Timeout court : le bus ne doit jamais retarder le flux métier.
         signal: AbortSignal.timeout(SYNAPSE_TIMEOUT_MS),

@@ -4,6 +4,9 @@ on:
   push:
     branches: [master]
   pull_request:
+  # Déclenchement manuel : la suite connectée touche un vrai projet Supabase,
+  # elle ne doit jamais partir toute seule sur une PR.
+  workflow_dispatch:
 
 jobs:
   frontend:
@@ -20,8 +23,44 @@ jobs:
       - run: npm run typecheck
       - run: npm run test
       - run: npm run build
-      - name: npm audit (high+)
-        run: npm audit --audit-level=high || true
+      # `npm audit --audit-level=high || true` affichait les vulnérabilités puis
+      # passait quoi qu'il arrive : décoratif. La porte échoue sur toute
+      # vulnérabilité high/critical non corrigée ET non acceptée explicitement
+      # (registre daté dans scripts/audit-gate.mjs, détail dans
+      # docs/security/dependances.md). Couvre frontend + orchestrateur.
+      - name: Porte npm audit (high+, risques acceptés datés)
+        run: node scripts/audit-gate.mjs .
+
+  # Les 18 specs Playwright existaient depuis des mois sans jamais tourner en
+  # intégration : 8 d'entre elles échouaient silencieusement. Ce job ferme
+  # cette brèche. Il tourne sans Supabase (`--mode test` charge .env.test, qui
+  # vide volontairement les variables) : aucun secret n'est requis.
+  e2e:
+    name: E2E (Playwright · chromium)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - name: Installer chromium
+        run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - name: Rapport en cas d'échec
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          # reporter: 'list' (playwright.config.ts) n'écrit pas de
+          # playwright-report/ — traces/captures vont dans test-results/
+          # (trace: 'retain-on-failure', screenshot: 'only-on-failure').
+          # L'ancien chemin ne matchait jamais rien : 0 artefact remonté
+          # sur un échec, aucun moyen de diagnostiquer après coup.
+          name: playwright-report
+          path: test-results/
+          if-no-files-found: warn
+          retention-days: 7
 
   orchestrator:
     name: Orchestrateur (typecheck · test · build)
@@ -37,9 +76,124 @@ jobs:
           cache: npm
           cache-dependency-path: orchestrator/package-lock.json
       - run: npm ci
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Conversion et installation des personas (sans réseau)
+        working-directory: .
+        run: python -B -m unittest discover -s scripts/bots -p 'test_*.py'
       - run: npm run typecheck
       - run: npm run test
       - run: npm run build
+      # Depuis la racine : la cible du registre d'acceptations est un chemin
+      # relatif au dépôt, pas au répertoire courant du job.
+      - name: Porte npm audit (high+, risques acceptés datés)
+        working-directory: .
+        run: node scripts/audit-gate.mjs orchestrator
+
+  # Isolation multi-tenant vérifiée sur un PostgreSQL RÉEL, à partir du SQL
+  # réellement versionné (baseline + migrations postérieures). Les mocks ne
+  # peuvent pas attraper la classe de faille visée ici : `NULL NOT IN (...)`
+  # vaut NULL, et PL/pgSQL traite `IF NULL THEN` comme faux — le refus était
+  # sauté. Seul un vrai moteur reproduit ce comportement.
+  securite-sql:
+    name: Sécurité SQL (isolation workspaces · PostgreSQL réel)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 10
+      # Seconde base, VIERGE : les tests de concurrence créent leur propre
+      # schéma minimal. Les mélanger avec le schéma Organigrad complet ferait
+      # jouer ses triggers (client_guard) et rendrait le résultat illisible.
+      postgres-concurrence:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: test
+        ports: ['5433:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    defaults:
+      run:
+        working-directory: orchestrator
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: orchestrator/package-lock.json
+      - run: npm ci
+      # Ciblé sur ce fichier : la base est provisionnée depuis le schéma
+      # Organigrad, les autres suites d'intégration attendent un schéma à elles.
+      - name: Tests de sécurité négatifs
+        run: npm test -- workspaceRpcSecurity
+        env:
+          TEST_DATABASE_URL: postgres://postgres:test@localhost:5432/postgres
+      # Test de conformité : une écriture portant une version périmée doit être
+      # refusée et ne doit pas écraser la modification concurrente.
+      - name: Concurrence — verrou optimiste
+        run: npm test -- concurrentWrites
+        env:
+          TEST_DATABASE_URL: postgres://postgres:test@localhost:5433/postgres
+
+  # Suite connectée à un vrai Supabase (P1-7). Uniquement sur déclenchement
+  # MANUEL : elle crée puis supprime des données, et exige un projet de test.
+  #
+  # Secrets attendus (Settings → Secrets and variables → Actions) :
+  #   E2E_SUPABASE_URL, E2E_SUPABASE_ANON_KEY
+  #   E2E_EMAIL, E2E_PASSWORD              — compte A
+  #   E2E_EMAIL_B, E2E_PASSWORD_B          — compte B, AUTRE workspace (isolation)
+  #   E2E_EMAIL_VIEWER, E2E_PASSWORD_VIEWER — facultatif, rôle lecture seule
+  connectee:
+    name: E2E connectée (Supabase de test · manuel)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - name: Installer chromium
+        run: npx playwright install --with-deps chromium
+      - name: Écrire .env.connected depuis les secrets
+        run: |
+          # Sans identifiants, toute la suite se SAUTE et le job passerait au
+          # vert en n'ayant rien testé. On échoue explicitement à la place.
+          if [ -z "${{ secrets.E2E_SUPABASE_URL }}" ] || [ -z "${{ secrets.E2E_EMAIL }}" ]; then
+            echo "::error::Secrets E2E absents — la suite connectée n'aurait rien testé."
+            exit 1
+          fi
+          cat > .env.connected <<'EOF'
+          VITE_SUPABASE_URL=${{ secrets.E2E_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY=${{ secrets.E2E_SUPABASE_ANON_KEY }}
+          E2E_EMAIL=${{ secrets.E2E_EMAIL }}
+          E2E_PASSWORD=${{ secrets.E2E_PASSWORD }}
+          E2E_EMAIL_B=${{ secrets.E2E_EMAIL_B }}
+          E2E_PASSWORD_B=${{ secrets.E2E_PASSWORD_B }}
+          E2E_EMAIL_VIEWER=${{ secrets.E2E_EMAIL_VIEWER }}
+          E2E_PASSWORD_VIEWER=${{ secrets.E2E_PASSWORD_VIEWER }}
+          EOF
+      - run: npm run test:e2e:connected
+      - name: Rapport en cas d'échec
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-connectee
+          path: test-results/
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Ne jamais laisser traîner les identifiants
+        if: always()
+        run: rm -f .env.connected
 
   hygiene:
     name: Hygiène dépôt (secrets · artefacts)
@@ -48,7 +202,10 @@ jobs:
       - uses: actions/checkout@v4
       - name: Aucun .env (hors .example/.test) versionné
         run: |
-          if git ls-files | grep -E '(^|/)\.env($|\.)' | grep -vE '\.env\.example$|\.env\.test$'; then
+          # `\.example$` plutôt que le seul `\.env\.example` : les gabarits sont
+          # désormais plusieurs (.env.example, .env.connected.example) et un
+          # gabarit ne contient par définition aucune valeur.
+          if git ls-files | grep -E '(^|/)\.env($|\.)' | grep -vE '\.example$|\.env\.test$'; then
             echo "::error::Un fichier .env est versionné"; exit 1; fi
       - name: Aucun node_modules / dist versionné
         run: |
@@ -56,6 +213,19 @@ jobs:
             echo "::error::Artefacts de build versionnés"; exit 1; fi
       - name: Aucune valeur secrète évidente
         run: |
-          if git ls-files | grep -vE 'package-lock|\.env\.example' \
-            | xargs grep -lEi 'eyJ[A-Za-z0-9_-]{30,}|postgres(ql)?://[a-z0-9_]+:[^@ ]+@|hooks\.slack\.com/services/T[A-Z0-9]+/B' 2>/dev/null; then
-            echo "::error::Valeur secrète potentielle détectée"; exit 1; fi
+          # Le contrôle liste désormais les LIGNES fautives (et non les fichiers)
+          # afin d'écarter les valeurs qui ne sont pas des secrets : un DSN vers
+          # localhost, un mot de passe entre crochets, un jeton d'exemple dans
+          # un test de masquage. Une règle qui crie au loup finit ignorée — et
+          # celle-ci l'était : elle échouait sur master depuis des semaines.
+          motif='eyJ[A-Za-z0-9_-]{30,}|postgres(ql)?://[a-z0-9_]+:[^@ ]+@|hooks\.slack\.com/services/T[A-Z0-9]+/B'
+          # Domaines réservés (RFC 2606) et marqueurs explicites uniquement :
+          # un simple « example » quelque part dans la ligne ne suffit pas.
+          exceptions='@localhost|@127\.0\.0\.1|:\[[A-Z_]+\]@|/T00/B00/|@example\.(com|org|net)|\.invalid|REDACTED|A_CONSERVER_DANS_LE_COFFRE_FORT'
+          suspects=$(git ls-files | grep -vE 'package-lock|\.env\.example' \
+            | xargs grep -nEi "$motif" 2>/dev/null \
+            | grep -vEi "$exceptions" || true)
+          if [ -n "$suspects" ]; then
+            echo "$suspects"
+            echo "::error::Valeur secrète potentielle détectée"; exit 1
+          fi

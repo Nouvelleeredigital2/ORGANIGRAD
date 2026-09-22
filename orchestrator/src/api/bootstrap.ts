@@ -10,9 +10,16 @@ import { Notifier } from '../observability/notifier.js';
 import { buildServer } from './server.js';
 import { buildPgServer } from './pgServer.js';
 import { registerSynapseConsumer } from '../synapse/consumer.js';
+import { registerVoiceGatewayRoutes } from './voiceGateway.js';
 import { createSynapseProducer } from '../synapse/producer.js';
 import { getSql } from '../state/pgGraphStore.js';
 import { loadEnv } from '../config/env.js';
+import { createSupabaseJwtVerifier } from './userAuth.js';
+import { pathToFileURL } from 'node:url';
+import { PgCircuitScheduler } from '../state/pgCircuitScheduler.js';
+import { registerCircuitWorker } from './circuitWorker.js';
+import { loadLinkBridgeConfig } from './linkBridgeConfig.js';
+import { createOrvionServiceClient, readOrvionMandateFile } from '../integrations/orvionServiceClient.js';
 
 export async function startOrchestrator() {
     // Validation centralisée — échoue tôt avec un message clair si config invalide.
@@ -22,10 +29,46 @@ export async function startOrchestrator() {
 
     if (env.mode === 'pg') {
         const sql = getSql();
+        // Sessions humaines : HS256 (secret partagé legacy) et/ou ES256 (JWKS —
+        // projets migrés vers les « JWT signing keys »). Sans l'un ni l'autre,
+        // seules les clés API `ok_…` sont acceptées.
+        const verifyUserToken =
+            env.supabaseJwtSecret || env.supabaseJwksUrl
+                ? createSupabaseJwtVerifier({
+                      secret: env.supabaseJwtSecret,
+                      jwksUrl: env.supabaseJwksUrl,
+                  })
+                : undefined;
+        // Livraison Orvion sous reçu : le mandat est lu depuis un fichier au démarrage et n'est
+        // jamais journalisé ; toute configuration incomplète fait échouer le démarrage.
+        const circuitDelivery = env.circuitDeliveryEnabled ? {
+            orvion: createOrvionServiceClient({
+                baseUrl: env.orvionBaseUrl ?? '', qualifiedOrigin: env.orvionQualifiedOrigin ?? '',
+                mandateId: readOrvionMandateFile(env.orvionServiceMandateFile ?? ''),
+                originHeader: new URL(appUrl ?? '').origin,
+            }),
+        } : undefined;
         const app = buildPgServer({
             sql,
+            circuitDelivery,
+            projectsEnabled: env.projectsEnabled,
+            circuitsEnabled: env.circuitsEnabled,
+            projectServiceDelegationsEnabled: env.projectServiceDelegationsEnabled,
+            privateProjectsEnabled: env.privateProjectsEnabled,
+            privateProjectsIssuer: env.privateProjectsIssuer,
+            privateProjectsVerifyUserToken: env.privateProjectsEnabled ? createSupabaseJwtVerifier({
+                secret: env.supabaseJwtSecret,
+                jwksUrl: env.supabaseJwksUrl,
+                fetchImpl: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(4500) }),
+            }) : undefined,
             allowedOrigins: env.corsAllowedOrigins,
             jwtSecret: env.supabaseJwtSecret,
+            verifyUserToken,
+            linkBaseUrl: env.linkBaseUrl,
+            linkBridgeToken: env.linkBridgeToken,
+            // Pont LINK ↔ hub : lecture des clés au démarrage, échec explicite
+            // si LINK_BRIDGE_ENABLED=1 et qu'un fichier est absent ou invalide.
+            linkBridge: loadLinkBridgeConfig(env),
             notifierOptions: {
                 validationsWebhook: env.slackValidations,
                 fluxWebhook: env.slackFlux,
@@ -35,6 +78,22 @@ export async function startOrchestrator() {
                 supabaseServiceRoleKey: env.supabaseServiceRoleKey,
             },
         });
+        // Consommation du bus APPS-2026 en production — DÉSACTIVÉE PAR DÉFAUT.
+        // Le producteur, lui, est déjà câblé côté pgServer (hop 1 via le moteur,
+        // hop 5 sur approve/reject) : Organigrad PARLE déjà sur le bus, il n'y
+        // ÉCOUTE pas encore. Activer avec SYNAPSE_CONSUMER=1.
+        // Prérequis avant activation durable : cloisonner la file du consumer par
+        // workspace (cf. avertissement en tête de synapse/consumer.ts).
+        // Proxy vocal (SDK @apps2026/voice-client) — 503 tant que le gateway
+        // n'est pas configuré (NED_VOICE_GATEWAY_URL / NED_VOICE_GATEWAY_TOKEN).
+        registerVoiceGatewayRoutes(app);
+        if(env.circuitSchedulerEnabled) {
+            registerCircuitWorker(app,new PgCircuitScheduler(sql,env.circuitSchedulerProjectIds));
+        }
+        if (process.env.SYNAPSE_CONSUMER === '1') {
+            registerSynapseConsumer(app);
+            console.log('[orchestrator] consumer Synapse ACTIF (mode pg)');
+        }
         await app.listen({ port, host: '0.0.0.0' });
         console.log(`[orchestrator] mode Postgres + API key sur http://0.0.0.0:${port}`);
         return { app, mode: 'pg' as const };
@@ -65,12 +124,19 @@ export async function startOrchestrator() {
     // Participation au bus APPS-2026 (consomme validation.requested, ré-émet la
     // décision). Auto-inactif si SYNAPSE_URL absent. Dev/in-memory uniquement.
     registerSynapseConsumer(app);
+    // Proxy vocal (SDK @apps2026/voice-client) — même patron qu'en mode pg.
+    registerVoiceGatewayRoutes(app);
     await app.listen({ port, host: '0.0.0.0' });
     console.log(`[orchestrator] mode in-memory sur http://0.0.0.0:${port}`);
     return { app, store, engine, notifier, mode: 'memory' as const };
 }
 
-const isEntry = import.meta.url === `file://${process.argv[1]?.replace(/\\/g, '/')}`;
+// pathToFileURL normalise correctement (encodage %20, 2 vs 3 slashes) — la
+// reconstruction manuelle précédente échouait sur tout chemin avec espace
+// (ex. Windows "...\5070 Ti\...") : startOrchestrator() n'était jamais
+// appelé, le process restait vivant sans jamais écouter de port. Incident
+// réel du 09/08 (banc E2E local).
+const isEntry = process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isEntry || process.env.ORCHESTRATOR_AUTOSTART === '1') {
     startOrchestrator().catch((err) => {
         console.error('[orchestrator] échec démarrage', err);

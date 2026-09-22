@@ -4,7 +4,10 @@ export default defineConfig({
     testDir: './e2e',
     fullyParallel: false,
     forbidOnly: !!process.env.CI,
-    retries: 0,
+    // 0 en local (un échec doit être visible immédiatement) ; 2 en CI, où un
+    // runner partagé plus lent peut faire échouer un mock réseau une fois
+    // sans que ce soit une régression (cf. bridge-and-uuids.spec.ts).
+    retries: process.env.CI ? 2 : 0,
     workers: 1,
     reporter: 'list',
     use: {

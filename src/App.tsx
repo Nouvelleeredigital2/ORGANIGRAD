@@ -1,5 +1,5 @@
-import { useState, useRef, lazy, Suspense } from 'react';
-import { AlertCircle, RefreshCw, MapPin } from 'lucide-react';
+import { useState, useRef, useEffect, lazy, Suspense } from 'react';
+import { AlertCircle, RefreshCw, MapPin, Settings } from 'lucide-react';
 import { useOrgChartController } from './hooks/useOrgChartController';
 import { SpotlightSearch } from './components/spotlight/SpotlightSearch';
 import { ProfileModal } from './components/ProfileModal';
@@ -12,6 +12,7 @@ import { useWorkspaceContext } from './contexts/WorkspaceContext';
 import { Sidebar } from './components/layout/Sidebar';
 import { Topbar } from './components/layout/Topbar';
 import type { OrgChartRef } from './components/OrgChart';
+import { isProjectsEnabled } from './lib/projectsFeature';
 
 // Code-splitting (Priorité 12) : les vues lourdes (recharts, orgchart zoom/pan,
 // export PDF…) sont chargées à la demande, hors du bundle initial.
@@ -23,6 +24,13 @@ const SettingsView = lazy(() =>
 );
 const OrchestrationView = lazy(() =>
     import('./components/views/OrchestrationView').then((m) => ({ default: m.OrchestrationView })),
+);
+const BotsView = lazy(() =>
+    import('./components/views/BotsView').then((m) => ({ default: m.BotsView })),
+);
+const CircuitsView = lazy(() => import('./components/views/CircuitsView').then(m=>({default:m.CircuitsView})));
+const ProjectsView = lazy(() =>
+    import('./components/views/ProjectsView').then((m) => ({ default: m.ProjectsView })),
 );
 const ApiKeysView = lazy(() =>
     import('./components/views/ApiKeysView').then((m) => ({ default: m.ApiKeysView })),
@@ -43,12 +51,27 @@ import { useSession } from './hooks/useSession';
 import { AuthScreen } from './components/auth/AuthScreen';
 import { WorkspaceProvider } from './contexts/WorkspaceProvider';
 import { isSupabaseConfigured } from './lib/supabase';
+import { useFeedback } from './feedback/FeedbackContext';
+import { FeedbackProvider } from './feedback/FeedbackProvider';
+import { messageErreurUtilisateur } from './utils/asyncGuard';
+import { usePermissions } from './auth/usePermissions';
+import { ImportPreviewModal } from './components/import/ImportPreviewModal';
 
 function AppContent() {
     const { setFilamentState } = useOrigin();
+    // Canal de retour unifié : un export ne se conclut jamais en « succès »
+    // silencieux, chaque échec reste affiché jusqu'à lecture.
+    const feedback = useFeedback();
+    // Un viewer pouvait activer le mode édition et « supprimer » des agents en
+    // croyant agir pour tout le monde. La suppression suit la même règle que
+    // côté serveur : réservée à owner/admin.
+    const { can, isAdmin } = usePermissions();
+    const peutEditerAgents = can('graph:write');
+    const peutSupprimerAgents = isAdmin;
     const {
         loading,
         error,
+        refresh,
         csvUrl,
         sourceInfo,
         applyCsvUrl,
@@ -58,7 +81,7 @@ function AppContent() {
         poleStats,
         highlightedSearch,
         setHighlightedSearch,
-        isEditMode,
+        isEditMode: editionDemandee,
         setIsEditMode,
         handleDeleteAgent,
         handleUpdateAgent,
@@ -66,14 +89,37 @@ function AppContent() {
         activeView,
         setActiveView,
         handleImportFile,
-        clearImportedSource,
         selectedPoleKey,
         setSelectedPoleKey,
         selectedPole,
         poleDirectory,
         focusAgentPole,
-        isImportedSourceActive,
+        locateAgent,
+        importPreview,
+        importMode,
+        setImportMode,
+        allowInvalidImport,
+        setAllowInvalidImport,
+        isCommittingImport,
+        importCommitError,
+        confirmImport,
+        cancelImport,
+        isServerBacked,
+        agentsStale,
     } = useOrgChartController();
+
+    // `?edit=1` vient de l'URL : un viewer peut l'écrire à la main. Le mode
+    // édition est donc BORNÉ ICI, une seule fois, plutôt qu'à chaque endroit qui
+    // le consomme — un site oublié suffisait à rouvrir la brèche, et c'est
+    // exactement ce qui s'était produit : l'organigramme était bien borné, mais
+    // ProfileModal et ContactModal recevaient le drapeau brut et proposaient
+    // leur formulaire d'enregistrement à un lecteur seul.
+    // La RLS refusait bien l'écriture ; l'interface promettait quand même une
+    // action qui finissait en 403 muet.
+    const isEditMode = editionDemandee && peutEditerAgents;
+
+    const { activeWorkspace } = useWorkspaceContext();
+    const activeWorkspaceName = activeWorkspace?.name ?? null;
 
     const [isExporting, setIsExporting] = useState(false);
     const [isPdfMode, setIsPdfMode] = useState(false);
@@ -81,12 +127,17 @@ function AppContent() {
     const [useHybridCard, setUseHybridCard] = useState(false);
     const [activeModal, setActiveModal] = useState<{ type: 'profile' | 'contact'; agent: Agent } | null>(null);
     const orgChartRef = useRef<OrgChartRef>(null);
+    const canExport = rawAgents.length > 0;
 
     /**
      * Export PDF — depuis la topbar, on ouvre d'abord l'aperçu A3 (PrintExportView).
      * L'utilisateur valide via le bouton "Télécharger" → on lance l'export réel.
      */
     const handleExportPDF = async (): Promise<void> => {
+        if (!canExport) {
+            feedback.info("Importez des fiches avant d'exporter.");
+            return;
+        }
         setPrintPreviewOpen(true);
     };
 
@@ -99,13 +150,36 @@ function AppContent() {
         await new Promise((resolve) => setTimeout(resolve, 800));
 
         const { exportToPdf } = await import('./services/exportPdf');
-        await exportToPdf(orgChartRef, { poleLabel: selectedPole?.pole }).catch((err) => {
+        const poleLabel = selectedPole?.pole;
+
+        let failure: unknown = null;
+        try {
+            await exportToPdf(orgChartRef, { poleLabel });
+        } catch (err) {
+            failure = err;
             console.error('[export]', err);
-        });
+        }
 
         setIsPdfMode(false);
         setIsExporting(false);
-        setFilamentState('success');
+
+        // Le succès n'est affiché que si l'export a réellement abouti (ORG-003).
+        if (failure) {
+            feedback.error(
+                `Export PDF échoué${poleLabel ? ` — ${poleLabel}` : ''} : ${messageErreurUtilisateur(failure)}. Aucun fichier n'a été téléchargé.`,
+            );
+            setFilamentState('error');
+        } else {
+            // Un export peut nécessiter quelques secondes de finalisation côté
+            // navigateur. Le succès doit donc rester lisible après le
+            // téléchargement, au-delà de la durée générique des toasts verts.
+            feedback.success(
+                `Export PDF terminé${poleLabel ? ` — ${poleLabel}` : ''}.`,
+                { autoDismissMs: 15_000 },
+            );
+            setFilamentState('success');
+        }
+
         setTimeout(() => setFilamentState('idle'), 3000);
     };
 
@@ -120,13 +194,18 @@ function AppContent() {
 
         const { exportToPdf } = await import('./services/exportPdf');
 
+        const failedPoles: string[] = [];
+
         for (const pole of poleDirectory) {
             setSelectedPoleKey(pole.key);
             // Laisser le temps au DOM de se mettre à jour
             await new Promise((resolve) => setTimeout(resolve, 1200));
-            await exportToPdf(orgChartRef, { poleLabel: pole.pole }).catch((err) => {
-                console.error('[batch export]', err);
-            });
+            try {
+                await exportToPdf(orgChartRef, { poleLabel: pole.pole });
+            } catch (err) {
+                failedPoles.push(pole.pole);
+                console.error('[batch export]', pole.pole, err);
+            }
         }
 
         if (previousPoleKey) {
@@ -135,17 +214,49 @@ function AppContent() {
 
         setIsPdfMode(false);
         setIsExporting(false);
-        setFilamentState('success');
+
+        // Bilan explicite : un lot partiel ne doit jamais passer pour complet (ORG-004).
+        const total = poleDirectory.length;
+        const exported = total - failedPoles.length;
+
+        if (failedPoles.length === 0) {
+            feedback.success(
+                `Export par lots terminé : ${total} pôle${total > 1 ? 's' : ''} exporté${total > 1 ? 's' : ''}.`,
+            );
+            setFilamentState('success');
+        } else if (exported === 0) {
+            feedback.error(`Export par lots échoué : aucun des ${total} pôles n'a été exporté.`);
+            setFilamentState('error');
+        } else {
+            feedback.warning(
+                `Export par lots incomplet : ${exported}/${total} pôles exportés. Échecs : ${failedPoles.join(', ')}.`,
+            );
+            setFilamentState('warning');
+        }
+
         setTimeout(() => setFilamentState('idle'), 3000);
     };
 
     const handleExportCSV = async () => {
-        const { exportToCsv } = await import('./services/csvService');
-        if (activeView === 'orgchart' && selectedPole) {
-            exportToCsv(selectedPole.agents);
+        if (!canExport) {
+            feedback.info("Importez des fiches avant d'exporter.");
             return;
         }
-        exportToCsv(rawAgents);
+        // Contrairement à l'export PDF (bilan succès/échec complet), cet export
+        // partait sans try/catch : un `import()` dynamique en échec (perte
+        // réseau juste après le chargement) ou une erreur dans exportToCsv
+        // filaient en rejet non géré — aucun message, l'utilisateur croyait le
+        // fichier parti. Audit P2.
+        try {
+            const { exportToCsv } = await import('./services/csvService');
+            if (activeView === 'orgchart' && selectedPole) {
+                exportToCsv(selectedPole.agents);
+            } else {
+                exportToCsv(rawAgents);
+            }
+        } catch (err) {
+            feedback.error(`Export CSV impossible : ${messageErreurUtilisateur(err)}`);
+        }
     };
 
     return (
@@ -171,6 +282,7 @@ function AppContent() {
                         handleExportPDF={handleExportPDF}
                         loading={loading}
                         isExporting={isExporting}
+                        canExport={canExport}
                         spotlightInput={
                             <SpotlightSearch
                                 data={viewTree}
@@ -178,19 +290,49 @@ function AppContent() {
                                     focusAgentPole(id);
                                     setHighlightedSearch({ id, path: new Set(path) });
                                 }}
+                                // Le Spotlight de la vue Orchestration a son propre
+                                // raccourci ⌘K (HybridSpotlight) — la topbar reste
+                                // montée sur toutes les vues, donc sans ce garde les
+                                // deux panneaux s'ouvraient en même temps. Audit P2.
+                                disableShortcut={activeView === 'orchestration'}
                             />
                         }
                         handleImportFile={handleImportFile}
                     />
                 }
             >
-                {loading ? (
+                {/* L'orchestration dispose de sa propre source de nœuds (locale
+                    ou serveur). Elle doit rester consultable pendant le
+                    chargement indépendant des fiches RH. */}
+                {loading && activeView !== 'orchestration' && activeView !== 'projects' ? (
                     <OriginLoader />
-                ) : error ? (
+                ) : error && activeView !== 'settings' && activeView !== 'orchestration' && activeView !== 'projects' ? (
+                    /* L'écran d'erreur reste une impasse tant qu'il n'offre pas de sortie :
+                       on propose donc un nouvel essai et l'accès aux Paramètres, seule vue
+                       encore utile sans données (changement de source / import). (ORG-005) */
                     <div className="absolute inset-0 flex flex-col items-center justify-center z-50">
                         <div className="p-10 rounded-3xl bg-red-50 border border-red-100 flex flex-col items-center text-red-500 shadow-xl">
                             <AlertCircle className="w-16 h-16 mb-6" />
                             <p className="text-lg font-black tracking-tight">{error}</p>
+                            <p className="mt-3 max-w-sm text-center text-xs font-bold text-red-400">
+                                La source de données n'a pas pu être chargée.
+                            </p>
+                            <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+                                <button
+                                    onClick={() => void refresh()}
+                                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-red-500 text-white text-[10px] font-black uppercase tracking-widest hover:bg-red-600 transition-all shadow-lg shadow-red-200/50"
+                                >
+                                    <RefreshCw className="w-3.5 h-3.5" />
+                                    Réessayer
+                                </button>
+                                <button
+                                    onClick={() => setActiveView('settings')}
+                                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white text-red-500 text-[10px] font-black uppercase tracking-widest border border-red-200 hover:bg-red-50 transition-all"
+                                >
+                                    <Settings className="w-3.5 h-3.5" />
+                                    Changer de source
+                                </button>
+                            </div>
                         </div>
                     </div>
                 ) : (
@@ -198,6 +340,25 @@ function AppContent() {
                         id="exportable-org-chart"
                         className={`w-full h-full flex flex-col ${isPdfMode ? 'bg-slate-50 overflow-auto' : ''}`}
                     >
+                        {/* `agentsStale` était calculé mais jamais affiché : en mode
+                            connecté, une panne Supabase faisait retomber silencieusement
+                            sur le cache local, présenté comme s'il était à jour — même
+                            défaut que l'orchestration corrigeait déjà avec son propre
+                            bandeau (OrchestrationView). Audit P2. */}
+                        {isServerBacked && agentsStale && activeView !== 'projects' && (
+                            <div
+                                role="status"
+                                className="mx-4 mt-4 rounded-xl px-4 py-2.5 text-[13px] sm:mx-6 lg:mx-10"
+                                style={{
+                                    background: 'rgba(255,149,0,0.08)',
+                                    color: 'var(--system-orange, #b25e00)',
+                                    boxShadow: 'inset 0 0 0 1px rgba(255,149,0,0.3)',
+                                }}
+                            >
+                                Connexion au serveur impossible — organigramme affiché
+                                potentiellement obsolète (cache local).
+                            </div>
+                        )}
                         <Suspense fallback={<OriginLoader />}>
                         {activeView === 'dashboard' ? (
                             <DashboardView
@@ -209,6 +370,12 @@ function AppContent() {
                             />
                         ) : activeView === 'orchestration' ? (
                             <OrchestrationView rawAgents={rawAgents || []} />
+                        ) : activeView === 'bots' ? (
+                            <BotsView />
+                        ) : activeView === 'circuits' ? (
+                            <CircuitsView />
+                        ) : activeView === 'projects' && isProjectsEnabled() ? (
+                            <ProjectsView />
                         ) : activeView === 'members' ? (
                             <MembersView />
                         ) : activeView === 'api-keys' ? (
@@ -221,8 +388,8 @@ function AppContent() {
                                 handleResetData={handleResetData}
                                 sourceInfo={sourceInfo}
                                 handleImportFile={handleImportFile}
-                                clearImportedSource={clearImportedSource}
-                                isImportedSourceActive={isImportedSourceActive}
+                                sourceError={error}
+                                retrySource={() => void refresh()}
                             />
                         ) : (
                             <PoleOrgChartView
@@ -230,10 +397,12 @@ function AppContent() {
                                 orgChartRef={orgChartRef}
                                 isPdfMode={isPdfMode}
                                 isEditMode={isEditMode}
-                                onToggleEditMode={() => setIsEditMode(!isEditMode)}
+                                onToggleEditMode={
+                                    peutEditerAgents ? () => setIsEditMode(!isEditMode) : undefined
+                                }
                                 highlightedId={highlightedSearch.id}
                                 highlightedPath={highlightedSearch.path}
-                                onDeleteAgent={handleDeleteAgent}
+                                onDeleteAgent={peutSupprimerAgents ? handleDeleteAgent : undefined}
                                 onProfileClick={(agent) => setActiveModal({ type: 'profile', agent })}
                                 onContactClick={(agent) => setActiveModal({ type: 'contact', agent })}
                                 useHybridCard={useHybridCard}
@@ -297,7 +466,12 @@ function AppContent() {
                     agent={activeModal?.agent || null}
                     onClose={() => setActiveModal(null)}
                     onContact={(agent) => setActiveModal({ type: 'contact', agent })}
-                    onLocate={() => setActiveModal(null)}
+                    onLocate={(agent) => {
+                        // Bascule sur le pôle de l'agent, déplie la branche et le
+                        // met en évidence — puis referme la fiche (ORG-001).
+                        locateAgent(agent.id);
+                        setActiveModal(null);
+                    }}
                 />
             )}
             <ContactModal
@@ -306,6 +480,29 @@ function AppContent() {
                 agent={activeModal?.agent || null}
                 isEditMode={isEditMode}
                 onSave={handleUpdateAgent}
+            />
+
+            {/* Instance UNIQUE : handleImportFile est passé à la fois à la
+                Topbar et aux Paramètres ; deux montages donneraient deux
+                modales concurrentes. */}
+            <ImportPreviewModal
+                isOpen={importPreview !== null}
+                fileName={importPreview?.fileName ?? null}
+                preview={importPreview?.preview ?? null}
+                targetLabel={
+                    activeWorkspaceName
+                        ? `Workspace ${activeWorkspaceName}`
+                        : 'Session locale (hors ligne)'
+                }
+                canWrite={peutEditerAgents}
+                mode={importMode}
+                onModeChange={setImportMode}
+                allowInvalid={allowInvalidImport}
+                onAllowInvalidChange={setAllowInvalidImport}
+                isCommitting={isCommittingImport}
+                commitError={importCommitError}
+                onConfirm={() => void confirmImport()}
+                onCancel={cancelImport}
             />
 
             <Suspense fallback={null}>
@@ -330,13 +527,13 @@ function PostAuthGate({ children }: { children: React.ReactNode }) {
         return (
             <AcceptInvitation
                 token={pendingToken}
-                onAccepted={async () => {
+                onAccepted={async (workspaceId) => {
                     setPendingToken(null);
                     clearPendingInviteToken();
                     const updated = await refresh();
                     // Basculer automatiquement vers le premier workspace disponible
                     // (le workspace accepté sera en tête de liste après refresh)
-                    if (updated?.[0]?.id) setActive(updated[0].id);
+                    if (updated?.some((workspace) => workspace.id === workspaceId)) setActive(workspaceId);
                 }}
                 onSkip={() => {
                     setPendingToken(null);
@@ -350,6 +547,17 @@ function PostAuthGate({ children }: { children: React.ReactNode }) {
 
 function AuthGate({ children }: { children: React.ReactNode }) {
     const { session, loading } = useSession();
+    // Capture le token d'invitation le plus tôt possible — AVANT que
+    // l'utilisateur ne clique « Créer un compte » ou un lien magique.
+    // `readPendingInviteToken` le persiste en localStorage et nettoie l'URL ;
+    // sans cet appel précoce, un invité passant par un de ces deux parcours
+    // perdait son invitation : la redirection post-auth
+    // (`emailRedirectTo: window.location.origin`) revient SANS `?invite=`,
+    // et rien ne l'avait encore écrit en localStorage à ce moment-là.
+    // Idempotent et sans effet si l'URL ne porte pas `?invite=`. Audit P2.
+    useEffect(() => {
+        readPendingInviteToken();
+    }, []);
     // Mode offline / dev sans Supabase : on saute l'auth et le repo bascule en localStorage.
     if (!isSupabaseConfigured) return <>{children}</>;
     if (loading) return <OriginLoader />;
@@ -364,9 +572,13 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 function App() {
     return (
         <OriginProvider>
-            <AuthGate>
-                <AppContent />
-            </AuthGate>
+            {/* Au-dessus d'AuthGate : l'écran d'authentification doit lui aussi
+                pouvoir signaler ses échecs. */}
+            <FeedbackProvider>
+                <AuthGate>
+                    <AppContent />
+                </AuthGate>
+            </FeedbackProvider>
         </OriginProvider>
     );
 }

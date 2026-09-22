@@ -14,8 +14,7 @@
 //
 // Usage CI sans serveur :
 //   npx vitest run tests/rbac.test.ts   (→ tous skippés, suite verte)
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createServer, type Server } from 'node:http';
+import { describe, it, expect } from 'vitest';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -35,7 +34,8 @@ interface ProtectedRoute {
   method: string;
   path: string;
   /** Corps JSON minimal pour les méthodes POST/PUT */
-  body?: Record<string, unknown>;
+  /** Le endpoint MCP attend un lot JSON-RPC, d'où le tableau. */
+  body?: Record<string, unknown> | Record<string, unknown>[];
   /** Description lisible pour le rapport de test */
   label: string;
 }

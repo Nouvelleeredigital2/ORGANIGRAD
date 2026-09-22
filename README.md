@@ -5,6 +5,10 @@ où chaque nœud est un humain (garant/validation), un agent IA, ou un logiciel 
 Le flux avance d'un nœud à l'autre sous contrôle d'une machine à états, avec
 validation humaine (HITL), notifications, et audit.
 
+Le [module projets/tâches](docs/projets-pilote.md) est un ajout pilote local,
+désactivé par défaut : il ne remplace pas le graphe et n'est pas encore livré
+ni raccordé au panneau LINK.
+
 - **SPA** (`/`, `src/`) : React 19 + Vite + Tailwind, données via Supabase.
 - **Orchestrateur** (`orchestrator/`) : Node + Fastify + `postgres.js`, moteur d'exécution + MCP.
 - **Supabase** : Postgres (source de vérité persistante), Auth, Edge Functions, RLS.
@@ -66,7 +70,7 @@ npm run preview   # prévisualisation du build
 cd orchestrator
 npm run dev       # tsx watch (mode in-memory si SUPABASE_DB_URL absent)
 npm run build     # tsc
-npm start         # node dist/api/bootstrap.js
+npm start         # node dist/src/api/bootstrap.js (rootDir=".")
 ```
 
 Sans `SUPABASE_DB_URL`, l'orchestrateur tourne **in-memory** (dev/tests, sans auth).
@@ -161,6 +165,8 @@ Deux identités distinctes :
 | `node:run` | exécuter un nœud |
 | `human:approve` / `human:reject` / `node:reset` | validation **humaine** |
 | `workspace:admin` | administration |
+| `bots:read` / `bots:write` | consulter/éditer les fiches de bots |
+| `bots:export` | lire `/api/bots/bundle` (paquet de synchronisation Hermès) — jamais dans les scopes par défaut d'une clé, posé explicitement via `create_scoped_workspace_api_key` |
 
 > Une clé technique **ne reçoit jamais** les scopes humains (`human:*`, `node:reset`,
 > `workspace:admin`) : un agent ne peut donc pas contourner la validation humaine.
@@ -176,11 +182,12 @@ Deux identités distinctes :
 
 ## 13. Limites connues
 
-- **`xlsx`** : CVE (prototype pollution / ReDoS) sans correctif npm — atténué côté
-  app (limites d'import + import dynamique). À terme : épingler le build SheetJS CDN
-  ou remplacer la bibliothèque.
-- **Validation humaine via orchestrateur** : protégée par scopes ; la vérification
-  forte par **session utilisateur (JWT Supabase)** côté orchestrateur reste à câbler.
+- **`xlsx`** : la version corrigée est vendorisée localement ; les imports restent
+  bornés et chargés dynamiquement.
+- **Écritures concurrentes** : verrou optimiste sur `updated_at` ; une modification
+  périmée est refusée avec un conflit explicite au lieu d'être écrasée.
+- **Validation humaine via orchestrateur** : protégée par scopes et par vérification
+  de session utilisateur (**JWT Supabase**, HS256/JWKS ES256 selon la configuration).
 - Caches CSV legacy (`storageService`) globaux (organigramme RH mono-source).
 - Bundle : libs lourdes (recharts/xlsx/jspdf) chargées à la demande ; le grand
   organigramme peut encore bénéficier de virtualisation.

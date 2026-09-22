@@ -1,6 +1,6 @@
 import Papa from 'papaparse';
 import type { Agent } from '../types/agent';
-import { mapImportedRowToAgent } from '../utils/importMapping';
+import { mapImportedRowsToAgents } from '../utils/importMapping';
 import {
     IMPORT_LIMITS,
     assertFileSize,
@@ -25,7 +25,6 @@ const decodeCsvBuffer = (buffer: ArrayBuffer): string => {
 const isMeaningfulAgent = (agent: Agent): boolean =>
     Boolean(agent.pole || agent.service || agent.nom || agent.prenom || agent.fonction);
 
-const filterImportedAgents = (agents: Agent[]): Agent[] => agents.filter(isMeaningfulAgent);
 
 /** Parse CSV → tous les agents mappés (NON filtrés) pour permettre l'analyse. */
 const parseCsvRows = (buffer: ArrayBuffer): Promise<Agent[]> => {
@@ -40,7 +39,7 @@ const parseCsvRows = (buffer: ArrayBuffer): Promise<Agent[]> => {
                     const data = results.data;
                     assertDimensions(data.length, results.meta.fields?.length ?? 0);
                     assertCellLengths(data);
-                    resolve(data.map((row, index) => mapImportedRowToAgent(row, index)));
+                    resolve(mapImportedRowsToAgents(data));
                 } catch (err) {
                     reject(err);
                 }
@@ -88,7 +87,7 @@ const parseWorkbookRows = async (buffer: ArrayBuffer): Promise<Agent[]> => {
     const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' });
     assertDimensions(rows.length, 0);
     assertCellLengths(rows);
-    return rows.map((row, index) => mapImportedRowToAgent(row, index));
+    return mapImportedRowsToAgents(rows);
 };
 
 /** Parse un fichier → agents mappés non filtrés (CSV ou XLSX selon l'extension). */
@@ -101,6 +100,17 @@ const parseFileRows = async (file: File): Promise<Agent[]> => {
     throw new Error('Format de fichier non supporté (formats acceptés : .csv, .xlsx, .xls).');
 };
 
+const filterImportedAgents = (agents: Agent[]): Agent[] => agents.filter(isMeaningfulAgent);
+
+/**
+ * Import direct fichier → agents filtrés, sans prévisualisation.
+ *
+ * NON utilisé par l'UI (le flux réel passe par `previewImport`/`commitImport`,
+ * qui permet la confirmation en deux temps) mais couvert par ses propres
+ * tests (`importService.test.ts`) — ce n'est donc pas du code mort au sens
+ * strict, seulement un chemin non câblé à l'interface. Conservé tel quel :
+ * le retirer casserait sa couverture de test sans bénéfice réel.
+ */
 export const importAgentsFromFile = async (file: File): Promise<Agent[]> => {
     return filterImportedAgents(await parseFileRows(file));
 };

@@ -6,7 +6,9 @@ import { test, expect, type Page } from '@playwright/test';
  * sèment eux-mêmes via `localStorage` avant le `goto`.
  */
 
-const STORAGE_KEY = 'organigrad_hybrid_nodes_v1';
+// Clé namespacée par workspace (cf. hybridNodeStore.keyFor) : hors Supabase,
+// l'espace est `local`. Sans le suffixe, la fixture n'est jamais lue.
+const STORAGE_KEY = 'organigrad_hybrid_nodes_v1::local';
 
 const FIXTURE = [
     {

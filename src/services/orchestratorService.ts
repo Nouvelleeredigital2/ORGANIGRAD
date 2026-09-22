@@ -12,6 +12,9 @@
  */
 
 import type { HybridNode, NodeStatus, McpConfig, NotificationChannels } from '../types/hybridNode';
+import type { BotProfile } from '../types/botProfile';
+import { CircuitScheduleSchema, type CircuitDecision, type CircuitDefinition, type CircuitSchedule } from '@apps2026/contracts';
+import type { CircuitOptions, CircuitRun, StoredCircuit, ScheduleAuthorization, ScheduleOccurrence } from '../types/circuit';
 
 /**
  * Vue PUBLIQUE d'un nœud renvoyée par `GET /api/graph` (cf. DTO côté
@@ -22,6 +25,7 @@ import type { HybridNode, NodeStatus, McpConfig, NotificationChannels } from '..
  */
 export interface OrchestratorGraphNode {
     id: string;
+    updated_at?: string;
     type: HybridNode['type'];
     nom: string;
     roleTitre: string;
@@ -32,7 +36,66 @@ export interface OrchestratorGraphNode {
     status: NodeStatus;
     hasSystemPrompt: boolean;
     mcp: { configured: boolean; connectedTo: string[] };
-    notifications: { slack: boolean; email: boolean; whatsapp: boolean };
+    notifications: { slack: boolean; email: boolean };
+}
+
+/** Réponse de POST /api/integrations/link/import. */
+export interface LinkImportResult {
+    ok: true;
+    created: number;
+    updated: number;
+    skipped: number;
+    total: number;
+}
+
+/** Corps envoyé à POST /api/bots ou PUT /api/bots/:id — voir `validateBotMutation` côté orchestrateur. */
+export interface BotMutationPayload {
+    id: string;
+    updated_at?: string;
+    runtimeId: string;
+    fileName: string;
+    displayName: string;
+    avatarUrl?: string | null;
+    family: BotProfile['family'];
+    brand?: string | null;
+    network?: string | null;
+    telegramUsername?: string | null;
+    mission?: string;
+    personality?: string;
+    research?: string;
+    watch?: string;
+    deliverables?: string;
+    method?: string;
+    limits?: string;
+    usefulContext?: string;
+    sources?: BotProfile['sources'];
+    model?: BotProfile['model'];
+    enabled?: boolean;
+}
+
+/** Paquet de synchronisation Hermès — GET /api/bots/bundle. */
+export interface BotBundle {
+    files: Record<string, { agent: string; content: string; sha256: string }>;
+}
+
+export interface BotActivationCheck {
+    code: string;
+    label: string;
+    passed: boolean;
+}
+
+export interface BotActivationStatus {
+    botId?: string;
+    enabled: boolean;
+    ready: boolean;
+    checks: BotActivationCheck[];
+}
+
+export interface BotActivationResult {
+    status: 'activated' | 'draft';
+    botId: string;
+    actorId: string;
+    verification?: BotActivationStatus;
 }
 
 export interface SseStatusEvent {
@@ -47,6 +110,7 @@ export interface SseStatusEvent {
 /** Corps envoyé à POST /api/nodes ou PUT /api/nodes/:id. */
 export interface NodeMutationPayload {
     id: string;
+    updated_at?: string;
     type: HybridNode['type'];
     nom: string;
     roleTitre: string;
@@ -64,6 +128,23 @@ export interface UserAuth {
     token: string;
     /** Workspace courant (envoyé en en-tête X-Workspace-Id). */
     workspaceId: string;
+}
+
+/** Délai au-delà duquel un orchestrateur muet est traité comme injoignable. */
+export const SONDE_TIMEOUT_MS = 8_000;
+
+/**
+ * Signal d'abandon après `ms`. `AbortSignal.timeout` n'existe pas partout
+ * (jsdom ancien, environnements de test) : on retombe alors sur un
+ * `AbortController` + `setTimeout`, plutôt que de perdre le délai maximal.
+ */
+function delaiMaximal(ms: number): AbortSignal {
+    if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+        return AbortSignal.timeout(ms);
+    }
+    const controleur = new AbortController();
+    setTimeout(() => controleur.abort(), ms);
+    return controleur.signal;
 }
 
 export interface OrchestratorClientOptions {
@@ -99,6 +180,10 @@ export class OrchestratorClient {
         return this.apiKey ? { authorization: `Bearer ${this.apiKey}` } : {};
     }
 
+    private async connectionHeaders(): Promise<Record<string, string>> {
+        return this.apiKey ? this.authHeaders() : this.humanHeaders();
+    }
+
     /**
      * En-têtes pour une action HUMAINE : session utilisateur (JWT + workspace) si
      * disponible, sinon repli sur la clé API (qui, sans scope humain, sera refusée
@@ -112,21 +197,34 @@ export class OrchestratorClient {
         return this.authHeaders();
     }
 
-    async isReachable(): Promise<boolean> {
+    /**
+     * Sonde de disponibilité, BORNÉE DANS LE TEMPS.
+     *
+     * Sans délai maximal, un orchestrateur qui accepte la connexion TCP mais ne
+     * répond jamais (service figé, proxy qui retient la requête) laissait cette
+     * promesse en attente indéfiniment. L'interface restait alors bloquée sur
+     * son état d'avant-sonde, sans jamais pouvoir dire « indisponible » : un
+     * serveur muet est plus difficile à diagnostiquer qu'un serveur en erreur.
+     */
+    async isReachable(timeoutMs = SONDE_TIMEOUT_MS): Promise<boolean> {
         try {
             const res = await this.fetchImpl(`${this.baseUrl}/graph`, {
                 method: 'GET',
-                headers: { accept: 'application/json', ...this.authHeaders() },
+                headers: { accept: 'application/json', ...await this.connectionHeaders() },
+                redirect: 'error',
+                signal: delaiMaximal(timeoutMs),
             });
             return res.ok;
         } catch {
+            // Inclut l'expiration du délai : injoignable en pratique.
             return false;
         }
     }
 
     async fetchGraph(): Promise<OrchestratorGraphNode[]> {
         const res = await this.fetchImpl(`${this.baseUrl}/graph`, {
-            headers: this.authHeaders(),
+            headers: await this.connectionHeaders(),
+            redirect: 'error',
         });
         if (!res.ok) throw new Error(`GET /graph → ${res.status}`);
         const body = (await res.json()) as { nodes: OrchestratorGraphNode[] };
@@ -167,6 +265,9 @@ export class OrchestratorClient {
         });
         if (!res.ok) {
             const detail = await res.json().catch(() => ({}));
+            if (res.status === 409 && (detail as { error?: unknown }).error === 'CONCURRENT_WRITE') {
+                throw new OrchestratorConflictError(node.id, node.updated_at, detail);
+            }
             throw new OrchestratorClientError(`HTTP_${res.status}`, res.status, detail);
         }
         const body = (await res.json()) as { node: OrchestratorGraphNode };
@@ -185,24 +286,180 @@ export class OrchestratorClient {
     }
 
     /**
-     * Récupère la configuration complète d'un nœud avec secrets déchiffrés
-     * (pour l'édition seulement). Exige graph:write.
+     * Importe les bots Hermes/LINK comme des nœuds AGENT_IA (référence par id
+     * LINK, pas de copie de prompt — B3). Action humaine réservée admin :
+     * exige workspace:admin, qu'une clé API n'a jamais (cf. scopes serveur).
      */
-    async getNodeConfig(id: string): Promise<HybridNode | null> {
+    async importLinkAgents(): Promise<LinkImportResult> {
         const headers = await this.humanHeaders();
-        const res = await this.fetchImpl(`${this.baseUrl}/nodes/${id}`, {
-            headers: { ...headers },
+        const res = await this.fetchImpl(`${this.baseUrl}/integrations/link/import`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', ...headers },
+            // Fastify refuse un content-type JSON sans corps (FST_ERR_CTP_EMPTY_JSON_BODY).
+            body: '{}',
         });
-        if (res.status === 404) return null;
+        if (!res.ok) {
+            const detail = await res.json().catch(() => ({}));
+            throw new OrchestratorClientError(`HTTP_${res.status}`, res.status, detail);
+        }
+        return (await res.json()) as LinkImportResult;
+    }
+
+    // ── Bots conversationnels (personas Hermès) ──────────────────────────
+    // Édition traitée comme une action humaine (session vérifiée), au même
+    // titre que l'édition d'un nœud — cf. upsertNode ci-dessus.
+
+    async fetchBots(): Promise<BotProfile[]> {
+        const headers = await this.humanHeaders();
+        const res = await this.fetchImpl(`${this.baseUrl}/bots`, { headers });
+        if (!res.ok) {
+            const detail = await res.json().catch(() => ({}));
+            throw new OrchestratorClientError(`HTTP_${res.status}`, res.status, detail);
+        }
+        const body = (await res.json()) as { bots: BotProfile[] };
+        return body.bots;
+    }
+
+    async fetchBotActivation(id: string): Promise<BotActivationStatus> {
+        const headers = await this.humanHeaders();
+        const res = await this.fetchImpl(`${this.baseUrl}/bots/${encodeURIComponent(id)}/activation`, { headers });
+        if (!res.ok) throw new OrchestratorClientError(`HTTP_${res.status}`, res.status, await res.json().catch(() => ({})));
+        return ((await res.json()) as { activation: BotActivationStatus }).activation;
+    }
+
+    async activateBot(id: string): Promise<BotActivationResult> {
+        const headers = await this.humanHeaders();
+        const res = await this.fetchImpl(`${this.baseUrl}/bots/${encodeURIComponent(id)}/activation`, {
+            method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: '{}',
+        });
+        if (!res.ok) throw new OrchestratorClientError(`HTTP_${res.status}`, res.status, await res.json().catch(() => ({})));
+        return ((await res.json()) as { activation: BotActivationResult }).activation;
+    }
+
+    async deactivateBot(id: string, reason: string): Promise<BotActivationResult> {
+        const headers = await this.humanHeaders();
+        const res = await this.fetchImpl(`${this.baseUrl}/bots/${encodeURIComponent(id)}/activation`, {
+            method: 'DELETE', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify({ reason }),
+        });
+        if (!res.ok) throw new OrchestratorClientError(`HTTP_${res.status}`, res.status, await res.json().catch(() => ({})));
+        return ((await res.json()) as { activation: BotActivationResult }).activation;
+    }
+
+    private async circuitRequest<T>(path: string, body?: unknown, method='GET'): Promise<T> {
+        const headers=await this.humanHeaders();
+        const res=await this.fetchImpl(`${this.baseUrl}${path}`,{method,headers:{...headers,'Content-Type':'application/json'},cache:'no-store',redirect:'error',signal:delaiMaximal(10000),...(body===undefined?{}:{body:JSON.stringify(body)})});
+        if(!res.ok)throw new OrchestratorClientError(`HTTP_${res.status}`,res.status,await res.json().catch(()=>({})));
+        if(res.status===204)return undefined as T;
+        return res.json() as Promise<T>;
+    }
+    async fetchCircuits():Promise<StoredCircuit[]> {
+        return (await this.circuitRequest<{circuits:StoredCircuit[]}>('/circuits')).circuits;
+    }
+    async fetchCircuitSchedule(id:string):Promise<ScheduleAuthorization|null> {
+        return (await this.circuitRequest<{authorization:ScheduleAuthorization|null}>(`/circuits/${encodeURIComponent(id)}/schedule-authorization`)).authorization;
+    }
+    async fetchCircuitOccurrences(id:string):Promise<ScheduleOccurrence[]> {
+        return (await this.circuitRequest<{occurrences:ScheduleOccurrence[]}>(`/circuits/${encodeURIComponent(id)}/occurrences`)).occurrences;
+    }
+    async recoverCircuitOccurrence(id:string,occurrenceId:string):Promise<CircuitRun> {
+        return (await this.circuitRequest<{run:CircuitRun}>(`/circuits/${encodeURIComponent(id)}/occurrences/${encodeURIComponent(occurrenceId)}/recover`,{},'POST')).run;
+    }
+    async authorizeCircuitSchedule(id:string,input:{idempotencyKey:string;expectedVersion:number;expiresAt:string}):Promise<ScheduleAuthorization> {
+        return (await this.circuitRequest<{authorization:ScheduleAuthorization}>(`/circuits/${encodeURIComponent(id)}/schedule-authorization`,input,'POST')).authorization;
+    }
+    async revokeCircuitSchedule(id:string,grantId:string):Promise<void> {
+        await this.circuitRequest(`/circuits/${encodeURIComponent(id)}/schedule-authorization/${encodeURIComponent(grantId)}`,undefined,'DELETE');
+    }
+    async fetchCircuitOptions():Promise<CircuitOptions> { return this.circuitRequest('/circuits/options'); }
+    async previewCircuitSchedule(schedule:CircuitSchedule):Promise<string[]> {
+        const result=await this.circuitRequest<{occurrences:unknown}>('/circuits/preview-schedule',CircuitScheduleSchema.parse(schedule),'POST');
+        if(!Array.isArray(result.occurrences)||!result.occurrences.length||result.occurrences.length>10||result.occurrences.some(value=>typeof value!=='string'||!/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(value)||!Number.isFinite(Date.parse(value))))throw new Error('SCHEDULE_PREVIEW_INVALID');
+        return result.occurrences;
+    }
+    async fetchCircuitRuns():Promise<CircuitRun[]> { return (await this.circuitRequest<{runs:CircuitRun[]}>('/circuit-runs')).runs; }
+    async startCircuitRun(circuitId:string,idempotencyKey:string):Promise<CircuitRun> {
+        return (await this.circuitRequest<{run:CircuitRun}>(`/circuits/${encodeURIComponent(circuitId)}/runs`,{idempotencyKey},'POST')).run;
+    }
+    async decideCircuitRun(id:string,decision:CircuitDecision):Promise<CircuitRun> {
+        return (await this.circuitRequest<{run:CircuitRun}>(`/circuit-runs/${encodeURIComponent(id)}/decisions`,decision,'POST')).run;
+    }
+    async controlCircuitRun(id:string,input:{action:'pause'|'resume'|'cancel';expectedVersion:number;idempotencyKey:string}):Promise<CircuitRun> {
+        return (await this.circuitRequest<{run:CircuitRun}>(`/circuit-runs/${encodeURIComponent(id)}/control`,input,'POST')).run;
+    }
+    async saveCircuit(definition:CircuitDefinition,existing?:StoredCircuit):Promise<StoredCircuit> {
+        return (await this.circuitRequest<{circuit:StoredCircuit}>(existing?`/circuits/${encodeURIComponent(existing.id)}`:'/circuits',{definition,...(existing?{expectedVersion:existing.version}:{})},existing?'PUT':'POST')).circuit;
+    }
+
+    async upsertBot(bot: BotMutationPayload): Promise<BotProfile> {
+        const headers = await this.humanHeaders();
+        const isCreate = !bot.updated_at;
+        const method = isCreate ? 'POST' : 'PUT';
+        const url = isCreate ? `${this.baseUrl}/bots` : `${this.baseUrl}/bots/${bot.id}`;
+        const res = await this.fetchImpl(url, {
+            method,
+            headers: { 'content-type': 'application/json', ...headers },
+            body: JSON.stringify(bot),
+        });
+        if (!res.ok) {
+            const detail = await res.json().catch(() => ({}));
+            if (res.status === 409 && (detail as { error?: unknown }).error === 'CONCURRENT_WRITE') {
+                throw new OrchestratorConflictError(bot.id, bot.updated_at, detail);
+            }
+            throw new OrchestratorClientError(`HTTP_${res.status}`, res.status, detail);
+        }
+        const body = (await res.json()) as { bot: BotProfile };
+        return body.bot;
+    }
+
+    async removeBot(id: string): Promise<void> {
+        const headers = await this.humanHeaders();
+        const res = await this.fetchImpl(`${this.baseUrl}/bots/${id}`, { method: 'DELETE', headers });
+        if (res.status === 404) return; // déjà absent — idempotent
         if (!res.ok) throw new OrchestratorClientError(`HTTP_${res.status}`, res.status);
-        const body = (await res.json()) as { node: HybridNode };
+    }
+
+    /** Crée/actualise le nœud AGENT_IA jumeau du bot, pour le voir dans la vue Orchestration. */
+    async linkBotNode(id: string): Promise<OrchestratorGraphNode> {
+        const headers = await this.humanHeaders();
+        const res = await this.fetchImpl(`${this.baseUrl}/bots/${id}/link-node`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', ...headers },
+            body: '{}',
+        });
+        if (!res.ok) {
+            const detail = await res.json().catch(() => ({}));
+            throw new OrchestratorClientError(`HTTP_${res.status}`, res.status, detail);
+        }
+        const body = (await res.json()) as { node: OrchestratorGraphNode };
         return body.node;
     }
 
+    /** Paquet de synchronisation Hermès (prompts compilés + empreintes) — scope bots:export. */
+    async fetchBotBundle(): Promise<BotBundle> {
+        const headers = await this.humanHeaders();
+        const res = await this.fetchImpl(`${this.baseUrl}/bots/bundle`, { headers });
+        if (!res.ok) {
+            const detail = await res.json().catch(() => ({}));
+            throw new OrchestratorClientError(`HTTP_${res.status}`, res.status, detail);
+        }
+        return (await res.json()) as BotBundle;
+    }
+
+    /**
+     * `res.status !== 404` traitait TOUTE réponse non-404 comme « existe » —
+     * y compris un 401/403/500, poussant `upsertNode` à choisir PUT pour un
+     * nœud dont l'existence réelle est inconnue. On ne conclut désormais
+     * « existe » / « n'existe pas » que sur une réponse sans ambiguïté ;
+     * tout le reste échoue explicitement, comme le ferait la requête
+     * PUT/POST suivante de toute façon. Audit P3.
+     */
     private async nodeExists(id: string): Promise<boolean> {
         const headers = await this.humanHeaders();
         const res = await this.fetchImpl(`${this.baseUrl}/nodes/${id}`, { headers });
-        return res.status !== 404;
+        if (res.status === 404) return false;
+        if (res.ok) return true;
+        const detail = await res.json().catch(() => ({}));
+        throw new OrchestratorClientError(`HTTP_${res.status}`, res.status, detail);
     }
 
     private async postAction(
@@ -214,7 +471,7 @@ export class OrchestratorClient {
         // actions humaines (session utilisateur vérifiée requise par l'orchestrateur).
         const headers =
             action === 'run' || action === 'run-flow'
-                ? this.authHeaders()
+                ? await this.connectionHeaders()
                 : await this.humanHeaders();
         const res = await this.fetchImpl(`${this.baseUrl}/nodes/${id}/${action}`, {
             method: 'POST',
@@ -236,7 +493,7 @@ export class OrchestratorClient {
     private async fetchSseTicket(): Promise<string> {
         const res = await this.fetchImpl(`${this.baseUrl}/events/ticket`, {
             method: 'POST',
-            headers: { 'content-type': 'application/json', ...this.authHeaders() },
+            headers: { 'content-type': 'application/json', ...await this.connectionHeaders() },
             body: '{}',
         });
         if (!res.ok) throw new OrchestratorClientError(`TICKET_${res.status}`, res.status);
@@ -250,7 +507,17 @@ export class OrchestratorClient {
      * réutiliserait un ticket déjà consommé) : on gère nous-mêmes la reconnexion
      * en redemandant un ticket frais. Renvoie une fonction de cleanup.
      */
-    subscribe(onEvent: (evt: SseStatusEvent) => void, onError?: (err: Event) => void): () => void {
+    subscribe(
+        onEvent: (evt: SseStatusEvent) => void,
+        onError?: (err: Event) => void,
+        /**
+         * Appelé à CHAQUE ouverture du flux, y compris après une reconnexion.
+         * Sans ce rappel, une interruption laissait l'interface en « dégradé »
+         * définitivement : `onError` faisait basculer l'état, et rien ne le
+         * ramenait jamais — même une fois le flux rétabli.
+         */
+        onOpen?: () => void,
+    ): () => void {
         if (!this.eventSourceImpl) {
             // Environnement sans EventSource (Node sans polyfill) → no-op
             return () => {};
@@ -277,6 +544,9 @@ export class OrchestratorClient {
                     `${this.baseUrl}/events?ticket=${encodeURIComponent(ticket)}`,
                 );
                 es.addEventListener('NODE_STATUS_CHANGED', handler as EventListener);
+                es.addEventListener('open', () => {
+                    if (!closed) onOpen?.();
+                });
                 es.addEventListener('error', (ev) => {
                     onError?.(ev);
                     // Connexion perdue → on ferme et on reconnecte avec un ticket frais.
@@ -321,5 +591,17 @@ export class OrchestratorClientError extends Error {
         this.code = code;
         this.status = status;
         this.detail = detail;
+    }
+}
+
+export class OrchestratorConflictError extends OrchestratorClientError {
+    readonly nodeId: string;
+    readonly expectedUpdatedAt?: string;
+
+    constructor(nodeId: string, expectedUpdatedAt: string | undefined, detail?: unknown) {
+        super('CONCURRENT_WRITE', 409, detail);
+        this.name = 'OrchestratorConflictError';
+        this.nodeId = nodeId;
+        this.expectedUpdatedAt = expectedUpdatedAt;
     }
 }

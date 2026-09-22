@@ -6,6 +6,11 @@ import { useWorkspaceContext } from '../../contexts/WorkspaceContext';
 import { Button, FormField, Input, Select, Surface } from '../../design/ui';
 import { cx } from '../../design/cx';
 import type { WorkspaceRole } from '../../types/supabase';
+import { usePermissions } from '../../auth/usePermissions';
+import { useFeedback } from '../../feedback/FeedbackContext';
+import { useCopyToClipboard } from '../../hooks/useCopyToClipboard';
+import { canAdminManageMember } from './adminGuards';
+import { describeWorkspaceRpcError } from '../../utils/describeAuthError';
 
 /**
  * MembersView — gestion des membres et invitations d'un workspace.
@@ -39,23 +44,41 @@ const ROLES: WorkspaceRole[] = ['admin', 'member', 'viewer'];
 
 export function MembersView() {
     const { session } = useSession();
-    const { activeId, activeWorkspace } = useWorkspaceContext();
+    const workspaceCtx = useWorkspaceContext();
+    const { activeId, activeWorkspace } = workspaceCtx;
     const userId = session?.user.id ?? null;
-    const role = activeWorkspace?.role ?? 'viewer';
-    const isAdmin = role === 'owner' || role === 'admin';
+    const { role, isAdmin } = usePermissions();
+    const feedback = useFeedback();
+    const { copy } = useCopyToClipboard();
 
     const [members, setMembers] = useState<MemberRow[]>([]);
     const [invitations, setInvitations] = useState<InvitationRow[]>([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    /** Raison pour laquelle la vue ne peut rien afficher (ce n'est pas une erreur). */
+    const [unavailable, setUnavailable] = useState<string | null>(null);
 
     const [inviteEmail, setInviteEmail] = useState('');
     const [inviteRole, setInviteRole] = useState<WorkspaceRole>('member');
     const [creating, setCreating] = useState(false);
     const [revealed, setRevealed] = useState<{ url: string; email: string } | null>(null);
+    /** `user_id` du membre dont le rôle est en cours de modification — anti
+     * double-clic et retour visuel pendant l'appel. Audit P2/P3. */
+    const [changingRoleFor, setChangingRoleFor] = useState<string | null>(null);
 
     const refresh = useCallback(async () => {
-        if (!supabase || !activeId) return;
+        // Sortie muette auparavant : la vue affichait « Aucun membre » alors
+        // qu'aucune requête n'avait été tentée, sans aucune explication.
+        if (!supabase) {
+            setUnavailable("Supabase n'est pas configuré : la gestion des membres est indisponible.");
+            return;
+        }
+        if (!activeId) {
+            setUnavailable('Aucun workspace actif — sélectionne-en un pour voir ses membres.');
+            return;
+        }
+        setUnavailable(null);
+        setError(null);
         setLoading(true);
         const [m, i] = await Promise.all([
             supabase
@@ -72,8 +95,9 @@ export function MembersView() {
                 .gt('expires_at', new Date().toISOString())
                 .order('created_at', { ascending: false }),
         ]);
-        if (m.error) setError(m.error.message);
-        if (i.error) setError(i.error.message);
+        // Les deux erreurs sont agrégées : la seconde écrasait la première.
+        const erreurs = [m.error?.message, i.error?.message].filter(Boolean);
+        setError(erreurs.length ? erreurs.join(' · ') : null);
         const filteredMembers: MemberRow[] = ((m.data ?? []) as Array<{
             user_id: string | null;
             email: string | null;
@@ -126,12 +150,23 @@ export function MembersView() {
         });
         setCreating(false);
         if (err) {
-            setError(err.message);
+            // Audit — amélioration #7 : messages RPC bruts (ex.
+            // « invitation_already_pending ») incompréhensibles pour un
+            // administrateur non technique.
+            setError(describeWorkspaceRpcError(err.message));
             return;
         }
         const row = Array.isArray(data) ? data[0] : data;
         if (row?.token) {
             setRevealed({ url: buildInviteUrl(row.token), email: inviteEmail.trim() });
+            feedback.success(`Invitation créée pour ${inviteEmail.trim()}.`);
+        } else {
+            // La RPC a répondu sans erreur mais sans jeton : l'invitation peut
+            // exister en base sans qu'on puisse en donner le lien. Le silence
+            // laissait croire qu'il ne s'était rien passé.
+            feedback.error(
+                "Invitation créée mais le lien n'a pas été renvoyé — révoque-la et recommence.",
+            );
         }
         setInviteEmail('');
         setInviteRole('member');
@@ -141,34 +176,92 @@ export function MembersView() {
     const handleRevoke = async (id: string) => {
         if (!supabase) return;
         if (!confirm('Révoquer cette invitation ?')) return;
+        setError(null);
         const { error: err } = await supabase
             .from('workspace_invitations')
             .update({ revoked_at: new Date().toISOString() })
             .eq('id', id);
-        if (err) setError(err.message);
+        if (err) {
+            const msg = describeWorkspaceRpcError(err.message);
+            setError(msg);
+            feedback.error(`Révocation échouée : ${msg}`);
+        } else {
+            feedback.success('Invitation révoquée.');
+        }
         await refresh();
     };
 
     const handleChangeRole = async (memberId: string, next: WorkspaceRole) => {
-        if (!supabase || !activeId) return;
-        const { error: err } = await supabase
-            .from('workspace_members')
-            .update({ role: next })
-            .eq('workspace_id', activeId)
-            .eq('user_id', memberId);
-        if (err) setError(err.message);
-        await refresh();
+        if (!supabase || !activeId || changingRoleFor) return; // anti double-clic — audit P2
+        const cible = members.find((m) => m.user_id === memberId);
+        const nom = cible?.email ?? 'ce membre';
+        // Un changement de rôle est une action de permission, pas un simple
+        // champ de formulaire : elle s'appliquait jusqu'ici instantanément au
+        // `onChange`, sans confirmation ni retour visuel pendant l'appel.
+        // Audit P2.
+        if (!confirm(`Changer le rôle de ${nom} en « ${next} » ?`)) return;
+
+        setChangingRoleFor(memberId);
+        setError(null);
+        try {
+            const { error: err } = await supabase
+                .from('workspace_members')
+                .update({ role: next })
+                .eq('workspace_id', activeId)
+                .eq('user_id', memberId);
+            if (err) {
+                const msg = describeWorkspaceRpcError(err.message);
+                setError(msg);
+                feedback.error(`Rôle non modifié : ${msg}`);
+            } else {
+                feedback.success(`Rôle mis à jour : ${next}.`);
+            }
+            await refresh();
+        } finally {
+            setChangingRoleFor(null);
+        }
     };
 
-    const handleRemove = async (memberId: string) => {
+    /**
+     * Retire un membre. `self` distingue « je quitte » de « je retire
+     * quelqu'un » : même texte pour les deux était trompeur, et après un
+     * départ réussi l'utilisateur restait sur un workspace dont il n'était
+     * plus membre, l'écran se vidant sans explication.
+     */
+    const handleRemove = async (memberId: string, { self }: { self: boolean }) => {
         if (!supabase || !activeId) return;
-        if (!confirm('Retirer ce membre du workspace ?')) return;
+        const question = self
+            ? 'Quitter ce workspace ? Tu perdras l\'accès à ses données.'
+            : 'Retirer ce membre du workspace ?';
+        if (!confirm(question)) return;
+
+        setError(null);
         const { error: err } = await supabase
             .from('workspace_members')
             .delete()
             .eq('workspace_id', activeId)
             .eq('user_id', memberId);
-        if (err) setError(err.message);
+
+        if (err) {
+            const msg = describeWorkspaceRpcError(err.message);
+            setError(msg);
+            feedback.error(self ? `Départ impossible : ${msg}` : `Retrait impossible : ${msg}`);
+            return;
+        }
+
+        if (self) {
+            feedback.success('Tu as quitté le workspace.');
+            const restants = await workspaceCtx.refresh();
+            const suivant = restants?.[0]?.id;
+            if (suivant) {
+                workspaceCtx.setActive(suivant);
+            } else {
+                setUnavailable("Tu n'appartiens plus à aucun workspace.");
+            }
+            return;
+        }
+
+        feedback.success('Membre retiré.');
         await refresh();
     };
 
@@ -179,10 +272,19 @@ export function MembersView() {
                     <p className="eyebrow">Workspace · {activeWorkspace?.name}</p>
                     <h1 className="t-h1 mt-2">Membres.</h1>
                     <p className="t-body mt-2 max-w-2xl">
-                        Invite des collaborateurs, attribue-leur un rôle, ou retire l'accès. Les
-                        invitations expirent automatiquement après 14 jours.
+                        {isAdmin
+                            ? "Invite des collaborateurs, attribue-leur un rôle, ou retire l'accès. Les invitations expirent automatiquement après 14 jours."
+                            : `Consultation des membres du workspace. Ton rôle (${role ?? 'inconnu'}) ne permet pas d'inviter ni de modifier les accès.`}
                     </p>
                 </header>
+
+                {unavailable && (
+                    <Surface className="p-5">
+                        <p className="text-[13px]" style={{ color: 'var(--fg-2)' }}>
+                            {unavailable}
+                        </p>
+                    </Surface>
+                )}
 
                 {revealed && (
                     <Surface
@@ -207,7 +309,7 @@ export function MembersView() {
                             </code>
                             <button
                                 type="button"
-                                onClick={() => void navigator.clipboard.writeText(revealed.url)}
+                                onClick={() => void copy(revealed.url, "Lien d'invitation")}
                                 className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-medium text-white"
                                 style={{ background: 'var(--accent)' }}
                             >
@@ -298,7 +400,7 @@ export function MembersView() {
                             {members.map((m) => {
                                 const isSelf = m.user_id === userId;
                                 const isOwner = m.user_id === ownerId;
-                                const canModify = isAdmin && !isOwner;
+                                const canModify = canAdminManageMember({ isAdmin, isOwner, isSelf });
                                 return (
                                     <li
                                         key={m.user_id}
@@ -339,6 +441,7 @@ export function MembersView() {
                                         {canModify ? (
                                             <Select
                                                 value={m.role}
+                                                disabled={changingRoleFor === m.user_id}
                                                 onChange={(e) =>
                                                     void handleChangeRole(
                                                         m.user_id,
@@ -372,7 +475,7 @@ export function MembersView() {
                                         {canModify && (
                                             <button
                                                 type="button"
-                                                onClick={() => void handleRemove(m.user_id)}
+                                                onClick={() => void handleRemove(m.user_id, { self: false })}
                                                 className="inline-flex h-8 w-8 items-center justify-center rounded-full"
                                                 style={{
                                                     color: 'var(--system-red)',
@@ -388,7 +491,7 @@ export function MembersView() {
                                                 tone="slate"
                                                 variant="soft"
                                                 size="sm"
-                                                onClick={() => void handleRemove(m.user_id)}
+                                                onClick={() => void handleRemove(m.user_id, { self: true })}
                                             >
                                                 Quitter
                                             </Button>
@@ -412,7 +515,11 @@ export function MembersView() {
                             Invitations en attente · {invitations.length}
                         </p>
                     </div>
-                    {invitations.length === 0 ? (
+                    {loading && invitations.length === 0 ? (
+                        <div className="p-8 text-center text-[13px]" style={{ color: 'var(--fg-3)' }}>
+                            Chargement des invitations…
+                        </div>
+                    ) : invitations.length === 0 ? (
                         <div className="p-8 text-center text-[13px]" style={{ color: 'var(--fg-3)' }}>
                             Aucune invitation en attente.
                         </div>
@@ -450,8 +557,10 @@ export function MembersView() {
                                             <button
                                                 type="button"
                                                 onClick={() =>
-                                                    void navigator.clipboard.writeText(
+                                                    void copy(
                                                         buildInviteUrl(inv.token),
+                                                        "Lien d'invitation",
+                                                        inv.id,
                                                     )
                                                 }
                                                 className="inline-flex h-8 items-center gap-1 rounded-full px-3 text-[11px] font-medium"

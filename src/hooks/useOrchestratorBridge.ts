@@ -5,6 +5,7 @@ import {
     type SseStatusEvent,
     type OrchestratorGraphNode,
     type UserAuth,
+    type LinkImportResult,
 } from '../services/orchestratorService';
 import { useOrchestratorConfig } from './useOrchestratorConfig';
 import { useWorkspaceContext } from '../contexts/WorkspaceContext';
@@ -23,6 +24,19 @@ import { supabase } from '../lib/supabase';
  */
 export interface OrchestratorBridge {
     connected: boolean;
+    /**
+     * `local`      — aucun orchestrateur configuré, transitions simulées ;
+     * `connecting` — orchestrateur configuré, sonde en cours ;
+     * `connected`  — snapshot obtenu et flux ouvert ;
+     * `degraded`   — flux SSE interrompu, données possiblement obsolètes ;
+     * `failed`     — injoignable ou en erreur.
+     *
+     * `connecting` manquait : pendant la sonde, l'interface annonçait « Mode
+     * local · transitions simulées » alors qu'un orchestrateur ÉTAIT configuré
+     * et en cours de contact. Le chargement doit se distinguer de l'absence de
+     * configuration, sinon un serveur lent se lit comme un serveur absent.
+     */
+    connectionState: 'local' | 'connecting' | 'connected' | 'degraded' | 'failed';
     nodes: OrchestratorGraphNode[];
     /** Client actif — exposé pour que le repo puisse router les écritures via l'orchestrateur. */
     client: OrchestratorClient | null;
@@ -31,6 +45,8 @@ export interface OrchestratorBridge {
     approve: (id: string) => Promise<void>;
     reject: (id: string, feedback: string) => Promise<void>;
     reset: (id: string) => Promise<void>;
+    /** Importe les bots Hermes/LINK comme des nœuds AGENT_IA (admin uniquement). */
+    importLinkAgents: () => Promise<LinkImportResult>;
 }
 
 export interface UseOrchestratorBridgeOptions {
@@ -46,15 +62,26 @@ export function useOrchestratorBridge(
     opts: UseOrchestratorBridgeOptions = {},
 ): OrchestratorBridge {
     const [connected, setConnected] = useState(false);
+    const [connectionState, setConnectionState] = useState<OrchestratorBridge['connectionState']>('local');
     const [nodes, setNodes] = useState<OrchestratorGraphNode[]>([]);
     const [activeClient, setActiveClient] = useState<OrchestratorClient | null>(null);
     const clientRef = useRef<OrchestratorClient | null>(null);
 
     // Configuration persistée (Paramètres). Les options explicites priment.
-    const { config, isConfigured } = useOrchestratorConfig();
-    const { activeId } = useWorkspaceContext();
-    const baseUrl = opts.baseUrl ?? config.baseUrl;
-    const apiKey = opts.apiKey ?? config.apiKey;
+    const { config } = useOrchestratorConfig();
+    const { activeId, userId } = useWorkspaceContext();
+    const deployedUrl = import.meta.env.VITE_ORCHESTRATOR_URL;
+    const deployed = opts.baseUrl === undefined && typeof deployedUrl === 'string' && deployedUrl.length > 0;
+    let deployedBase = '';
+    if (deployed) {
+        try {
+            const url = new URL(deployedUrl);
+            if (url.protocol === 'https:' && !url.username && !url.password && !url.search && !url.hash &&
+                ['/', '/api', '/api/'].includes(url.pathname)) deployedBase = `${url.origin}/api`;
+        } catch { /* Invalid deployment configuration must never fall back to browser settings. */ }
+    }
+    const baseUrl = deployed ? deployedBase : opts.baseUrl ?? config.baseUrl;
+    const apiKey = deployed ? '' : opts.apiKey ?? config.apiKey;
     const { clientFactory, enabled } = opts;
 
     // Session utilisateur (JWT) pour les actions humaines — l'orchestrateur exige
@@ -62,15 +89,16 @@ export function useOrchestratorBridge(
     const getUserAuth = useCallback(async (): Promise<UserAuth | null> => {
         if (!supabase || !activeId) return null;
         const { data } = await supabase.auth.getSession();
+        if (userId && data.session?.user.id !== userId) return null;
         const token = data.session?.access_token;
         return token ? { token, workspaceId: activeId } : null;
-    }, [activeId]);
+    }, [activeId, userId]);
 
     useEffect(() => {
         const disabled =
             enabled === false ||
             // Sans config ni clientFactory de test → pas de tentative
-            (!clientFactory && !(baseUrl && (apiKey || !isConfigured)));
+            (!clientFactory && !baseUrl);
 
         let cancelled = false;
         let unsubscribe = () => {};
@@ -78,20 +106,30 @@ export function useOrchestratorBridge(
         // Tous les setState se font dans ce callback async (jamais de setState
         // synchrone dans le corps de l'effet).
         (async () => {
-            if (disabled) {
-                setConnected(false);
+            setConnected(false);
+            setActiveClient(null);
+            setNodes([]);
+            clientRef.current = null;
+            if (deployed && !deployedBase) {
+                setConnected(false); setActiveClient(null); setNodes([]); setConnectionState('failed');
                 return;
             }
+            if (disabled) {
+                setConnected(false);
+                setConnectionState('local');
+                return;
+            }
+            setConnectionState('connecting');
             const client = clientFactory
                 ? clientFactory()
                 : new OrchestratorClient({ baseUrl, apiKey, getUserAuth });
-            clientRef.current = client;
 
             const reachable = await client.isReachable();
             if (cancelled) return;
             if (!reachable) {
                 setConnected(false);
                 setActiveClient(null);
+                setConnectionState('failed');
                 return;
             }
             try {
@@ -99,25 +137,39 @@ export function useOrchestratorBridge(
                 if (cancelled) return;
                 setNodes(snapshot);
                 setConnected(true);
+                setConnectionState('connected');
                 setActiveClient(client);
-                unsubscribe = client.subscribe((evt: SseStatusEvent) => {
-                    setNodes((prev) => applyTransitionPatch(prev, evt));
-                });
+                clientRef.current = client;
+                unsubscribe = client.subscribe(
+                    (evt: SseStatusEvent) => {
+                        setNodes((prev) => applyTransitionPatch(prev, evt));
+                    },
+                    () => {
+                        if (!cancelled) setConnectionState('degraded');
+                    },
+                    // Reconnexion réussie : on ne reste pas « dégradé » à vie.
+                    () => {
+                        if (!cancelled) setConnectionState('connected');
+                    },
+                );
             } catch {
                 setConnected(false);
                 setActiveClient(null);
+                setConnectionState('failed');
             }
         })();
 
         return () => {
             cancelled = true;
+            clientRef.current = null;
             setActiveClient(null);
             unsubscribe();
         };
-    }, [baseUrl, apiKey, clientFactory, enabled, isConfigured, getUserAuth]);
+    }, [baseUrl, apiKey, clientFactory, enabled, deployed, deployedBase, getUserAuth]);
 
     return {
         connected,
+        connectionState,
         nodes,
         client: activeClient,
         runNode: async (id) => {
@@ -134,6 +186,15 @@ export function useOrchestratorBridge(
         },
         reset: async (id) => {
             await clientRef.current?.reset(id);
+        },
+        /**
+         * Importe les bots Hermes/LINK comme des nœuds AGENT_IA (session
+         * humaine admin requise côté serveur). Lève si l'orchestrateur n'est
+         * pas configuré/joignable — le client doit gérer l'erreur.
+         */
+        importLinkAgents: async () => {
+            if (!clientRef.current) throw new Error('ORCHESTRATOR_NOT_CONFIGURED');
+            return clientRef.current.importLinkAgents();
         },
     };
 }

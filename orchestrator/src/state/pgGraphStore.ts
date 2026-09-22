@@ -1,9 +1,23 @@
-import postgres, { type Sql } from 'postgres';
+import postgres, { type Sql, type TransactionSql } from 'postgres';
 import { transition, type NodeStatus } from '../domain/stateMachine.js';
-import type { HybridNode, JsonObject, McpConfig, NotificationChannels, NodeType } from '../domain/types.js';
-import { type GraphStore, type TransitionEvent } from './graphStore.js';
+import type {
+    HybridNode,
+    JsonObject,
+    McpConfig,
+    NotificationChannels,
+    NodeType,
+    SourceObservation,
+} from '../domain/types.js';
+import { type GraphStore, type TransitionEvent, NodeNotFoundError } from './graphStore.js';
 import type { SecretCipher } from '../security/crypto.js';
 import { decryptText, decryptJson, encryptText, encryptJson } from '../security/nodeSecrets.js';
+
+// `NodeNotFoundError` est réexportée pour ne pas casser les imports existants
+// (`import { NodeNotFoundError } from './pgGraphStore.js'`) — la classe elle-
+// même vit désormais UNIQUEMENT dans graphStore.js. Avant ce correctif, deux
+// classes distinctes portaient le même nom : un `instanceof` sur l'une ne
+// reconnaissait jamais une erreur levée par l'autre store. Audit P3.
+export { NodeNotFoundError };
 
 /**
  * GraphStore Postgres-backed — alternative pour la production.
@@ -22,13 +36,15 @@ import { decryptText, decryptJson, encryptText, encryptJson } from '../security/
  * clé API.
  */
 
-export class NodeNotFoundError extends Error {
-    constructor(public readonly nodeId: string) {
-        super(`Nœud introuvable : ${nodeId}`);
-        this.name = 'NodeNotFoundError';
+export class OptimisticConcurrencyError extends Error {
+    constructor(
+        public readonly nodeId: string,
+        public readonly expectedUpdatedAt?: string,
+    ) {
+        super(`Conflit de version pour le nœud : ${nodeId}`);
+        this.name = 'OptimisticConcurrencyError';
     }
 }
-
 type TransitionListener = (evt: TransitionEvent) => void;
 
 interface DbRow {
@@ -45,13 +61,42 @@ interface DbRow {
     notification_channels: unknown;
     avatar_url: string | null;
     status: NodeStatus;
+    presence: string | null;
+    presence_observed_at: string | Date | null;
+    cadence: string | null;
+    updated_at: string;
+    updated_at_text?: string;
+}
+
+/**
+ * Projette les colonnes d'observation externe en `SourceObservation`, ou
+ * `undefined` si la ligne n'en porte aucune (nœud natif Organigrad).
+ *
+ * Le driver `postgres` rend un `timestamptz` sous forme de `Date` : on
+ * normalise en ISO, car le contrat expose une chaîne et la SPA la reformate.
+ */
+function sourceObservationOf(r: DbRow): SourceObservation | undefined {
+    const observedAt =
+        r.presence_observed_at instanceof Date
+            ? r.presence_observed_at.toISOString()
+            : (r.presence_observed_at ?? undefined);
+
+    if (!r.presence && !observedAt && !r.cadence) return undefined;
+
+    return {
+        ...(r.presence ? { presence: r.presence } : {}),
+        ...(observedAt ? { observedAt } : {}),
+        ...(r.cadence ? { cadence: r.cadence } : {}),
+    };
 }
 
 export class PgGraphStore implements GraphStore {
     private listeners = new Set<TransitionListener>();
 
     constructor(
-        private readonly sql: Sql,
+        // Accepte aussi un handle de transaction (`TransactionSql`) — utilisé
+        // par l'import LINK pour que tout le lot s'écrive atomiquement.
+        private readonly sql: Sql | TransactionSql,
         private readonly workspaceId: string,
         private readonly actor: { kind: 'user' | 'api_key' | 'orchestrator'; id?: string } = {
             kind: 'orchestrator',
@@ -60,9 +105,14 @@ export class PgGraphStore implements GraphStore {
     ) {}
 
     /** Déchiffre les champs sensibles d'une ligne DB vers HybridNode. */
-    private rowToNode(r: DbRow): HybridNode {
+    private rowToNode(r: DbRow): HybridNode & { updated_at: string } {
+        const observation = sourceObservationOf(r);
         return {
             id: r.id,
+            // Le driver `postgres` convertit timestamptz en Date et perd les
+            // microsecondes. Le prédicat de verrouillage doit réutiliser la
+            // valeur exacte renvoyée par PostgreSQL.
+            updated_at: r.updated_at_text ?? r.updated_at,
             type: r.type,
             nom: r.nom,
             roleTitre: r.role_titre,
@@ -74,22 +124,23 @@ export class PgGraphStore implements GraphStore {
             notificationChannels: decryptJson<NotificationChannels>(this.cipher, r.notification_channels) ?? undefined,
             avatarUrl: r.avatar_url ?? undefined,
             status: r.status,
+            ...(observation ? { sourceObservation: observation } : {}),
         };
     }
 
     /** Charge tous les nœuds du workspace. */
     async list(): Promise<readonly HybridNode[]> {
         const rows = await this.sql<DbRow[]>`
-            select * from public.hybrid_nodes
+            select *, updated_at::text as updated_at_text from public.hybrid_nodes
              where workspace_id = ${this.workspaceId}
              order by created_at asc
         `;
         return rows.map((r) => this.rowToNode(r));
     }
 
-    async get(id: string): Promise<HybridNode> {
+    async get(id: string): Promise<HybridNode & { updated_at: string }> {
         const rows = await this.sql<DbRow[]>`
-            select * from public.hybrid_nodes
+            select *, updated_at::text as updated_at_text from public.hybrid_nodes
              where workspace_id = ${this.workspaceId} and id = ${id}
              limit 1
         `;
@@ -113,11 +164,17 @@ export class PgGraphStore implements GraphStore {
      * Le `status` est TOUJOURS forcé à IDLE à la création ; la machine à états
      * interdit de créer un nœud dans un état autre que IDLE.
      */
-    async upsertNode(node: HybridNode): Promise<HybridNode> {
+    async upsertNode(node: HybridNode & { updated_at?: string }): Promise<HybridNode> {
         const encPrompt = encryptText(this.cipher, node.systemPrompt ?? null);
         const encMcp = encryptJson(this.cipher, node.mcpConfig ?? null) as JsonObject | null;
         const encNotif = encryptJson(this.cipher, node.notificationChannels ?? null) as JsonObject | null;
 
+        const versionPredicate = node.updated_at
+            // Compare la représentation texte exacte renvoyée par PostgreSQL.
+            // Le driver peut convertir un paramètre string en type date et
+            // perdre la précision sub-microseconde lors du cast inverse.
+            ? this.sql` and public.hybrid_nodes.updated_at::text = ${node.updated_at}`
+            : this.sql``;
         const rows = await this.sql<DbRow[]>`
             insert into public.hybrid_nodes
                 (id, workspace_id, type, nom, role_titre, parent_id, grade_id,
@@ -143,11 +200,14 @@ export class PgGraphStore implements GraphStore {
                 notification_channels = excluded.notification_channels,
                 avatar_url            = excluded.avatar_url,
                 updated_at            = now()
-            where public.hybrid_nodes.workspace_id = ${this.workspaceId}
-            returning *
+            where public.hybrid_nodes.workspace_id = ${this.workspaceId}${versionPredicate}
+            returning *, updated_at::text as updated_at_text
         `;
         const row = rows[0];
-        if (!row) throw new NodeNotFoundError(node.id);
+        if (!row) {
+            if (node.updated_at) throw new OptimisticConcurrencyError(node.id, node.updated_at);
+            throw new NodeNotFoundError(node.id);
+        }
         return this.rowToNode(row);
     }
 
@@ -160,6 +220,23 @@ export class PgGraphStore implements GraphStore {
     }
 
     /**
+     * Démarre une transaction, ou un savepoint si `this.sql` est déjà un
+     * handle de transaction (import LINK) — `TransactionSql` n'a pas de
+     * `.begin()`, seulement `.savepoint()`, qui a la sémantique correcte
+     * pour une transaction imbriquée.
+     */
+    private beginTx<T>(cb: (tx: TransactionSql) => Promise<T>): Promise<T> {
+        // `postgres` type ses helpers de transaction via `UnwrapPromiseArray<T>`
+        // (pensé pour un tableau de requêtes) : sans rapport avec notre usage
+        // (un seul callback renvoyant T). Le cast est local et sans risque —
+        // T n'est jamais lui-même un tableau de promesses ici.
+        if ('begin' in this.sql) {
+            return (this.sql as Sql).begin(cb) as Promise<T>;
+        }
+        return (this.sql as TransactionSql).savepoint(cb) as Promise<T>;
+    }
+
+    /**
      * Mute le statut d'un nœud après validation par la machine à états.
      * Transaction : UPDATE + INSERT transition en un coup.
      */
@@ -168,7 +245,7 @@ export class PgGraphStore implements GraphStore {
         to: NodeStatus,
         payload?: JsonObject,
     ): Promise<HybridNode> {
-        return this.sql.begin(async (tx) => {
+        return this.beginTx(async (tx) => {
             const before = await tx<DbRow[]>`
                 select * from public.hybrid_nodes
                  where workspace_id = ${this.workspaceId} and id = ${nodeId}
@@ -230,7 +307,14 @@ export function getSql(): Sql {
         );
     }
     _sql = postgres(url, {
-        prepare: true,
+        // `prepare: false` est obligatoire : le DSN de production passe par le
+        // pooler Supabase en MODE TRANSACTION (port 6543, Supavisor/PgBouncer).
+        // Ce mode réassigne la connexion Postgres backend à chaque transaction ;
+        // un prepared statement créé sur l'une n'existe plus sur la suivante et
+        // casse en `prepared statement "…" does not exist`. Constaté en recette
+        // le 2026-08-09 : cette erreur a fait crasher tout le process (rejet non
+        // rattrapé plus loin dans le journal d'audit — cf. recordAudit).
+        prepare: false,
         max: 10,
         idle_timeout: 30,
         connect_timeout: 10,

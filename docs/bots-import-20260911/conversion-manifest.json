@@ -1,0 +1,436 @@
+[
+  {
+    "file": "hannah.md",
+    "sha256": "63c2f9820f0a462cce4fd96a25cdf675b8ff8329ce916ad8413344b006a286e2",
+    "runtimeId": "hannah",
+    "mapped": {
+      "Mission": "mission",
+      "Personnalité et relation": "personality",
+      "Recherche documentaire": "research",
+      "Veille": "watch",
+      "Livrables et méthode": "deliverables",
+      "Limites et accès": "limits",
+      "Méthode de conseil 4.0": "method",
+      "Contexte utile 4.0": "usefulContext"
+    },
+    "excluded": [
+      "Dialogue métier 4.0",
+      "Progression et évaluation",
+      "Réception métier 4.0"
+    ],
+    "sourceCount": 6,
+    "fieldLengths": {
+      "mission": 131,
+      "personality": 132,
+      "research": 307,
+      "watch": 369,
+      "deliverables": 536,
+      "limits": 1694,
+      "method": 1186,
+      "usefulContext": 340
+    }
+  },
+  {
+    "file": "marina.md",
+    "sha256": "9b656eae09d9afd17c5b4676c065c05e42b803076c0dadb3823dcc602f21d289",
+    "runtimeId": "marina",
+    "mapped": {
+      "Mission": "mission",
+      "Personnalité et relation": "personality",
+      "Recherche documentaire": "research",
+      "Veille": "watch",
+      "Livrables et méthode": "deliverables",
+      "Limites et accès": "limits",
+      "Méthode de conseil 4.0": "method",
+      "Contexte utile 4.0": "usefulContext"
+    },
+    "excluded": [
+      "Dialogue métier 4.0",
+      "Progression et évaluation",
+      "Réception métier 4.0"
+    ],
+    "sourceCount": 6,
+    "fieldLengths": {
+      "mission": 156,
+      "personality": 169,
+      "research": 258,
+      "watch": 372,
+      "deliverables": 478,
+      "limits": 1603,
+      "method": 1053,
+      "usefulContext": 312
+    }
+  },
+  {
+    "file": "alain.md",
+    "sha256": "825a430af0fc624ac75a53a818de2828e0d8ff8e89d1c7482d7bd52b727bf5c6",
+    "runtimeId": "alain",
+    "mapped": {
+      "Mission": "mission",
+      "Personnalité et relation": "personality",
+      "Recherche documentaire": "research",
+      "Veille": "watch",
+      "Livrables et méthode": "deliverables",
+      "Limites et accès": "limits",
+      "Méthode de conseil 4.0": "method",
+      "Contexte utile 4.0": "usefulContext"
+    },
+    "excluded": [
+      "Dialogue métier 4.0",
+      "Progression et évaluation",
+      "Réception métier 4.0"
+    ],
+    "sourceCount": 6,
+    "fieldLengths": {
+      "mission": 127,
+      "personality": 126,
+      "research": 235,
+      "watch": 344,
+      "deliverables": 445,
+      "limits": 1598,
+      "method": 1054,
+      "usefulContext": 304
+    }
+  },
+  {
+    "file": "pedro.md",
+    "sha256": "0cc6fa66b5b6b4c744e77e55dbf0fb8e1ec6f5e8088e8f968e43eaa51e10d44b",
+    "runtimeId": "pedro",
+    "mapped": {
+      "Mission": "mission",
+      "Personnalité et relation": "personality",
+      "Recherche documentaire": "research",
+      "Veille": "watch",
+      "Livrables et méthode": "deliverables",
+      "Limites et accès": "limits",
+      "Méthode de conseil 4.0": "method",
+      "Contexte utile 4.0": "usefulContext"
+    },
+    "excluded": [
+      "Dialogue métier 4.0",
+      "Progression et évaluation",
+      "Réception métier 4.0"
+    ],
+    "sourceCount": 6,
+    "fieldLengths": {
+      "mission": 118,
+      "personality": 104,
+      "research": 251,
+      "watch": 314,
+      "deliverables": 460,
+      "limits": 1616,
+      "method": 1266,
+      "usefulContext": 307
+    }
+  },
+  {
+    "file": "eric.md",
+    "sha256": "b730cc5e430e7cf1a6835d712d0a599581b7ace9ce57cb97ea8109da350e050a",
+    "runtimeId": "eric",
+    "mapped": {
+      "Mission": "mission",
+      "Personnalité et relation": "personality",
+      "Recherche documentaire": "research",
+      "Veille": "watch",
+      "Livrables et méthode": "deliverables",
+      "Limites et accès": "limits",
+      "Méthode de conseil 4.0": "method",
+      "Contexte utile 4.0": "usefulContext"
+    },
+    "excluded": [
+      "Dialogue métier 4.0",
+      "Progression et évaluation",
+      "Réception métier 4.0"
+    ],
+    "sourceCount": 6,
+    "fieldLengths": {
+      "mission": 110,
+      "personality": 100,
+      "research": 238,
+      "watch": 442,
+      "deliverables": 456,
+      "limits": 1606,
+      "method": 1142,
+      "usefulContext": 305
+    }
+  },
+  {
+    "file": "anita.md",
+    "sha256": "9144022e2a5d83bd486b38064cc191207e3a5bccbf589496d094ec39d664d064",
+    "runtimeId": "anita.instagram.bot",
+    "mapped": {
+      "Mission": "mission",
+      "Personnalité et relation": "personality",
+      "Recherche documentaire": "research",
+      "Veille": "watch",
+      "Livrables et méthode": "deliverables",
+      "Limites et accès": "limits",
+      "Méthode de conseil 4.0": "method",
+      "Contexte utile 4.0": "usefulContext"
+    },
+    "excluded": [
+      "Dialogue métier 4.0",
+      "Progression et évaluation",
+      "Réception métier 4.0"
+    ],
+    "sourceCount": 0,
+    "fieldLengths": {
+      "mission": 83,
+      "personality": 82,
+      "research": 169,
+      "watch": 351,
+      "deliverables": 480,
+      "limits": 1568,
+      "method": 690,
+      "usefulContext": 241
+    }
+  },
+  {
+    "file": "victor.md",
+    "sha256": "152800f44b02eb81f5aae6bd41d098af57878ffe231957cab528e0a4f7bdfa71",
+    "runtimeId": "victor.linkedin.bot",
+    "mapped": {
+      "Mission": "mission",
+      "Personnalité et relation": "personality",
+      "Recherche documentaire": "research",
+      "Veille": "watch",
+      "Livrables et méthode": "deliverables",
+      "Limites et accès": "limits",
+      "Méthode de conseil 4.0": "method",
+      "Contexte utile 4.0": "usefulContext"
+    },
+    "excluded": [
+      "Dialogue métier 4.0",
+      "Progression et évaluation",
+      "Réception métier 4.0"
+    ],
+    "sourceCount": 0,
+    "fieldLengths": {
+      "mission": 81,
+      "personality": 81,
+      "research": 140,
+      "watch": 323,
+      "deliverables": 455,
+      "limits": 1533,
+      "method": 727,
+      "usefulContext": 256
+    }
+  },
+  {
+    "file": "lea.md",
+    "sha256": "5892da26df95ecfd67ac888ae23485819b1b018c3afb7f45d15e33aedf47fae0",
+    "runtimeId": "lea.tiktok.bot",
+    "mapped": {
+      "Mission": "mission",
+      "Personnalité et relation": "personality",
+      "Recherche documentaire": "research",
+      "Veille": "watch",
+      "Livrables et méthode": "deliverables",
+      "Limites et accès": "limits",
+      "Méthode de conseil 4.0": "method",
+      "Contexte utile 4.0": "usefulContext"
+    },
+    "excluded": [
+      "Dialogue métier 4.0",
+      "Progression et évaluation",
+      "Réception métier 4.0"
+    ],
+    "sourceCount": 0,
+    "fieldLengths": {
+      "mission": 71,
+      "personality": 114,
+      "research": 158,
+      "watch": 259,
+      "deliverables": 472,
+      "limits": 1572,
+      "method": 805,
+      "usefulContext": 239
+    }
+  },
+  {
+    "file": "max.md",
+    "sha256": "11e78f1981cad1629ef81c78d692d364dd375496876b27927040ec173d29fa72",
+    "runtimeId": "max.x.bot",
+    "mapped": {
+      "Mission": "mission",
+      "Personnalité et relation": "personality",
+      "Recherche documentaire": "research",
+      "Veille": "watch",
+      "Livrables et méthode": "deliverables",
+      "Limites et accès": "limits",
+      "Méthode de conseil 4.0": "method",
+      "Contexte utile 4.0": "usefulContext"
+    },
+    "excluded": [
+      "Dialogue métier 4.0",
+      "Progression et évaluation",
+      "Réception métier 4.0"
+    ],
+    "sourceCount": 0,
+    "fieldLengths": {
+      "mission": 72,
+      "personality": 79,
+      "research": 134,
+      "watch": 320,
+      "deliverables": 458,
+      "limits": 1563,
+      "method": 642,
+      "usefulContext": 239
+    }
+  },
+  {
+    "file": "rosa.md",
+    "sha256": "a2dbb21f691d6cf84371e77ea8622e086a4baa6cc9307ade83b651c438f6fa8c",
+    "runtimeId": "rosa.pinterest.bot",
+    "mapped": {
+      "Mission": "mission",
+      "Personnalité et relation": "personality",
+      "Recherche documentaire": "research",
+      "Veille": "watch",
+      "Livrables et méthode": "deliverables",
+      "Limites et accès": "limits",
+      "Méthode de conseil 4.0": "method",
+      "Contexte utile 4.0": "usefulContext"
+    },
+    "excluded": [
+      "Dialogue métier 4.0",
+      "Progression et évaluation",
+      "Réception métier 4.0"
+    ],
+    "sourceCount": 0,
+    "fieldLengths": {
+      "mission": 88,
+      "personality": 96,
+      "research": 164,
+      "watch": 289,
+      "deliverables": 479,
+      "limits": 1519,
+      "method": 724,
+      "usefulContext": 247
+    }
+  },
+  {
+    "file": "sofia.md",
+    "sha256": "ab6e2ce47e9db57171b5ff1bdd73dd548231e77a5064d177573c9c754783fa06",
+    "runtimeId": "sofia.facebook.bot",
+    "mapped": {
+      "Mission": "mission",
+      "Personnalité et relation": "personality",
+      "Recherche documentaire": "research",
+      "Veille": "watch",
+      "Livrables et méthode": "deliverables",
+      "Limites et accès": "limits",
+      "Méthode de conseil 4.0": "method",
+      "Contexte utile 4.0": "usefulContext"
+    },
+    "excluded": [
+      "Dialogue métier 4.0",
+      "Progression et évaluation",
+      "Réception métier 4.0"
+    ],
+    "sourceCount": 0,
+    "fieldLengths": {
+      "mission": 108,
+      "personality": 121,
+      "research": 138,
+      "watch": 318,
+      "deliverables": 430,
+      "limits": 1522,
+      "method": 693,
+      "usefulContext": 245
+    }
+  },
+  {
+    "file": "theo.md",
+    "sha256": "c4afa95bc6ed964edcd74d3f80ed1365c469d3caa7364a0c65d299b2fb60f8e0",
+    "runtimeId": "theo.youtube.bot",
+    "mapped": {
+      "Mission": "mission",
+      "Personnalité et relation": "personality",
+      "Recherche documentaire": "research",
+      "Veille": "watch",
+      "Livrables et méthode": "deliverables",
+      "Limites et accès": "limits",
+      "Méthode de conseil 4.0": "method",
+      "Contexte utile 4.0": "usefulContext"
+    },
+    "excluded": [
+      "Dialogue métier 4.0",
+      "Progression et évaluation",
+      "Réception métier 4.0"
+    ],
+    "sourceCount": 0,
+    "fieldLengths": {
+      "mission": 97,
+      "personality": 68,
+      "research": 190,
+      "watch": 290,
+      "deliverables": 460,
+      "limits": 1552,
+      "method": 780,
+      "usefulContext": 251
+    }
+  },
+  {
+    "file": "design.md",
+    "sha256": "42d75faf2839fef8097bc1dd411c93f1c4c913f260d5aecfeeaea84e29539e9b",
+    "runtimeId": "clario.instadesign.bot",
+    "mapped": {
+      "Mission": "mission",
+      "Personnalité et relation": "personality",
+      "Recherche documentaire": "research",
+      "Veille": "watch",
+      "Livrables et méthode": "deliverables",
+      "Limites et accès": "limits",
+      "Méthode de conseil 4.0": "method",
+      "Contexte utile 4.0": "usefulContext"
+    },
+    "excluded": [
+      "Dialogue métier 4.0",
+      "Progression et évaluation",
+      "Réception métier 4.0"
+    ],
+    "sourceCount": 0,
+    "fieldLengths": {
+      "mission": 119,
+      "personality": 89,
+      "research": 199,
+      "watch": 247,
+      "deliverables": 516,
+      "limits": 1561,
+      "method": 1509,
+      "usefulContext": 251
+    }
+  },
+  {
+    "file": "gardien.md",
+    "sha256": "d95e0027bd4c7ae0dbf6a1b1ee0ad73294a4fe3fd6c135710adc8dfa7fdd000d",
+    "runtimeId": "gardien.marque",
+    "mapped": {
+      "Mission": "mission",
+      "Personnalité et relation": "personality",
+      "Recherche documentaire": "research",
+      "Veille": "watch",
+      "Livrables et méthode": "deliverables",
+      "Limites et accès": "limits",
+      "Méthode de conseil 4.0": "method",
+      "Contexte utile 4.0": "usefulContext"
+    },
+    "excluded": [
+      "Dialogue métier 4.0",
+      "Progression et évaluation",
+      "Réception métier 4.0"
+    ],
+    "sourceCount": 0,
+    "fieldLengths": {
+      "mission": 116,
+      "personality": 69,
+      "research": 156,
+      "watch": 284,
+      "deliverables": 486,
+      "limits": 1595,
+      "method": 971,
+      "usefulContext": 254
+    }
+  }
+]

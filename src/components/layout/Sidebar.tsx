@@ -1,10 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import { LayoutDashboard, Loader2, Printer, Users, Settings, Layers3, Workflow, Menu, X, LogOut, ChevronDown, Key, UsersRound } from 'lucide-react';
+import { LayoutDashboard, Loader2, Printer, Users, Settings, Layers3, Workflow, Menu, X, LogOut, ChevronDown, Key, UsersRound, Bot } from 'lucide-react';
 import type { AppView } from '../../hooks/useOrgChartController';
 import type { CsvSourceInfo } from '../../utils/csvSource';
 import type { PoleDirectoryEntry } from '../../utils/poleDirectory';
 import { useWorkspaceContext } from '../../contexts/WorkspaceContext';
 import { supabase } from '../../lib/supabase';
+import { useFeedback } from '../../feedback/FeedbackContext';
+import { isProjectsEnabled } from '../../lib/projectsFeature';
+import { FolderKanban } from 'lucide-react';
 
 /**
  * Sidebar — Apple-style refinement.
@@ -38,6 +41,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
     const [mobileOpen, setMobileOpen] = useState(false);
     const [wsDropdownOpen, setWsDropdownOpen] = useState(false);
+    const [signingOut, setSigningOut] = useState(false);
+    const feedback = useFeedback();
+
+    /**
+     * La déconnexion n'était ni attendue ni catchée : en cas d'échec,
+     * l'utilisateur restait connecté sans le moindre message.
+     */
+    const handleSignOut = async () => {
+        if (!supabase) return;
+        setSigningOut(true);
+        const { error } = await supabase.auth.signOut();
+        setSigningOut(false);
+        if (error) feedback.error(`Déconnexion échouée : ${error.message}`);
+    };
     const ws = useWorkspaceContext();
 
     // Ferme le menu mobile lors d'une navigation — ajustement pendant le rendu
@@ -149,6 +166,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             >
                                 Workspaces
                             </p>
+                            {ws.error && (
+                                <p
+                                    className="mx-3 mb-2 rounded bg-[rgba(255,59,48,0.08)] px-2 py-1.5 text-[11px] leading-snug text-[var(--system-red)]"
+                                    role="alert"
+                                >
+                                    {ws.error}
+                                </p>
+                            )}
                             {ws.workspaces.map((w) => (
                                 <button
                                     key={w.id}
@@ -174,12 +199,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             ))}
                             <div className="my-1 h-px" style={{ background: 'var(--hairline)' }} />
                             <button
-                                onClick={() => supabase?.auth.signOut()}
+                                disabled={signingOut}
+                                onClick={() => void handleSignOut()}
                                 className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] transition hover:bg-white"
                                 style={{ color: 'var(--system-red)' }}
                             >
                                 <LogOut size={13} strokeWidth={1.6} />
-                                Se déconnecter
+                                {signingOut ? 'Déconnexion…' : 'Se déconnecter'}
                             </button>
                         </div>
                     )}
@@ -197,6 +223,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     <NavItem icon={<Users size={17} strokeWidth={1.6} />} label="Organigrammes" active={activeView === 'orgchart'} onClick={() => setActiveView('orgchart')} />
                     <NavItem icon={<LayoutDashboard size={17} strokeWidth={1.6} />} label="Tableau de bord" active={activeView === 'dashboard'} onClick={() => setActiveView('dashboard')} />
                     <NavItem icon={<Workflow size={17} strokeWidth={1.6} />} label="Orchestration" active={activeView === 'orchestration'} onClick={() => setActiveView('orchestration')} />
+                    <NavItem icon={<Bot size={17} strokeWidth={1.6} />} label="Bots" active={activeView === 'bots'} onClick={() => setActiveView('bots')} />
+                    <NavItem icon={<Workflow size={17} strokeWidth={1.6} />} label="Circuits" active={activeView === 'circuits'} onClick={() => setActiveView('circuits')} />
+                    {isProjectsEnabled() && <NavItem icon={<FolderKanban size={17} strokeWidth={1.6} />} label="Projets" active={activeView === 'projects'} onClick={() => setActiveView('projects')} />}
                     <NavItem icon={<UsersRound size={17} strokeWidth={1.6} />} label="Membres" active={activeView === 'members'} onClick={() => setActiveView('members')} />
                     <NavItem icon={<Key size={17} strokeWidth={1.6} />} label="Clés API" active={activeView === 'api-keys'} onClick={() => setActiveView('api-keys')} />
                     <NavItem icon={<Settings size={17} strokeWidth={1.6} />} label="Paramètres" active={activeView === 'settings'} onClick={() => setActiveView('settings')} />

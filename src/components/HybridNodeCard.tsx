@@ -1,9 +1,10 @@
 import { useMemo } from 'react';
 import { Lock, AlertCircle, Play, Mail, Trash2, Pencil, ChevronUp, ChevronDown } from 'lucide-react';
-import type { HybridNode } from '../types/hybridNode';
+import type { HybridNode, SourceObservation } from '../types/hybridNode';
 import { ARCHETYPE, STATUS, TONE_CLASSES } from '../design/tokens';
 import { Button, IconButton, Pill } from '../design/ui';
 import { cx } from '../design/cx';
+import { estFrais, formatRelatif } from '../utils/tempsRelatif';
 
 /**
  * HybridNodeCard — carte universelle des 3 archétypes.
@@ -119,6 +120,72 @@ function StatusBadge({ status }: { status: HybridNodeCardProps['node']['status']
     );
 }
 
+/**
+ * Présence rapportée par l'application source (ex. LINK) — DISTINCTE du statut
+ * d'exécution affiché par `StatusBadge`. Un bot peut être « en ligne » chez
+ * LINK et `IDLE` dans Organigrad : les deux sont vrais, et c'est précisément
+ * l'absence de cette nuance qui faisait passer 20 bots actifs pour des fiches
+ * mortes.
+ *
+ * La date du relevé est toujours affichée, et la pastille ne prend sa couleur
+ * vive que si l'observation est fraîche : au-delà, on montre un fait daté, pas
+ * un état courant.
+ */
+function PresenceBadge({ observation }: { observation: SourceObservation }) {
+    const { presence, observedAt, cadence } = observation;
+    if (!presence) return null;
+
+    const frais = estFrais(observedAt);
+    const releve = formatRelatif(observedAt);
+    const enLigne = presence.toLowerCase() === 'online';
+    const libelle = enLigne ? 'En ligne' : presence;
+
+    // Vert seulement sur une observation fraîche ET positive ; sinon le ton
+    // neutre du design system, qui se lit comme un fait daté.
+    const tone = TONE_CLASSES[frais && enLigne ? 'green' : 'slate'];
+
+    return (
+        <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span
+                className={cx(
+                    'inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium ring-1',
+                    tone.soft,
+                    tone.text,
+                    tone.ring,
+                )}
+                title={
+                    releve
+                        ? `Présence rapportée par la source, relevée ${releve}`
+                        : 'Présence rapportée par la source, date de relevé inconnue'
+                }
+            >
+                <span
+                    className="inline-flex h-1.5 w-1.5 rounded-full"
+                    style={{ background: frais && enLigne ? 'var(--system-green)' : 'var(--fg-4)' }}
+                />
+                {libelle}
+            </span>
+
+            {/* Sans la date, la pastille se lirait comme un état temps réel. */}
+            {releve && (
+                <span className="text-[11px]" style={{ color: 'var(--fg-4)' }}>
+                    relevé {releve}
+                </span>
+            )}
+
+            {cadence && (
+                <span
+                    className="truncate text-[11px]"
+                    style={{ color: 'var(--fg-4)' }}
+                    title={`Cadence : ${cadence}`}
+                >
+                    · {cadence}
+                </span>
+            )}
+        </div>
+    );
+}
+
 // --- Composant principal ---------------------------------------------------
 
 export default function HybridNodeCard({
@@ -140,6 +207,7 @@ export default function HybridNodeCard({
 }: HybridNodeCardProps) {
     const archetype = ARCHETYPE[node.type];
     const isLocked = node.status === 'WAITING_HUMAN_APPROVAL';
+    const isExecuting = node.status === 'EXECUTING';
 
     const skills = useMemo(() => node.skills?.slice(0, 4) ?? [], [node.skills]);
     const extraSkills = (node.skills?.length ?? 0) - skills.length;
@@ -162,6 +230,24 @@ export default function HybridNodeCard({
         <article
             data-node-id={node.id}
             onClick={() => onOpen?.(node)}
+            // La carte entière est cliquable mais n'était atteignable ni au
+            // clavier ni par lecteur d'écran (aucun rôle, aucun ordre de
+            // tabulation) — les boutons imbriqués (Run, Contact…) le sont via
+            // leur propre <button>, `e.stopPropagation()` évite le conflit.
+            // Audit P3.
+            role={onOpen ? 'button' : undefined}
+            tabIndex={onOpen ? 0 : undefined}
+            aria-label={onOpen ? `Ouvrir la fiche de ${node.nom}` : undefined}
+            onKeyDown={
+                onOpen
+                    ? (e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              onOpen(node);
+                          }
+                      }
+                    : undefined
+            }
             className={cx(
                 'group relative w-full max-w-xs sm:w-72 cursor-pointer select-none p-5 transition-all duration-300',
                 'bg-white rounded-[28px]',
@@ -218,7 +304,24 @@ export default function HybridNodeCard({
 
             <div className="mt-4">
                 <StatusBadge status={node.status} />
+                {node.sourceObservation && (
+                    <PresenceBadge observation={node.sourceObservation} />
+                )}
             </div>
+
+            {/* Un champ chiffré a une valeur `undefined` côté SPA : sans cet
+                indicateur, la carte laisserait croire qu'il n'est pas configuré. */}
+            {node.type === 'AGENT_IA' && node.encrypted?.systemPrompt && (
+                <div
+                    className="mt-3 rounded-[10px] p-2.5 text-[12px] leading-snug"
+                    style={{ background: 'var(--bg-secondary)', color: 'var(--fg-3)' }}
+                >
+                    <span className="font-semibold" style={{ color: 'var(--fg-1)' }}>
+                        Prompt ·{' '}
+                    </span>
+                    configuré (chiffré)
+                </div>
+            )}
 
             {node.type === 'AGENT_IA' && node.systemPrompt && (
                 <div
@@ -229,6 +332,18 @@ export default function HybridNodeCard({
                         Prompt ·{' '}
                     </span>
                     <span className="line-clamp-2">{node.systemPrompt}</span>
+                </div>
+            )}
+
+            {node.type === 'SOFTWARE_MCP' && node.encrypted?.mcpConfig && (
+                <div
+                    className="mt-3 rounded-[10px] p-2.5 text-[12px]"
+                    style={{ background: 'var(--bg-secondary)', color: 'var(--fg-3)' }}
+                >
+                    <span className="font-semibold" style={{ color: 'var(--fg-1)' }}>
+                        MCP ·{' '}
+                    </span>
+                    configuré (chiffré)
                 </div>
             )}
 
@@ -313,7 +428,11 @@ export default function HybridNodeCard({
                             label="Supprimer"
                             onClick={(e) => {
                                 e.stopPropagation();
-                                onDelete(node);
+                                // Même garde que la carte RH (AgentCard) : une action
+                                // destructive ne doit pas dépendre du mode d'affichage. (ORG-006)
+                                if (confirm(`Supprimer ${node.nom} ?`)) {
+                                    onDelete(node);
+                                }
                             }}
                         >
                             <Trash2 size={13} strokeWidth={1.6} />
@@ -324,12 +443,18 @@ export default function HybridNodeCard({
                         <Button
                             tone="blue"
                             size="sm"
+                            // Anti double-clic : `onRun` déclenche un POST asynchrone
+                            // et le statut EXECUTING ne revient qu'après un aller-retour
+                            // réseau (Realtime/SSE) — sans cette garde, chaque clic
+                            // pendant cette fenêtre relançait le même nœud. Audit P2.
+                            disabled={isExecuting}
                             onClick={(e) => {
                                 e.stopPropagation();
+                                if (isExecuting) return;
                                 onRun(node);
                             }}
                         >
-                            <Play size={11} strokeWidth={1.8} /> Run
+                            <Play size={11} strokeWidth={1.8} /> {isExecuting ? 'En cours…' : 'Run'}
                         </Button>
                     )}
 

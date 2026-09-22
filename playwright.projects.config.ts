@@ -1,0 +1,40 @@
+import { defineConfig } from '@playwright/test';
+
+export default defineConfig({
+    testDir: './e2e-projects',
+    testMatch: '**/*.spec.ts',
+    fullyParallel: false,
+    workers: 1,
+    retries: 0,
+    forbidOnly: true,
+    timeout: 60_000,
+    globalTimeout: 180_000,
+    expect: { timeout: 7_000 },
+    outputDir: './e2e-projects/test-results',
+    reporter: [['list'], ['html', { outputFolder: './e2e-projects/playwright-report', open: 'never' }]],
+    use: {
+        baseURL: 'http://127.0.0.1:5174',
+        browserName: 'chromium',
+        channel: 'chromium',
+        headless: true,
+        serviceWorkers: 'block',
+        actionTimeout: 7_000,
+        navigationTimeout: 15_000,
+        trace: 'retain-on-failure',
+        screenshot: 'only-on-failure',
+        launchOptions: { args: ['--disable-background-networking'] },
+    },
+    webServer: {
+        command: 'node e2e-projects/start-vite.mjs',
+        url: 'http://127.0.0.1:5174',
+        reuseExistingServer: false,
+        timeout: 30_000,
+        env: {
+            NODE_ENV: 'test',
+            VITE_PROJECTS_ENABLED: 'true',
+            VITE_SUPABASE_URL: 'http://127.0.0.1:5174/__test_supabase',
+            VITE_SUPABASE_ANON_KEY: 'sb_publishable_TEST_SYNapse_dummy_not_a_key',
+            VITE_ORCHESTRATOR_URL: '',
+        },
+    },
+});

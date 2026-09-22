@@ -1,29 +1,54 @@
 import { supabase } from '../lib/supabase';
+import { souscrirePartage } from './realtimeShared';
 import type {
     HybridNode,
     NodeType,
     NodeStatus,
     McpConfig,
     NotificationChannels,
+    SourceObservation,
 } from '../types/hybridNode';
 import type { Database } from '../types/supabase';
 import { hybridNodeStore } from './hybridNodeStore';
-import type { OrchestratorClient } from './orchestratorService';
+import type { NodeMutationPayload, OrchestratorClient } from './orchestratorService';
 
 /**
- * Sentinelle renvoyée quand un champ est chiffré côté serveur — la SPA
- * ne peut pas le déchiffrer (pas de clé). L'UI doit afficher un indicateur
- * "Configuré (chiffré)" et permettre une mise à jour sans montrer la valeur.
+ * Registre module-level des channels Realtime actifs, un par workspace —
+ * voir la jsdoc de `hybridNodeRepo.subscribe` pour la raison d'être.
  */
-export const ENCRYPTED_PLACEHOLDER = '__encrypted__' as const;
+/** Événement diffusé aux abonnés : DELETE ne porte que l'identifiant. */
+type EvenementNoeud = ['INSERT' | 'UPDATE' | 'DELETE', HybridNode | { id: string }];
 
-function maskEncryptedField<T>(v: T | string | null | undefined): T | typeof ENCRYPTED_PLACEHOLDER | null | undefined {
-    if (typeof v === 'string' && v.startsWith('enc:v1:')) return ENCRYPTED_PLACEHOLDER;
-    return v as T | null | undefined;
-}
+/**
+ * Préfixe posé par l'orchestrateur sur une valeur chiffrée au repos.
+ *
+ * Détail interne du mapping : un champ chiffré n'est PAS transformé en valeur
+ * factice, il est laissé `undefined` et signalé par `node.encrypted`. Faire
+ * circuler une sentinelle jusqu'à l'interface avait une conséquence grave :
+ * l'éditeur l'affichait comme une valeur ordinaire puis la réécrivait en base,
+ * détruisant le secret.
+ */
+const ENCRYPTED_PREFIX = 'enc:v1:';
+
+const isEncrypted = (v: unknown): boolean => typeof v === 'string' && v.startsWith(ENCRYPTED_PREFIX);
 
 type Row = Database['public']['Tables']['hybrid_nodes']['Row'];
 type Insert = Database['public']['Tables']['hybrid_nodes']['Insert'];
+
+export class HybridNodeConflictError extends Error {
+    readonly nodeId: string;
+    readonly expectedUpdatedAt: string;
+
+    constructor(
+        nodeId: string,
+        expectedUpdatedAt: string,
+    ) {
+        super(`Le nœud ${nodeId} a été modifié depuis son chargement`);
+        this.name = 'HybridNodeConflictError';
+        this.nodeId = nodeId;
+        this.expectedUpdatedAt = expectedUpdatedAt;
+    }
+}
 
 /**
  * Repository HybridNode — backend Supabase si configuré + workspace fourni,
@@ -33,38 +58,69 @@ type Insert = Database['public']['Tables']['hybrid_nodes']['Insert'];
  * vers NodeStatus dans les bornes du type union.
  */
 
-function rowToNode(row: Row): HybridNode {
-    // Champs potentiellement chiffrés par l'orchestrateur : si la valeur commence
-    // par `enc:v1:`, on la remplace par la sentinelle — la SPA n'a pas la clé.
-    const rawPrompt = row.system_prompt ?? undefined;
-    const systemPrompt = rawPrompt !== undefined ? (maskEncryptedField(rawPrompt) ?? undefined) : undefined;
+/** Exporté pour les tests : c'est ici que se joue la survie des secrets. */
+export function rowToNode(row: Row): HybridNode {
+    // Un champ chiffré est signalé, jamais matérialisé : la valeur reste
+    // `undefined` pour qu'aucun code d'interface ne puisse la réécrire.
+    const promptEncrypted = isEncrypted(row.system_prompt);
+    const mcpEncrypted = isEncrypted(row.mcp_config);
+    const notifEncrypted = isEncrypted(row.notification_channels);
 
-    const rawMcp = (row.mcp_config as McpConfig | null) ?? undefined;
-    const mcpRaw = rawMcp !== undefined ? maskEncryptedField(rawMcp) : undefined;
-    const mcpConfig = mcpRaw === ENCRYPTED_PLACEHOLDER ? undefined : (mcpRaw as McpConfig | undefined);
+    const observation = observationDe(row);
 
-    const rawNotif = (row.notification_channels as NotificationChannels | null) ?? undefined;
-    const notifRaw = rawNotif !== undefined ? maskEncryptedField(rawNotif) : undefined;
-    const notificationChannels = notifRaw === ENCRYPTED_PLACEHOLDER ? undefined : (notifRaw as NotificationChannels | undefined);
+    const encrypted: HybridNode['encrypted'] =
+        promptEncrypted || mcpEncrypted || notifEncrypted
+            ? {
+                  ...(promptEncrypted ? { systemPrompt: true } : {}),
+                  ...(mcpEncrypted ? { mcpConfig: true } : {}),
+                  ...(notifEncrypted ? { notificationChannels: true } : {}),
+              }
+            : undefined;
 
     return {
         id: row.id,
+        updated_at: row.updated_at,
         type: row.type as NodeType,
         nom: row.nom,
         roleTitre: row.role_titre,
         parentID: row.parent_id,
         gradeId: row.grade_id,
-        systemPrompt: systemPrompt === ENCRYPTED_PLACEHOLDER ? ENCRYPTED_PLACEHOLDER : systemPrompt,
+        systemPrompt: promptEncrypted ? undefined : (row.system_prompt ?? undefined),
         skills: row.skills,
-        mcpConfig,
-        notificationChannels,
+        mcpConfig: mcpEncrypted ? undefined : ((row.mcp_config as McpConfig | null) ?? undefined),
+        notificationChannels: notifEncrypted
+            ? undefined
+            : ((row.notification_channels as NotificationChannels | null) ?? undefined),
         avatarUrl: row.avatar_url ?? undefined,
         status: row.status as NodeStatus,
+        ...(observation ? { sourceObservation: observation } : {}),
+        ...(encrypted ? { encrypted } : {}),
     };
 }
 
-function nodeToInsert(node: HybridNode, workspaceId: string): Insert {
+/**
+ * Projette les colonnes d'observation externe, ou `undefined` si la ligne n'en
+ * porte aucune (nœud natif). Symétrique de `sourceObservationOf` côté
+ * orchestrateur — les deux copies du mapping doivent rester alignées.
+ */
+function observationDe(row: Row): SourceObservation | undefined {
+    if (!row.presence && !row.presence_observed_at && !row.cadence) return undefined;
     return {
+        ...(row.presence ? { presence: row.presence } : {}),
+        ...(row.presence_observed_at ? { observedAt: row.presence_observed_at } : {}),
+        ...(row.cadence ? { cadence: row.cadence } : {}),
+    };
+}
+
+/**
+ * Construit la charge d'écriture Supabase.
+ *
+ * OMISSION = CONSERVATION : une colonne absente de la charge n'est pas touchée
+ * par l'`upsert` PostgREST sur une ligne existante. C'est ainsi qu'un champ
+ * chiffré non remplacé survit à un enregistrement.
+ */
+export function nodeToInsert(node: HybridNode, workspaceId: string): Insert {
+    const base: Insert = {
         id: node.id,
         workspace_id: workspaceId,
         type: node.type,
@@ -72,13 +128,23 @@ function nodeToInsert(node: HybridNode, workspaceId: string): Insert {
         role_titre: node.roleTitre,
         parent_id: node.parentID,
         grade_id: node.gradeId,
-        system_prompt: node.systemPrompt ?? null,
         skills: node.skills ?? [],
-        mcp_config: (node.mcpConfig ?? null) as import('../types/supabase').Json | null,
-        notification_channels: (node.notificationChannels ?? null) as import('../types/supabase').Json | null,
         avatar_url: node.avatarUrl ?? null,
         status: node.status,
     };
+
+    if (!node.encrypted?.systemPrompt) {
+        base.system_prompt = node.systemPrompt ?? null;
+    }
+    if (!node.encrypted?.mcpConfig) {
+        base.mcp_config = (node.mcpConfig ?? null) as import('../types/supabase').Json | null;
+    }
+    if (!node.encrypted?.notificationChannels) {
+        base.notification_channels = (node.notificationChannels ??
+            null) as import('../types/supabase').Json | null;
+    }
+
+    return base;
 }
 
 export interface RepoContext {
@@ -133,26 +199,35 @@ export const hybridNodeRepo = {
     async upsert(node: HybridNode, ctx: RepoContext): Promise<HybridNode> {
         // Chemin orchestrateur : chiffrement côté serveur (audit #1).
         if (ctx.orchestratorClient && ctx.workspaceId) {
-            const dto = await ctx.orchestratorClient.upsertNode(
-                {
-                    id: node.id,
-                    type: node.type,
-                    nom: node.nom,
-                    roleTitre: node.roleTitre,
-                    parentID: node.parentID,
-                    gradeId: node.gradeId,
-                    systemPrompt: node.systemPrompt !== ENCRYPTED_PLACEHOLDER ? (node.systemPrompt ?? null) : null,
-                    skills: node.skills,
-                    mcpConfig: node.mcpConfig ?? null,
-                    notificationChannels: node.notificationChannels ?? null,
-                    avatarUrl: node.avatarUrl ?? null,
-                },
-                ctx.workspaceId,
-            );
+            // Même règle que côté Supabase : une propriété omise est conservée
+            // par le serveur (cf. validateNodeMutation), un `null` efface.
+            const payload: NodeMutationPayload = {
+                id: node.id,
+                updated_at: node.updated_at,
+                type: node.type,
+                nom: node.nom,
+                roleTitre: node.roleTitre,
+                parentID: node.parentID,
+                gradeId: node.gradeId,
+                skills: node.skills,
+                avatarUrl: node.avatarUrl ?? null,
+            };
+            if (!node.encrypted?.systemPrompt) {
+                payload.systemPrompt = node.systemPrompt ?? null;
+            }
+            if (!node.encrypted?.mcpConfig) {
+                payload.mcpConfig = node.mcpConfig ?? null;
+            }
+            if (!node.encrypted?.notificationChannels) {
+                payload.notificationChannels = node.notificationChannels ?? null;
+            }
+
+            const dto = await ctx.orchestratorClient.upsertNode(payload, ctx.workspaceId);
             // Le DTO retourné n'a pas les secrets (indicateurs seulement) — on
             // reconstitue un HybridNode minimal pour la mise à jour du cache local.
             const merged: HybridNode = {
                 ...node,
+                ...(dto.updated_at ? { updated_at: dto.updated_at } : {}),
                 status: dto.status,
             };
             hybridNodeStore.save(ctx.workspaceId, [
@@ -170,6 +245,19 @@ export const hybridNodeRepo = {
             return node;
         }
         const payload = nodeToInsert(node, ctx.workspaceId);
+        if (node.updated_at) {
+            const { data, error } = await supabase
+                .from('hybrid_nodes')
+                .update(payload)
+                .eq('id', node.id)
+                .eq('workspace_id', ctx.workspaceId)
+                .eq('updated_at', node.updated_at)
+                .select('*')
+                .maybeSingle();
+            if (error) throw error;
+            if (!data) throw new HybridNodeConflictError(node.id, node.updated_at);
+            return rowToNode(data);
+        }
         const { data, error } = await supabase
             .from('hybrid_nodes')
             .upsert(payload, { onConflict: 'id' })
@@ -208,36 +296,44 @@ export const hybridNodeRepo = {
     /**
      * Souscrit aux changements live (Realtime Postgres) pour un workspace.
      * Renvoie une fonction de cleanup.
+     *
+     * Mutualisé par workspace : ActivityLog et OrchestrationView s'abonnent
+     * tous deux au même workspace en parallèle, et `supabase.channel(topic)`
+     * renvoie l'instance EXISTANTE — d'où le crash de toute la SPA constaté en
+     * recette connectée le 2026-08-11. Le registre partagé et le comptage de
+     * références vivent dans `realtimeShared.ts`, avec le détail du piège.
      */
     subscribe(
         ctx: RepoContext,
         handler: (event: 'INSERT' | 'UPDATE' | 'DELETE', node: HybridNode | { id: string }) => void,
     ): () => void {
         if (!supabase || !ctx.workspaceId) return () => {};
-        const channel = supabase
-            .channel(`hybrid_nodes:${ctx.workspaceId}`)
-            .on(
-                'postgres_changes',
-                {
-                    event: '*',
-                    schema: 'public',
-                    table: 'hybrid_nodes',
-                    filter: `workspace_id=eq.${ctx.workspaceId}`,
-                },
-                (payload) => {
-                    if (payload.eventType === 'DELETE') {
-                        handler('DELETE', { id: (payload.old as Row).id });
-                    } else {
-                        handler(
-                            payload.eventType as 'INSERT' | 'UPDATE',
-                            rowToNode(payload.new as Row),
-                        );
-                    }
-                },
-            )
-            .subscribe();
-        return () => {
-            void supabase?.removeChannel(channel);
-        };
+        const workspaceId = ctx.workspaceId;
+
+        return souscrirePartage<EvenementNoeud>(
+            `hybrid_nodes:${workspaceId}`,
+            (channel, emettre) =>
+                channel.on(
+                    'postgres_changes',
+                    {
+                        event: '*',
+                        schema: 'public',
+                        table: 'hybrid_nodes',
+                        // Le filtre par workspace tient l'isolation côté serveur ;
+                        // le topic la tient côté client.
+                        filter: `workspace_id=eq.${workspaceId}`,
+                    },
+                    (payload) =>
+                        emettre(
+                            payload.eventType === 'DELETE'
+                                ? ['DELETE', { id: (payload.old as Row).id }]
+                                : [
+                                      payload.eventType as 'INSERT' | 'UPDATE',
+                                      rowToNode(payload.new as Row),
+                                  ],
+                        ),
+                ),
+            ([event, node]) => handler(event, node),
+        );
     },
 };

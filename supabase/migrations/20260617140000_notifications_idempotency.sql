@@ -2,9 +2,15 @@
 -- Organigrad — idempotence des notifications (Priorité 5)
 --
 -- Ajoute une clé d'idempotence aux notifications pour empêcher les doubles envois
--- (retries de la même transition). L'Edge Function `notify-email` consulte cette
--- clé avant d'envoyer ; l'unicité partielle garantit qu'un même envoi réussi
--- n'est pas dupliqué.
+-- (retries de la même transition). L'Edge Function `notify-email` RÉSERVE cette
+-- clé (`status = 'pending'`) AVANT d'envoyer : c'est l'unicité partielle
+-- ci-dessous qui arbitre entre deux invocations concurrentes.
+--
+-- Note de 2026-08-22 : la formulation d'origine disait que cette unicité
+-- « garantit qu'un même envoi réussi n'est pas dupliqué ». C'était faux tant que
+-- la fonction consultait la clé AVANT d'envoyer et ne l'insérait qu'APRÈS —
+-- l'index ne faisait alors échouer que la seconde écriture, l'e-mail étant déjà
+-- parti. L'ordre a été corrigé dans la fonction ; la garantie tient désormais.
 -- ════════════════════════════════════════════════════════════════════════════
 
 alter table public.notifications

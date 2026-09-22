@@ -2,18 +2,22 @@ import React from 'react';
 import { BaseModal } from './BaseModal';
 import type { Agent } from '../types/agent';
 import { User, Building, MapPin, Clock, Award, CheckCircle2, Mail, Phone } from 'lucide-react';
+import { useFeedback } from '../feedback/FeedbackContext';
 
 interface ProfileModalProps {
     isOpen: boolean;
     onClose: () => void;
     agent: Agent | null;
     isEditMode?: boolean;
-    onSave?: (id: string, updates: Partial<Agent>) => void;
+    onSave?: (id: string, updates: Partial<Agent>) => Promise<{ ok: boolean; message?: string }>;
 }
 
 export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose, agent, isEditMode = false, onSave }) => {
+    const feedback = useFeedback();
     const [formData, setFormData] = React.useState<Partial<Agent>>({});
     const fileInputRef = React.useRef<HTMLInputElement>(null);
+    const [isSaving, setIsSaving] = React.useState(false);
+    const [saveError, setSaveError] = React.useState<string | null>(null);
 
     const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
@@ -21,6 +25,12 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose, age
         const reader = new FileReader();
         reader.onload = (ev) => {
             setFormData((prev) => ({ ...prev, avatarUrl: ev.target?.result as string }));
+        };
+        // Une lecture qui échoue (fichier corrompu, permission refusée) était
+        // totalement silencieuse — aucun retour, la photo restait simplement
+        // inchangée sans explication. Audit P3.
+        reader.onerror = () => {
+            feedback.error("Lecture de l'image impossible. Réessayez avec un autre fichier.");
         };
         reader.readAsDataURL(file);
     };
@@ -31,13 +41,21 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose, age
 
     if (!agent) return null;
 
-    const handleSave = () => {
+    const handleSave = async () => {
         if (!onSave || !agent.id) return;
         if (formData.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
-            alert('Adresse email invalide.');
+            setSaveError('Adresse email invalide.');
             return;
         }
-        onSave(agent.id, formData);
+        setSaveError(null);
+        setIsSaving(true);
+        const result = await onSave(agent.id, formData);
+        setIsSaving(false);
+        if (!result.ok) {
+            setSaveError(result.message ?? 'Modification non enregistrée. Réessayez.');
+            return;
+        }
+        feedback.success(`Fiche mise a jour · ${agent.prenom} ${agent.nom}.`);
         onClose();
     };
 
@@ -67,24 +85,39 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose, age
             <div className="flex flex-col md:flex-row gap-8">
                 {/* Photo & Basic Info */}
                 <div className="flex flex-col items-center flex-shrink-0">
-                    <div
-                        className="w-32 h-32 rounded-full border-4 border-slate-50 shadow-xl overflow-hidden mb-4 relative group"
-                        onClick={isEditMode ? () => fileInputRef.current?.click() : undefined}
-                        style={isEditMode ? { cursor: 'pointer' } : undefined}
-                    >
-                        {(isEditMode ? formData.avatarUrl : agent.avatarUrl) ? (
-                            <img src={isEditMode ? (formData.avatarUrl as string) : agent.avatarUrl} alt={agent.nom} className="w-full h-full object-cover" />
-                        ) : (
-                            <div className="w-full h-full bg-slate-100 flex items-center justify-center text-slate-300">
-                                <User className="w-16 h-16" />
-                            </div>
-                        )}
-                        {isEditMode && (
+                    {/* <button> plutôt que <div onClick> uniquement en mode
+                        édition (lecture seule = pas de zone interactive) —
+                        cette zone n'était atteignable ni au clavier ni par
+                        lecteur d'écran. Audit P3. */}
+                    {isEditMode ? (
+                        <button
+                            type="button"
+                            aria-label="Changer la photo de l'agent"
+                            className="w-32 h-32 rounded-full border-4 border-slate-50 shadow-xl overflow-hidden mb-4 relative group cursor-pointer"
+                            onClick={() => fileInputRef.current?.click()}
+                        >
+                            {formData.avatarUrl ? (
+                                <img src={formData.avatarUrl as string} alt={agent.nom} className="w-full h-full object-cover" />
+                            ) : (
+                                <div className="w-full h-full bg-slate-100 flex items-center justify-center text-slate-300">
+                                    <User className="w-16 h-16" />
+                                </div>
+                            )}
                             <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                                 <p className="text-[8px] text-white font-black uppercase">Changer</p>
                             </div>
-                        )}
-                    </div>
+                        </button>
+                    ) : (
+                        <div className="w-32 h-32 rounded-full border-4 border-slate-50 shadow-xl overflow-hidden mb-4 relative">
+                            {agent.avatarUrl ? (
+                                <img src={agent.avatarUrl} alt={agent.nom} className="w-full h-full object-cover" />
+                            ) : (
+                                <div className="w-full h-full bg-slate-100 flex items-center justify-center text-slate-300">
+                                    <User className="w-16 h-16" />
+                                </div>
+                            )}
+                        </div>
+                    )}
                     {isEditMode && (
                         <input
                             ref={fileInputRef}
@@ -147,14 +180,17 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose, age
 
                     {isEditMode ? (
                         <div className="flex gap-3 pt-4">
+                            {saveError && <p className="w-full text-sm font-medium text-red-600">{saveError}</p>}
                             <button
-                                onClick={handleSave}
+                                onClick={() => void handleSave()}
+                                disabled={isSaving}
                                 className="flex-1 h-12 bg-blue-600 text-white font-black uppercase tracking-widest text-xs rounded-2xl shadow-xl shadow-blue-200 hover:bg-blue-700 transition-all"
                             >
-                                Enregistrer
+                                {isSaving ? 'Enregistrement…' : 'Enregistrer'}
                             </button>
                             <button
                                 onClick={onClose}
+                                disabled={isSaving}
                                 className="flex-1 h-12 bg-slate-100 text-slate-500 font-black uppercase tracking-widest text-xs rounded-2xl hover:bg-slate-200 transition-all"
                             >
                                 Annuler
