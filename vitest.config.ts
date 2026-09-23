@@ -31,6 +31,9 @@ export default defineConfig({
       VITE_SUPABASE_ANON_KEY: '',
       VITE_ORCHESTRATOR_URL: '',
     },
+    // Plusieurs suites UI partagent des ressources jsdom coûteuses. Un seul
+    // worker évite les timeouts intermittents observés sous contention.
+    maxWorkers: 1,
     testTimeout: 10000,
   },
 });
