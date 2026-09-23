@@ -59,7 +59,10 @@ export function registerCircuitRoutes(app:FastifyInstance,deps:{sql:Sql;appUrl?:
     if(!nodes[0])throw new CircuitError('ASSIGNEE_NOT_FOUND',400);
    }
   }
-  const circuit=await auth.store.saveDefinition(definition,auth.actorId,edit?id((req.params as {id:string}).id):undefined,body.expectedVersion);
+  let native;
+  try { native=nativeProjectRef(deps.appUrl,definition.project.projectId,req.workspaceId!); }
+  catch { throw new CircuitError('PROJECT_ORIGIN_UNQUALIFIED',503); }
+  const circuit=await auth.store.saveDefinition(definition,auth.actorId,native,edit?id((req.params as {id:string}).id):undefined,body.expectedVersion);
   return reply.code(edit?200:201).send({circuit});
  }
  app.post('/api/circuits',route((req,reply)=>save(req,reply,false)));

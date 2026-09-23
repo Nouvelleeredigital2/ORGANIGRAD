@@ -21,7 +21,7 @@ it('recovers a missed occurrence once with its original definition and preserves
   }
   const sql=adapter(db),store=new PgCircuitStore(sql,ws),scheduling=new PgCircuitScheduling(sql,ws);
   const definition=CircuitDefinitionSchema.parse({name:'Veille originale',project:{projectId:project,workspaceId:ws,sourceApp:'organigrad',canonicalUrl:'https://example.org/p'},schedule:{weekday:1,hour:7,minute:0},steps:[{id:'watch',kind:'watch',assigneeId:ws,instructions:'Veille'},{id:'final',kind:'approval',assigneeId:ws,instructions:'Valider'}]});
-  const circuit=await store.saveDefinition(definition,ws);
+  const circuit=await store.saveDefinition(definition,ws,definition.project);
   await scheduling.configure(circuit.id,{idempotencyKey:grant,expectedVersion:1,expiresAt:new Date(Date.now()+14*86400000).toISOString()},ws);
   await db.query('update team_circuits set enabled=true where id=$1',[circuit.id]);
   await db.query("update circuit_schedule_cursors set next_due_at='2026-01-05T06:00:00Z'");
@@ -29,7 +29,7 @@ it('recovers a missed occurrence once with its original definition and preserves
   expect(missed?.status).toBe('missed');
   const occurrenceId=missed!.id;
   const cursorBeforeEdit=(await db.query('select next_due_at from circuit_schedule_cursors')).rows;
-  await store.saveDefinition({...definition,name:'Nouvelle définition'},ws,circuit.id,1);
+  await store.saveDefinition({...definition,name:'Nouvelle définition'},ws,definition.project,circuit.id,1);
   expect((await db.query('select next_due_at from circuit_schedule_cursors')).rows).toEqual(cursorBeforeEdit);
   expect(await scheduling.occurrences(circuit.id,ws)).toMatchObject([{id:occurrenceId,status:'missed',recoveredRunId:null}]);
   await db.exec("update workspace_members set role='member'");

@@ -15,9 +15,12 @@ export class PgCircuitStore {
  async list():Promise<StoredCircuit[]> {
   return this.sql<StoredCircuit[]>`select id,version,definition,enabled from public.team_circuits where workspace_id=${this.workspaceId} order by updated_at desc limit 100`;
  }
- async saveDefinition(input:CircuitDefinition,actorId:string,id?:string,expectedVersion?:number):Promise<StoredCircuit> {
+ async saveDefinition(input:CircuitDefinition,actorId:string,nativeProject:CircuitDefinition['project'],id?:string,expectedVersion?:number):Promise<StoredCircuit> {
   const definition=CircuitDefinitionSchema.parse(input);
-  if(definition.project.workspaceId!==this.workspaceId || definition.project.sourceApp!=='organigrad')throw new CircuitError('PROJECT_BINDING_REQUIRED',400);
+  if(definition.project.workspaceId!==this.workspaceId || definition.project.sourceApp!=='organigrad' ||
+    definition.project.projectId!==nativeProject.projectId || definition.project.workspaceId!==nativeProject.workspaceId ||
+    definition.project.sourceApp!==nativeProject.sourceApp || definition.project.canonicalUrl!==nativeProject.canonicalUrl)
+    throw new CircuitError('PROJECT_BINDING_REQUIRED',400);
   const result=await this.sql.begin(async tx=>{
    const role=await this.member(tx,actorId);
    if(definition.steps.some(step=>['approval','selection'].includes(step.kind)&&step.validatorKind==='bot')&&!['admin','owner'].includes(role))throw new CircuitError('ADMIN_REQUIRED_FOR_BOT_APPROVAL',403);

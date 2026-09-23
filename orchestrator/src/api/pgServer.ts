@@ -21,7 +21,7 @@ import { PgCircuitReceipts } from '../state/pgCircuitReceipts.js';
 import { PgCircuitStore } from '../state/pgCircuitStore.js';
 import type { OrvionServiceClient } from '../integrations/orvionServiceClient.js';
 import { isPrivateProjectPath, isPrivateProjectRoute, registerPrivateProjectRoutes } from './privateProjectRoutes.js';
-import { isLinkBridgeDecisionPath, registerLinkBridgeRoutes, ReplayGuard, type LinkBridgeConfig, type NodeDecisionResult } from './linkBridgeRoutes.js';
+import { isLinkBridgeDecisionPath, registerLinkBridgeRoutes, type LinkBridgeConfig, type NodeDecisionResult } from './linkBridgeRoutes.js';
 import { registerLinkCircuitBridgeRoutes } from './linkCircuitBridgeRoutes.js';
 import type { JsonObject } from '../domain/types.js';
 import { verifySupabaseJwt } from './userAuth.js';
@@ -885,7 +885,6 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
     );
 
     // --- Pont LINK : décisions relayées par acteur signé + attestations ------
-    const linkBridgeReplays = new ReplayGuard();
     registerLinkBridgeRoutes(app, {
         sql: deps.sql,
         config: deps.linkBridge,
@@ -894,16 +893,14 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
         fetchImpl: deps.fetchImpl,
         fetchLookup: deps.fetchLookup,
         now: deps.linkBridgeNow,
-        replays: linkBridgeReplays,
     });
     // --- Pont LINK : dossiers et décisions de CIRCUIT (recette Atelier Boréal).
-    // Même assertion d'acteur, même garde anti-rejeu ; exige les circuits.
+    // Même assertion d'acteur et même réservation durable ; exige les circuits.
     registerLinkCircuitBridgeRoutes(app, {
         sql: deps.sql,
         config: deps.circuitsEnabled === true ? deps.linkBridge : undefined,
         appUrl: deps.notifierOptions?.appUrl,
         storeFor: (workspaceId) => new PgCircuitStore(deps.sql, workspaceId),
-        replays: linkBridgeReplays,
         now: deps.linkBridgeNow,
     });
 
