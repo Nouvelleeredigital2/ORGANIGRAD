@@ -24,7 +24,7 @@ import { z } from 'zod';
 import { ArtifactReferenceSchema, CircuitDecisionSchema } from '@apps2026/contracts';
 import { nativeProjectRef } from './projectRef.js';
 import { hasScope, scopesForRole, SCOPES } from './scopes.js';
-import { actorBodySha256, IdentityAssertionError, verifyActorAssertion, type ActorAssertionClaims } from './identityAssertions.js';
+import { actorBodySha256, IdentityAssertionError, reserveActorAssertion, verifyActorAssertion, type ActorAssertionClaims } from './identityAssertions.js';
 import type { LinkBridgeConfig } from './linkBridgeRoutes.js';
 import { CircuitError, type CircuitExecution } from '../orchestration/circuits.js';
 import type { PgCircuitStore } from '../state/pgCircuitStore.js';
@@ -81,10 +81,7 @@ export function registerLinkCircuitBridgeRoutes(app: FastifyInstance, deps: Link
         if (claims.purpose!==expected.purpose || claims.method!==expected.method || claims.route!==expected.route || claims.bodySha256!==actorBodySha256(expected.body) || claims.idempotencyKey!==expected.idempotencyKey)
             return reply.code(403).send({ error: 'ACTOR_ASSERTION_INVALID', code: 'REQUEST_BINDING_MISMATCH' });
         if (!canonicalUrlMatches(deps.appUrl, claims.project)) return reply.code(403).send({ error: 'UNQUALIFIED_PROJECT_REFERENCE' });
-        const reserved=await deps.sql<{request_id:string}[]>`insert into public.actor_assertion_requests(request_id,purpose,http_method,route,body_sha256,idempotency_key,expires_at)
-            values(${claims.requestId},${claims.purpose},${claims.method},${claims.route},${claims.bodySha256},${claims.idempotencyKey},to_timestamp(${claims.expiresAt}))
-            on conflict(request_id) do nothing returning request_id`;
-        if(!reserved[0])return reply.code(409).send({error:'ACTOR_ASSERTION_REPLAYED'});
+        if(!await reserveActorAssertion(deps.sql,claims))return reply.code(409).send({error:'ACTOR_ASSERTION_REPLAYED'});
         return claims;
     }
     /** Le rôle vient de NOTRE table des membres, jamais du hub ni de LINK. */

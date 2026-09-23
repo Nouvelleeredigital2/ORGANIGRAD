@@ -15,6 +15,7 @@
  * code, jamais le jeton ni ses claims.
  */
 import { createHash, createPrivateKey, createPublicKey, sign, verify, type KeyObject } from 'node:crypto';
+import type { Sql } from 'postgres';
 import { z } from 'zod';
 
 export type IdentityAssertionErrorCode =
@@ -86,6 +87,16 @@ function canonicalJson(value: unknown): string {
 }
 export function actorBodySha256(value: unknown): string {
     return createHash('sha256').update(canonicalJson(value)).digest('hex');
+}
+
+/** Réserve une assertion et déclenche la purge bornée définie par la migration. */
+export async function reserveActorAssertion(sql: Sql, claims: ActorAssertionClaims): Promise<boolean> {
+    const rows = await sql<{ reserved: boolean }[]>`
+        select public.reserve_actor_assertion_request(
+            ${claims.requestId},${claims.purpose},${claims.method},${claims.route},
+            ${claims.bodySha256},${claims.idempotencyKey},to_timestamp(${claims.expiresAt})
+        ) as reserved`;
+    return rows[0]?.reserved === true;
 }
 
 const attestationBase = {

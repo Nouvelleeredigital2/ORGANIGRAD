@@ -29,6 +29,7 @@ import {
     IdentityAssertionError,
     signOrganigradAttestation,
     verifyActorAssertion,
+    reserveActorAssertion,
     type ActorAssertionClaims,
     type OrganigradAttestationClaims,
 } from './identityAssertions.js';
@@ -155,10 +156,7 @@ export function registerLinkBridgeRoutes(app: FastifyInstance, deps: LinkBridgeR
             }
 
             try {
-                const reserved=await deps.sql<{request_id:string}[]>`insert into public.actor_assertion_requests(request_id,purpose,http_method,route,body_sha256,idempotency_key,expires_at)
-                    values(${claims.requestId},${claims.purpose},${claims.method},${claims.route},${claims.bodySha256},${claims.idempotencyKey},to_timestamp(${claims.expiresAt}))
-                    on conflict(request_id) do nothing returning request_id`;
-                if(!reserved[0])return reply.code(409).send({error:'ACTOR_ASSERTION_REPLAYED'});
+                if(!await reserveActorAssertion(deps.sql,claims))return reply.code(409).send({error:'ACTOR_ASSERTION_REPLAYED'});
                 // Le nœud doit exister DANS le workspace affirmé par le hub —
                 // jamais résolu à partir d'un autre workspace.
                 const nodes = await deps.sql<{ id: string }[]>`
