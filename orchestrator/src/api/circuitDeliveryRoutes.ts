@@ -15,11 +15,18 @@ import type { PgCircuitStore } from '../state/pgCircuitStore.js';
  */
 const target = z.object({ appId: z.string().regex(/^[a-z][a-z0-9-]{1,63}$/), workspaceId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/), resourceId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/) }).strict();
 const httpsUrl = z.string().max(4096).url().refine(value => { try { const u = new URL(value); return u.protocol === 'https:' && !u.username && !u.password; } catch { return false; } });
-const body = z.object({
-    grantId: z.string().uuid(), target, runVersion: z.number().int().positive(), operation: z.enum(orvionOperations),
-    editorial: z.object({ boardId: z.string().uuid(), dossierId: z.string().uuid() }).strict(),
+const delivery = z.object({
+    operation: z.enum(orvionOperations),
     payload: z.object({ content: z.string().min(1).max(200000), sources: z.array(httpsUrl).max(100).optional(), expectedVersion: z.number().int().min(0).optional(), kind: z.enum(orvionArtifactKinds).optional() }).strict(),
 }).strict();
+const common = {
+    grantId: z.string().uuid(), target, runVersion: z.number().int().positive(),
+    editorial: z.object({ boardId: z.string().uuid(), dossierId: z.string().uuid() }).strict(),
+};
+const body = z.union([
+    z.object({...common, ...delivery.shape}).strict(),
+    z.object({...common, deliveries: z.array(delivery).min(1).max(11)}).strict(),
+]);
 const params = z.object({ runId: z.string().uuid(), stepId: z.string().min(1).max(128).regex(/^[a-zA-Z0-9_.:-]+$/) }).strict();
 const conflicts = new Set(['PAYLOAD_CONFLICT', 'DELIVERY_UNRESOLVED', 'STALE_EXECUTION', 'STEP_NOT_READY', 'IDEMPOTENCY_CONFLICT', 'STALE_GRANT', 'RECEIPT_UNCERTAIN', 'RECEIPT_CONFLICT', 'RECEIPT_ACCEPTED_STATE_UNPERSISTED', 'RECEIPT_UNCERTAIN_UNPERSISTED', 'EXECUTION_NOT_ACTIVE', 'INVALID_STEP_OUTPUT', 'DOSSIER_INCOMPLETE']);
 const denied = new Set(['HUMAN_SESSION_REQUIRED', 'SERVICE_KEY_REQUIRED', 'PROJECT_UNAVAILABLE', 'GRANT_UNAVAILABLE', 'GRANT_REVOKED', 'KEY_UNAVAILABLE', 'NODE_UNAVAILABLE', 'KEY_SCOPE_REQUIRED', 'TARGET_MISMATCH', 'ACTION_FORBIDDEN', 'GRANTOR_REVOKED', 'RUN_UNAVAILABLE', 'STEP_FORBIDDEN', 'GRANT_EXPIRED', 'MANDATE_UNAVAILABLE', 'RUN_NOT_FOUND']);
@@ -44,6 +51,7 @@ export function registerCircuitDeliveryRoutes(app: FastifyInstance, deps: Circui
             const workspaceId = req.workspaceId, apiKeyId = req.apiKeyId;
             const route = params.parse(req.params);
             const input = body.parse(req.body);
+            if (input.target.appId !== 'atelier-orvion' || input.target.resourceId !== input.editorial.boardId) throw new Error('TARGET_MISMATCH');
             const key: CircuitReceiptKey = { runId: route.runId, runVersion: input.runVersion, stepId: route.stepId };
             // Le projet du run est lu dans son état, jamais dans le corps ; la délégation le revérifie.
             const runs = await deps.sql<{ project_id: string | null }[]>`select state#>>'{definition,project,projectId}' as project_id from public.circuit_executions where id=${route.runId} and workspace_id=${workspaceId}`;
@@ -60,11 +68,12 @@ export function registerCircuitDeliveryRoutes(app: FastifyInstance, deps: Circui
                 return { grantId: result.grantId, project: assertNativeProjectRef(deps.appUrl, result.project, projectId, workspaceId) };
             };
             const delivered = await deliverProductionStep(
-                { key, editorial: input.editorial, operation: input.operation, payload: input.payload },
+                { key, editorial: input.editorial, ...('deliveries' in input ? {deliveries:input.deliveries} : {operation:input.operation,payload:input.payload}) },
                 { receipts: deps.receiptsFor(workspaceId), orvion: deps.orvion, authorize, store: deps.storeFor(workspaceId), workspaceId },
             );
             const run: CircuitExecution = delivered.run;
-            return { receiptId: delivered.receipt.id, reference: delivered.reference, runVersion: run.version, reused: delivered.reused };
+            const result = { receiptId: delivered.receipt.id, reference: delivered.reference, runVersion: run.version, reused: delivered.reused };
+            return 'deliveries' in input ? {...result, receiptIds: delivered.receipts.map(receipt=>receipt.id), references: delivered.references} : result;
         } catch (error) {
             if (error instanceof z.ZodError) return reply.code(400).send({ error: 'INVALID_DELIVERY_INPUT' });
             if (error instanceof ReceiptedDeliveryError) {
