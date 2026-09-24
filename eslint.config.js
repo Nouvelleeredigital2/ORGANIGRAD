@@ -16,6 +16,7 @@ export default defineConfig([
     'coverage',
     'test-results',
     'playwright-report',
+    '.worktrees/**',
     'e2e-projects/test-results/**',
     'e2e-projects/playwright-report/**',
     'node_modules',

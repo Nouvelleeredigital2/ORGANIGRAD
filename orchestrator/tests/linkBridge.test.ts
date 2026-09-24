@@ -6,14 +6,15 @@
  * module vérifié) pour prouver l'interopérabilité du contrat de fil.
  */
 import { PGlite } from '@electric-sql/pglite';
+import { readFileSync } from 'node:fs';
 import Fastify from 'fastify';
 import { createHash, createHmac, generateKeyPairSync, randomUUID, sign } from 'node:crypto';
 import type { Sql } from 'postgres';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadEnv } from '../src/config/env.js';
 import { loadLinkBridgeConfig, LinkBridgeConfigError } from '../src/api/linkBridgeConfig.js';
-import { verifyOrganigradAttestation, verifyActorAssertion, IdentityAssertionError } from '../src/api/identityAssertions.js';
-import { ReplayGuard, registerLinkBridgeRoutes, type LinkBridgeConfig } from '../src/api/linkBridgeRoutes.js';
+import { actorBodySha256, verifyOrganigradAttestation, verifyActorAssertion, IdentityAssertionError } from '../src/api/identityAssertions.js';
+import { registerLinkBridgeRoutes, type LinkBridgeConfig } from '../src/api/linkBridgeRoutes.js';
 
 const WS = '11111111-1111-4111-8111-111111111111';
 const OTHER_WS = '99999999-9999-4999-8999-999999999999';
@@ -57,11 +58,15 @@ function actorClaims(over: Record<string, unknown> = {}) {
         version: '1.0', issuerApp: 'synapse-hub', audienceApp: 'organigrad',
         linkId: randomUUID(), linkUserId: randomUUID(), organigradUserId: OWNER,
         project: { sourceApp: 'organigrad', workspaceId: WS, projectId: PROJECT, canonicalUrl: CANONICAL },
-        requestId: randomUUID(), issuedAt: now, expiresAt: now + 60, ...over,
+        requestId: randomUUID(), purpose:'node-decision',method:'POST',route:`/api/link-bridge/nodes/${NODE}/decision`,bodySha256:actorBodySha256({decision:'approved'}),idempotencyKey:null,
+        issuedAt: now, expiresAt: now + 60, ...over,
     };
 }
-const actor = (over: Record<string, unknown> = {}, header: Record<string, unknown> = {}) =>
-    jws({ alg: 'EdDSA', typ: 'synapse-identity-actor+jwt', kid: 'hub-2026', ...header }, actorClaims(over));
+const actorTokens=new Map<string,Record<string,unknown>>();
+const actor = (over: Record<string, unknown> = {}, header: Record<string, unknown> = {}) => {
+    const claims=actorClaims(over);const token=jws({ alg: 'EdDSA', typ: 'synapse-identity-actor+jwt', kid: 'hub-2026', ...header },claims);
+    if(Object.keys(header).length===0)actorTokens.set(token,claims);return token;
+};
 
 function sessionJwt(sub: string): string {
     const h = b64(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
@@ -95,6 +100,7 @@ beforeEach(async () => {
     now = 1_800_000_000;
     db = new PGlite();
     await db.exec(`
+        create role anon; create role authenticated; create role service_role;
         create table workspace_members(workspace_id uuid, user_id uuid, role text, primary key(workspace_id,user_id));
         create table workspace_api_keys(id uuid primary key, workspace_id uuid, key_hash text, scopes text[], expires_at timestamptz, revoked_at timestamptz, last_used_at timestamptz);
         create table hybrid_nodes(id uuid primary key, workspace_id uuid, type text, nom text, role_titre text default '', parent_id uuid, grade_id text default '',
@@ -106,6 +112,7 @@ beforeEach(async () => {
         insert into hybrid_nodes(id,workspace_id,type,nom,status) values ('${NODE}','${WS}','HUMAN','Validation Boréal','WAITING_HUMAN_APPROVAL'), ('${OTHER_NODE}','${OTHER_WS}','HUMAN','Ailleurs','WAITING_HUMAN_APPROVAL');
         insert into workspace_api_keys(id,workspace_id,key_hash,scopes) values ('${API_KEY_ID}','${WS}','${createHash('sha256').update(API_KEY).digest('hex')}',array['graph:read','node:read']);
     `);
+    await db.exec(readFileSync(new URL('../../supabase/migrations/20260924120000_actor_assertion_requests.sql', import.meta.url),'utf8'));
 }, 30000);
 afterEach(async () => { await db.close(); });
 
@@ -122,8 +129,12 @@ async function server(opts: { enabled?: boolean; fetchImpl?: typeof fetch } = {}
     await app.ready();
     return app;
 }
-const decide = (app: import('fastify').FastifyInstance, assertion: string | string[] | undefined, body: Record<string, unknown> = { decision: 'approved' }, nodeId = NODE, extra: Record<string, string> = {}) =>
-    app.inject({ method: 'POST', url: `/api/link-bridge/nodes/${nodeId}/decision`, payload: body, headers: { ...(assertion !== undefined ? { 'x-synapse-actor': assertion } : {}), ...extra } });
+const decide = (app: import('fastify').FastifyInstance, assertion: string | string[] | undefined, body: Record<string, unknown> = { decision: 'approved' }, nodeId = NODE, extra: Record<string, string> = {}) => {
+    const route=`/api/link-bridge/nodes/${nodeId}/decision`;
+    const claims=typeof assertion==='string'?actorTokens.get(assertion):undefined;
+    const bound=claims?jws({alg:'EdDSA',typ:'synapse-identity-actor+jwt',kid:'hub-2026'},{...claims,purpose:'node-decision',method:'POST',route,bodySha256:actorBodySha256(body),idempotencyKey:null}):assertion;
+    return app.inject({ method: 'POST', url: route, payload: body, headers: { ...(bound !== undefined ? { 'x-synapse-actor': bound } : {}), ...extra } });
+};
 
 describe('POST /api/link-bridge/nodes/:nodeId/decision', () => {
     it('applies an owner decision relayed by LINK exactly like a human approval, with a link-bridge audit trace', async () => {
@@ -209,7 +220,7 @@ describe('POST /api/link-bridge/nodes/:nodeId/decision', () => {
         } finally { await app.close(); }
     });
 
-    it('rejects a replayed requestId inside the 120 s window (409) before any business check', async () => {
+    it('rejects a replayed requestId durably (409) before any business check', async () => {
         const app = await server();
         try {
             const claims = actorClaims();
@@ -223,10 +234,6 @@ describe('POST /api/link-bridge/nodes/:nodeId/decision', () => {
             // Fenêtre écoulée : plus un rejeu, mais l'assertion elle-même est expirée.
             expect((await decide(app, first)).statusCode).toBe(403);
         } finally { await app.close(); }
-        const guard = new ReplayGuard(1000);
-        expect(guard.accept('a', 0)).toBe(true);
-        expect(guard.accept('a', 999)).toBe(false);
-        expect(guard.accept('a', 1000)).toBe(true);
     });
 
     it('requires the canonical native project reference (403 UNQUALIFIED_PROJECT_REFERENCE)', async () => {
