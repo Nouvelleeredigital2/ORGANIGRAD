@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CircuitDefinitionSchema, type ArtifactReference } from '@apps2026/contracts';
 import type { LinkBridgeConfig } from '../src/api/linkBridgeRoutes.js';
 import { startExecution, completeStep, type CircuitExecution } from '../src/orchestration/circuits.js';
+import { actorBodySha256 } from '../src/api/identityAssertions.js';
 
 const WS = '11111111-1111-4111-8111-111111111111';
 const OTHER_WS = '99999999-9999-4999-8999-999999999999';
@@ -42,7 +43,7 @@ function jws(claims: Record<string, unknown>, key = hub.privateKey, header: Reco
     return `${h}.${p}.${b64(sign(null, Buffer.from(`${h}.${p}`), key))}`;
 }
 /** Une assertion par appel : LINK résout un acteur (requestId neuf) à chaque décision. */
-const actor = (over: Record<string, unknown> = {}) => jws({
+const actor = (over: Record<string, unknown> = {}) => ({
     version: '1.0', issuerApp: 'synapse-hub', audienceApp: 'organigrad',
     linkId: randomUUID(), linkUserId: randomUUID(), organigradUserId: OWNER,
     project: { sourceApp: 'organigrad', workspaceId: WS, projectId: PROJECT, canonicalUrl: CANONICAL },
@@ -85,7 +86,7 @@ let runId: string, otherProjectRunId: string;
 beforeEach(async () => {
     now = 1_800_000_000; runId = randomUUID(); otherProjectRunId = randomUUID();
     db = new PGlite();
-    await db.exec(`create role authenticated;create role anon;
+    await db.exec(`create role authenticated;create role anon;create role service_role;
         create table public.workspaces(id uuid primary key);
         create table public.projects(id uuid primary key,workspace_id uuid not null references workspaces(id),archived_at timestamptz);
         create function public.is_workspace_member(uuid) returns boolean language sql as $$select true$$;
@@ -97,6 +98,7 @@ beforeEach(async () => {
         insert into workspace_members values ('${WS}','${OWNER}','owner'),('${WS}','${MEMBER}','member'),('${WS}','${VIEWER}','viewer'),('${OTHER_WS}','${STRANGER}','owner');
         insert into hybrid_nodes(id,workspace_id,type,nom) values ('${ERIC}','${WS}','AGENT_IA','Eric'),('${GUARDIAN}','${WS}','AGENT_IA','Gardien');`);
     await db.exec(readFileSync(new URL('../../supabase/migrations/20260911150000_circuits.sql', import.meta.url), 'utf8'));
+    await db.exec(readFileSync(new URL('../../supabase/migrations/20260924120000_actor_assertion_requests.sql', import.meta.url), 'utf8'));
     for (const [id, projectId, def] of [[runId, PROJECT, definition], [otherProjectRunId, OTHER_PROJECT, { ...definition, project: { ...definition.project, projectId: OTHER_PROJECT, canonicalUrl: `${APP_URL}/?v=projects&project=${OTHER_PROJECT}&workspace=${WS}` } }]] as const) {
         await db.query('insert into public.team_circuits(id,workspace_id,project_id,definition,created_by) values($1,$2,$3,$4,$5)', [id, WS, projectId, JSON.stringify(def), OWNER]);
         const initial = startExecution(id, def, 1);
@@ -111,9 +113,17 @@ async function server(enabled = true) {
     await app.ready(); return app;
 }
 type App = import('fastify').FastifyInstance;
-const decide = (app: App, assertion: string | undefined, body: Record<string, unknown>, id = runId, extra: Record<string, string> = {}) =>
-    app.inject({ method: 'POST', url: `/api/link-bridge/circuit-runs/${id}/decisions`, payload: body, headers: { ...(assertion !== undefined ? { 'x-synapse-actor': assertion } : {}), ...extra } });
-const list = (app: App, assertion: string | undefined) => app.inject({ method: 'GET', url: '/api/link-bridge/circuit-runs', headers: assertion !== undefined ? { 'x-synapse-actor': assertion } : {} });
+type AssertionInput=string|Record<string,unknown>|undefined;
+const token=(input:AssertionInput,binding:Record<string,unknown>)=>typeof input==='string'?input:input===undefined?undefined:jws({...input,...binding});
+const decide = (app: App, assertion: AssertionInput, body: Record<string, unknown>, id = runId, extra: Record<string, string> = {}) => {
+    const route=`/api/link-bridge/circuit-runs/${id}/decisions`;
+    const signed=token(assertion,{purpose:'circuit-decision',method:'POST',route,bodySha256:actorBodySha256(body),idempotencyKey:body.idempotencyKey});
+    return app.inject({ method: 'POST', url: route, payload: body, headers: { ...(signed !== undefined ? { 'x-synapse-actor': signed } : {}), ...extra } });
+};
+const list = (app: App, assertion: AssertionInput) => {
+    const signed=token(assertion,{purpose:'circuit-runs-list',method:'GET',route:'/api/link-bridge/circuit-runs',bodySha256:actorBodySha256(null),idempotencyKey:null});
+    return app.inject({ method: 'GET', url: '/api/link-bridge/circuit-runs', headers: signed !== undefined ? { 'x-synapse-actor': signed } : {} });
+};
 const selection = (run: CircuitExecution, over: Record<string, unknown> = {}) => ({ stepId: 'selection', choice: 'approve', expectedVersion: run.version, idempotencyKey: randomUUID(), selectedArtifact: artifact('subject'), ...over });
 
 describe('GET /api/link-bridge/circuit-runs', () => {
@@ -221,16 +231,23 @@ describe('POST /api/link-bridge/circuit-runs/:runId/decisions', () => {
             expect((await decide(app, actor({ project: { sourceApp: 'organigrad', workspaceId: WS, projectId: PROJECT, canonicalUrl: `https://evil.example/?v=projects&project=${PROJECT}&workspace=${WS}` } }), selection(run))).json()).toEqual({ error: 'UNQUALIFIED_PROJECT_REFERENCE' });
             expect((await decide(app, undefined, selection(run))).json()).toEqual({ error: 'ACTOR_ASSERTION_REQUIRED' });
             expect((await decide(app, actor(), selection(run), runId, { authorization: 'Bearer ok_x' })).json()).toEqual({ error: 'UNEXPECTED_AUTHORIZATION' });
-            // Rejeu du même requestId : refusé même avec un corps valide.
+            const boundBody=selection(run);
+            const boundRoute=`/api/link-bridge/circuit-runs/${runId}/decisions`;
+            const mismatched=jws({...actor(),purpose:'circuit-decision',method:'POST',route:boundRoute,bodySha256:actorBodySha256({...boundBody,feedback:'tampered'}),idempotencyKey:boundBody.idempotencyKey});
+            expect((await decide(app,mismatched,boundBody)).json()).toEqual({error:'ACTOR_ASSERTION_INVALID',code:'REQUEST_BINDING_MISMATCH'});
+            // Un corps invalide n'est pas réservé. Après une consommation valide,
+            // le même requestId est refusé durablement.
             const requestId = randomUUID();
             const used = actor({ requestId });
             expect((await decide(app, used, { ...selection(run), choice: 'nope' })).statusCode).toBe(400);
-            expect((await decide(app, actor({ requestId }), selection(run))).json()).toEqual({ error: 'ACTOR_ASSERTION_REPLAYED' });
+            const valid=selection(run);
+            expect((await decide(app, actor({ requestId }), valid)).statusCode).toBe(200);
+            expect((await decide(app, actor({ requestId }), valid)).json()).toEqual({ error: 'ACTOR_ASSERTION_REPLAYED' });
             // Le corps ne porte jamais l'acteur, le canal ni le projet.
             for (const extra of [{ channel: 'organigrad' }, { organigradUserId: OWNER }, { workspaceId: WS }, { project: definition.project }]) {
                 expect((await decide(app, actor(), { ...selection(run), ...extra })).statusCode, JSON.stringify(extra)).toBe(400);
             }
-            expect((await state(runId)).version).toBe(run.version);
+            expect((await state(runId)).version).toBe(run.version+1);
         } finally { await app.close(); }
     });
 

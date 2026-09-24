@@ -17,12 +17,13 @@ it('SQL: isolation, collision, snapshot et décision atomique',async()=>{
   const sql=adapter(db) as unknown as Sql;
   const store=new PgCircuitStore(sql,ws);
   const def=CircuitDefinitionSchema.parse({name:'Veille',project:{projectId:project,workspaceId:ws,sourceApp:'organigrad',canonicalUrl:'https://example.org/p'},steps:[{id:'choose',kind:'approval',assigneeId:ws,instructions:'Vérifier'},{id:'final',kind:'approval',assigneeId:ws,instructions:'Valider',correctionStepId:'choose'}]});
-  const circuit=await store.saveDefinition(def,ws);
+  await expect(store.saveDefinition(def,ws,{...def.project,canonicalUrl:'https://example.org/other'})).rejects.toThrow('PROJECT_BINDING_REQUIRED');
+  const circuit=await store.saveDefinition(def,ws,def.project);
   const a=await store.start(circuit.id,project,ws),b=await store.start(circuit.id,project,ws);
   expect(a.id).toBe(b.id);
-  await store.saveDefinition({...def,name:'Nouvelle version'},ws,circuit.id,1);
+  await store.saveDefinition({...def,name:'Nouvelle version'},ws,def.project,circuit.id,1);
   expect((await store.getRun(a.id)).definition.name).toBe('Veille');
-  await expect(store.saveDefinition(def,ws,circuit.id,1)).rejects.toThrow('STALE_CIRCUIT');
+  await expect(store.saveDefinition(def,ws,def.project,circuit.id,1)).rejects.toThrow('STALE_CIRCUIT');
   const decision={choice:'approve' as const,stepId:'choose',expectedVersion:1,idempotencyKey:ws,channel:'link' as const,feedback:''};
   const c=await store.decide(a.id,decision,{id:ws,kind:'human'});
   expect(c.currentStepId).toBe('final');

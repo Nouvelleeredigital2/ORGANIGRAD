@@ -18,7 +18,7 @@ it('SQL : une occurrence unique, retard signalé, grant révoqué et pause respe
   const sql=adapter(db) as unknown as Sql;
   const store=new PgCircuitStore(sql,ws),scheduler=new PgCircuitScheduler(sql,[project]);
   const definition=CircuitDefinitionSchema.parse({name:'Lundi',project:{projectId:project,workspaceId:ws,sourceApp:'organigrad',canonicalUrl:'https://example.org/p'},schedule:{weekday:1,hour:7,minute:0,timeZone:'Europe/Paris'},steps:[{id:'watch',kind:'watch',assigneeId:ws,instructions:'Veille'},{id:'final',kind:'approval',assigneeId:ws,instructions:'Valider'}]});
-  const circuit=await store.saveDefinition(definition,ws);
+  const circuit=await store.saveDefinition(definition,ws,definition.project);
   await db.query('insert into circuit_service_grants(id,workspace_id,project_id,granted_by,expires_at) values($1,$2,$3,$2,$4)',[ws,ws,project,'2027-01-01']);
   await db.query('insert into circuit_schedule_cursors(circuit_id,workspace_id,grant_id,next_due_at) values($1,$2,$2,$3)',[circuit.id,ws,'2026-09-14T05:00:00Z']);
   // A draft is never started, even if a cursor was prepared.

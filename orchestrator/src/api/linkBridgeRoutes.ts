@@ -25,9 +25,11 @@ import { safeFetch, type SafeFetchDeps } from '../net/ssrfGuard.js';
 import type { JsonObject } from '../domain/types.js';
 import {
     attestationLifetimeSeconds,
+    actorBodySha256,
     IdentityAssertionError,
     signOrganigradAttestation,
     verifyActorAssertion,
+    reserveActorAssertion,
     type ActorAssertionClaims,
     type OrganigradAttestationClaims,
 } from './identityAssertions.js';
@@ -70,38 +72,14 @@ export interface LinkBridgeRouteDeps {
     fetchLookup?: SafeFetchDeps['lookup'];
     /** Horloge en secondes Unix (tests). */
     now?: () => number;
-    /** Garde anti-rejeu partagée avec le pont des circuits (un `requestId`, une seule route). */
-    replays?: ReplayGuard;
 }
 
 const DECISION_PATH_PREFIX = '/api/link-bridge/';
-/** Fenêtre anti-rejeu d'un `requestId` (ms) — couvre largement les 60 s de vie d'une assertion. */
-export const REPLAY_WINDOW_MS = 120_000;
 const HUB_TIMEOUT_MS = 8_000;
 const HUB_MAX_RESPONSE_BYTES = 64 * 1024;
 
 export function isLinkBridgeDecisionPath(path: string): boolean {
     return path.startsWith(DECISION_PATH_PREFIX);
-}
-
-/** Ensemble en mémoire des `requestId` déjà acceptés, avec expiration. */
-export class ReplayGuard {
-    private readonly seen = new Map<string, number>();
-    constructor(private readonly windowMs: number = REPLAY_WINDOW_MS) {}
-
-    /** `true` si l'identifiant est nouveau (et le marque vu) ; `false` s'il rejoue. */
-    accept(id: string, nowMs: number = Date.now()): boolean {
-        this.sweep(nowMs);
-        if (this.seen.has(id)) return false;
-        this.seen.set(id, nowMs + this.windowMs);
-        return true;
-    }
-
-    private sweep(nowMs: number): void {
-        for (const [id, expiresAt] of this.seen) {
-            if (expiresAt <= nowMs) this.seen.delete(id);
-        }
-    }
 }
 
 const decisionBody = z
@@ -143,7 +121,6 @@ function canonicalUrlMatches(appUrl: string | undefined, project: ActorAssertion
 }
 
 export function registerLinkBridgeRoutes(app: FastifyInstance, deps: LinkBridgeRouteDeps): void {
-    const replays = deps.replays ?? new ReplayGuard();
     const nowSeconds = () => deps.now?.() ?? Math.floor(Date.now() / 1000);
 
     // ── 1. Décision relayée par LINK, authentifiée par l'assertion du hub ──────
@@ -171,14 +148,15 @@ export function registerLinkBridgeRoutes(app: FastifyInstance, deps: LinkBridgeR
                 const code = err instanceof IdentityAssertionError ? err.code : 'UNKNOWN';
                 return reply.code(403).send({ error: 'ACTOR_ASSERTION_INVALID', code });
             }
-            if (!replays.accept(claims.requestId, nowSeconds() * 1000)) {
-                return reply.code(409).send({ error: 'ACTOR_ASSERTION_REPLAYED' });
-            }
+            const route=`/api/link-bridge/nodes/${nodeId}/decision`;
+            if(claims.purpose!=='node-decision'||claims.method!=='POST'||claims.route!==route||claims.bodySha256!==actorBodySha256(bodyParsed.data)||claims.idempotencyKey!==null)
+                return reply.code(403).send({error:'ACTOR_ASSERTION_INVALID',code:'REQUEST_BINDING_MISMATCH'});
             if (!canonicalUrlMatches(deps.appUrl, claims.project)) {
                 return reply.code(403).send({ error: 'UNQUALIFIED_PROJECT_REFERENCE' });
             }
 
             try {
+                if(!await reserveActorAssertion(deps.sql,claims))return reply.code(409).send({error:'ACTOR_ASSERTION_REPLAYED'});
                 // Le nœud doit exister DANS le workspace affirmé par le hub —
                 // jamais résolu à partir d'un autre workspace.
                 const nodes = await deps.sql<{ id: string }[]>`

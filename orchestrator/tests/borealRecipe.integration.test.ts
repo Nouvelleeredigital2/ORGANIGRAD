@@ -21,6 +21,7 @@ import { CircuitDefinitionSchema, type ArtifactReference } from '@apps2026/contr
 import { createOrvionServiceClient } from '../src/integrations/orvionServiceClient.js';
 import { createEngineTaskClient, type EngineArtifactReference, type EngineJobStatus } from '../src/integrations/engineTaskClient.js';
 import type { LinkBridgeConfig } from '../src/api/linkBridgeRoutes.js';
+import { actorBodySha256, type ActorAssertionClaims } from '../src/api/identityAssertions.js';
 import type { CircuitExecution } from '../src/orchestration/circuits.js';
 
 const WS = '11111111-1111-4111-8111-111111111111', PROJECT = '22222222-2222-4222-8222-222222222222';
@@ -36,7 +37,7 @@ const APP_URL = 'https://organigrad.example', ORVION = 'https://orvion.example',
 const CANONICAL = `${APP_URL}/?v=projects&project=${PROJECT}&workspace=${WS}`;
 const target = (bot: keyof typeof NODES) => ({ appId: bot === 'engine' ? 'ned-media-engine' : 'atelier-orvion', workspaceId: 'boreal-fictif', resourceId: bot === 'engine' ? 'flux-main' : boardId });
 const root = new URL('../../supabase/migrations/', import.meta.url);
-const migrations = ['20260911150000_circuits.sql', '20260911165000_circuit_attempts.sql', '20260914110000_project_service_delegations.sql', '20260915120000_circuit_execution_receipts.sql'].map((name) => readFileSync(new URL(name, root), 'utf8'));
+const migrations = ['20260911150000_circuits.sql', '20260911165000_circuit_attempts.sql', '20260914110000_project_service_delegations.sql', '20260915120000_circuit_execution_receipts.sql', '20260924120000_actor_assertion_requests.sql'].map((name) => readFileSync(new URL(name, root), 'utf8'));
 // Circuit de passe 1 (CONSIGNE-BOREAL-1C-2C) : pas d'étape de sélection ; ici les étapes de production sont assignées aux bots
 // pour exercer la délégation de service ; la validation finale reste humaine.
 const definition = CircuitDefinitionSchema.parse({ name: 'TEST FICTIF — Boréal — tuyauterie sans sélection', project: { sourceApp: 'organigrad', projectId: PROJECT, workspaceId: WS, canonicalUrl: CANONICAL }, steps: [
@@ -54,9 +55,9 @@ const pem = (k: import('node:crypto').KeyObject, kind: 'public' | 'private') => 
 const linkBridge: LinkBridgeConfig = { hubPublicKeys: { 'hub-2026': pem(hub.publicKey, 'public') }, signingKid: 'organigrad-2026', signingPrivateKeyPem: pem(orga.privateKey, 'private'), hubUrl: HUB_URL };
 let now = 1_800_000_000;
 const b64 = (v: string | Buffer) => Buffer.from(v).toString('base64url');
-function actorFor(organigradUserId: string): string {
+function actorFor(organigradUserId: string, request: Pick<ActorAssertionClaims, 'purpose' | 'method' | 'route' | 'bodySha256' | 'idempotencyKey'>): string {
     const h = b64(JSON.stringify({ alg: 'EdDSA', typ: 'synapse-identity-actor+jwt', kid: 'hub-2026' }));
-    const p = b64(JSON.stringify({ version: '1.0', issuerApp: 'synapse-hub', audienceApp: 'organigrad', linkId: randomUUID(), linkUserId: randomUUID(), organigradUserId, project: { sourceApp: 'organigrad', workspaceId: WS, projectId: PROJECT, canonicalUrl: CANONICAL }, requestId: randomUUID(), issuedAt: now, expiresAt: now + 60 }));
+    const p = b64(JSON.stringify({ version: '1.0', issuerApp: 'synapse-hub', audienceApp: 'organigrad', linkId: randomUUID(), linkUserId: randomUUID(), organigradUserId, project: { sourceApp: 'organigrad', workspaceId: WS, projectId: PROJECT, canonicalUrl: CANONICAL }, requestId: randomUUID(), issuedAt: now, expiresAt: now + 60, ...request }));
     return `${h}.${p}.${b64(sign(null, Buffer.from(`${h}.${p}`), hub.privateKey))}`;
 }
 function sessionJwt(sub: string): string {
@@ -136,8 +137,14 @@ afterEach(async () => { await db.close(); });
 type App = FastifyInstance;
 const asHuman = (user = OWNER) => ({ authorization: `Bearer ${sessionJwt(user)}`, 'x-workspace-id': WS });
 const asBot = (bot: keyof typeof KEYS) => ({ authorization: `Bearer ${KEYS[bot]}` });
-const linkDecide = (app: App, runId: string, organigradUserId: string, body: Record<string, unknown>) => app.inject({ method: 'POST', url: `/api/link-bridge/circuit-runs/${runId}/decisions`, payload: body, headers: { 'x-synapse-actor': actorFor(organigradUserId) } });
-const linkList = (app: App, organigradUserId: string) => app.inject({ method: 'GET', url: '/api/link-bridge/circuit-runs', headers: { 'x-synapse-actor': actorFor(organigradUserId) } });
+const linkDecide = (app: App, runId: string, organigradUserId: string, body: Record<string, unknown>) => {
+    const route = `/api/link-bridge/circuit-runs/${runId}/decisions`;
+    return app.inject({ method: 'POST', url: route, payload: body, headers: { 'x-synapse-actor': actorFor(organigradUserId, { purpose: 'circuit-decision', method: 'POST', route, bodySha256: actorBodySha256(body), idempotencyKey: String(body.idempotencyKey) }) } });
+};
+const linkList = (app: App, organigradUserId: string) => {
+    const route = '/api/link-bridge/circuit-runs';
+    return app.inject({ method: 'GET', url: route, headers: { 'x-synapse-actor': actorFor(organigradUserId, { purpose: 'circuit-runs-list', method: 'GET', route, bodySha256: actorBodySha256(null), idempotencyKey: null }) } });
+};
 const deliver = (app: App, bot: keyof typeof KEYS, runId: string, stepId: string, runVersion: number, operation: string, payload: Record<string, unknown>) =>
     app.inject({ method: 'POST', url: `/api/circuit-runs/${runId}/steps/${stepId}/deliver`, headers: asBot(bot), payload: { grantId: GRANTS[bot], target: target(bot), runVersion, operation, editorial: { boardId, dossierId }, payload } });
 const generate = (app: App, runId: string, runVersion: number, prompt = CONTENT.prompt) => app.inject({ method: 'POST', url: `/api/circuit-runs/${runId}/steps/step-5/generate`, headers: asBot('engine'), payload: { grantId: GRANTS.engine, target: target('engine'), runVersion, prompt } });

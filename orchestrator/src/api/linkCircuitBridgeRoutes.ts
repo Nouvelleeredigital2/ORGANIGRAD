@@ -24,8 +24,8 @@ import { z } from 'zod';
 import { ArtifactReferenceSchema, CircuitDecisionSchema } from '@apps2026/contracts';
 import { nativeProjectRef } from './projectRef.js';
 import { hasScope, scopesForRole, SCOPES } from './scopes.js';
-import { IdentityAssertionError, verifyActorAssertion, type ActorAssertionClaims } from './identityAssertions.js';
-import { ReplayGuard, type LinkBridgeConfig } from './linkBridgeRoutes.js';
+import { actorBodySha256, IdentityAssertionError, reserveActorAssertion, verifyActorAssertion, type ActorAssertionClaims } from './identityAssertions.js';
+import type { LinkBridgeConfig } from './linkBridgeRoutes.js';
 import { CircuitError, type CircuitExecution } from '../orchestration/circuits.js';
 import type { PgCircuitStore } from '../state/pgCircuitStore.js';
 
@@ -35,8 +35,6 @@ export interface LinkCircuitBridgeDeps {
     config: LinkBridgeConfig | undefined;
     appUrl?: string;
     storeFor(workspaceId: string): Pick<PgCircuitStore, 'runs' | 'getRun' | 'decide'>;
-    /** Partagé avec le pont des nœuds : un `requestId` n'est accepté qu'une fois, toutes routes confondues. */
-    replays?: ReplayGuard;
     now?: () => number;
 }
 
@@ -64,11 +62,10 @@ function belongsToProject(run: CircuitExecution, project: ActorAssertionClaims['
 }
 
 export function registerLinkCircuitBridgeRoutes(app: FastifyInstance, deps: LinkCircuitBridgeDeps): void {
-    const replays = deps.replays ?? new ReplayGuard();
     const nowSeconds = () => deps.now?.() ?? Math.floor(Date.now() / 1000);
 
     /** Transport + identité, communs aux deux routes. Rend les claims ou la réponse déjà envoyée. */
-    async function authenticate(headers: Record<string, string | string[] | undefined>, reply: FastifyReply): Promise<ActorAssertionClaims | FastifyReply> {
+    async function authenticate(headers: Record<string, string | string[] | undefined>, reply: FastifyReply, expected: {purpose: ActorAssertionClaims['purpose']; method: ActorAssertionClaims['method']; route: string; body: unknown; idempotencyKey: string|null}): Promise<ActorAssertionClaims | FastifyReply> {
         reply.header('Cache-Control', 'private, no-store');
         const config = deps.config;
         if (!config) return reply.code(404).send({ error: 'LINK_BRIDGE_NOT_FOUND' });
@@ -81,8 +78,10 @@ export function registerLinkCircuitBridgeRoutes(app: FastifyInstance, deps: Link
         } catch (err) {
             return reply.code(403).send({ error: 'ACTOR_ASSERTION_INVALID', code: err instanceof IdentityAssertionError ? err.code : 'UNKNOWN' });
         }
-        if (!replays.accept(claims.requestId, nowSeconds() * 1000)) return reply.code(409).send({ error: 'ACTOR_ASSERTION_REPLAYED' });
+        if (claims.purpose!==expected.purpose || claims.method!==expected.method || claims.route!==expected.route || claims.bodySha256!==actorBodySha256(expected.body) || claims.idempotencyKey!==expected.idempotencyKey)
+            return reply.code(403).send({ error: 'ACTOR_ASSERTION_INVALID', code: 'REQUEST_BINDING_MISMATCH' });
         if (!canonicalUrlMatches(deps.appUrl, claims.project)) return reply.code(403).send({ error: 'UNQUALIFIED_PROJECT_REFERENCE' });
+        if(!await reserveActorAssertion(deps.sql,claims))return reply.code(409).send({error:'ACTOR_ASSERTION_REPLAYED'});
         return claims;
     }
     /** Le rôle vient de NOTRE table des membres, jamais du hub ni de LINK. */
@@ -101,7 +100,7 @@ export function registerLinkCircuitBridgeRoutes(app: FastifyInstance, deps: Link
 
     // ── Lecture des dossiers du projet de la conversation ────────────────────
     app.get('/api/link-bridge/circuit-runs', async (req, reply) => {
-        const claims = await authenticate(req.headers, reply);
+        const claims = await authenticate(req.headers, reply,{purpose:'circuit-runs-list',method:'GET',route:'/api/link-bridge/circuit-runs',body:null,idempotencyKey:null});
         if (!('requestId' in claims)) return claims;
         try {
             const scopes = await memberScopes(claims);
@@ -113,11 +112,12 @@ export function registerLinkCircuitBridgeRoutes(app: FastifyInstance, deps: Link
 
     // ── Décision humaine relayée sur une exécution de circuit ────────────────
     app.post<{ Params: { runId: string }; Body: unknown }>('/api/link-bridge/circuit-runs/:runId/decisions', async (req, reply) => {
-        const claims = await authenticate(req.headers, reply);
-        if (!('requestId' in claims)) return claims;
         const runParsed = runIdParam.safeParse(req.params.runId);
         const bodyParsed = decisionBody.safeParse(req.body);
         if (!runParsed.success || !bodyParsed.success) return reply.code(400).send({ error: 'INVALID_LINK_BRIDGE_INPUT' });
+        const route=`/api/link-bridge/circuit-runs/${runParsed.data}/decisions`;
+        const claims = await authenticate(req.headers, reply,{purpose:'circuit-decision',method:'POST',route,body:bodyParsed.data,idempotencyKey:bodyParsed.data.idempotencyKey});
+        if (!('requestId' in claims)) return claims;
         try {
             const scopes = await memberScopes(claims);
             const required = bodyParsed.data.choice === 'approve' ? SCOPES.humanApprove : SCOPES.humanReject;

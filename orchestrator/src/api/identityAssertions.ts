@@ -14,7 +14,8 @@
  * pur). Aucune assertion n'est journalisée ici — les erreurs ne portent qu'un
  * code, jamais le jeton ni ses claims.
  */
-import { createPrivateKey, createPublicKey, sign, verify, type KeyObject } from 'node:crypto';
+import { createHash, createPrivateKey, createPublicKey, sign, verify, type KeyObject } from 'node:crypto';
+import type { Sql } from 'postgres';
 import { z } from 'zod';
 
 export type IdentityAssertionErrorCode =
@@ -67,12 +68,36 @@ const actorClaimsSchema = z
             })
             .strict(),
         requestId: uuid,
+        purpose: z.enum(['circuit-runs-list', 'circuit-decision', 'node-decision']),
+        method: z.enum(['GET', 'POST']),
+        route: z.string().min(1).max(512).regex(/^\/api\/link-bridge\//),
+        bodySha256: z.string().regex(/^[0-9a-f]{64}$/),
+        idempotencyKey: uuid.nullable(),
         issuedAt: unixSeconds,
         expiresAt: unixSeconds,
     })
     .strict();
 
 export type ActorAssertionClaims = z.infer<typeof actorClaimsSchema>;
+
+function canonicalJson(value: unknown): string {
+    if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+    if (value && typeof value === 'object') return `{${Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`).join(',')}}`;
+    return JSON.stringify(value) ?? 'null';
+}
+export function actorBodySha256(value: unknown): string {
+    return createHash('sha256').update(canonicalJson(value)).digest('hex');
+}
+
+/** Réserve une assertion et déclenche la purge bornée définie par la migration. */
+export async function reserveActorAssertion(sql: Sql, claims: ActorAssertionClaims): Promise<boolean> {
+    const rows = await sql<{ reserved: boolean }[]>`
+        select public.reserve_actor_assertion_request(
+            ${claims.requestId},${claims.purpose},${claims.method},${claims.route},
+            ${claims.bodySha256},${claims.idempotencyKey},to_timestamp(${claims.expiresAt})
+        ) as reserved`;
+    return rows[0]?.reserved === true;
+}
 
 const attestationBase = {
     version: z.literal('1.0'),

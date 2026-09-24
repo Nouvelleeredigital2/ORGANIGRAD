@@ -20,7 +20,7 @@ it('configures a service schedule atomically, retries without renewal and revoke
   }
   const sql=adapter(db),store=new PgCircuitStore(sql,ws),scheduling=new PgCircuitScheduling(sql,ws);
   const definition=CircuitDefinitionSchema.parse({name:'Veille',project:{projectId:project,workspaceId:ws,sourceApp:'organigrad',canonicalUrl:'https://example.org/p'},schedule:{weekday:1,hour:7,minute:0},steps:[{id:'watch',kind:'watch',assigneeId:ws,instructions:'Veille'},{id:'final',kind:'approval',assigneeId:ws,instructions:'Valider'}]});
-  const circuit=await store.saveDefinition(definition,ws);
+  const circuit=await store.saveDefinition(definition,ws,definition.project);
   const expiresAt=new Date(Date.now()+14*86400000).toISOString();
   const input={idempotencyKey:grant,expectedVersion:1,expiresAt};
   await db.exec("update workspace_members set role='member'");
