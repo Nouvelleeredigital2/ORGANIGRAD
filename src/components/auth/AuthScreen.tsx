@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { Button, FormField, Input, Surface } from '../../design/ui';
-import { messageErreurAuth } from './authErrors';
+import { estIndisponibiliteService, messageErreurAuth } from './authErrors';
+import { sonderServiceAuth } from './serviceSante';
 
 /**
  * Écran d'authentification — email + mot de passe + magic link.
@@ -17,6 +18,21 @@ export function AuthScreen() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [info, setInfo] = useState<string | null>(null);
+    // Panne du service (sonde au montage, ou échec réseau d'une tentative) :
+    // affichée en bandeau, distincte d'un refus d'identifiants.
+    const [serviceIndisponible, setServiceIndisponible] = useState(false);
+    const [sondeEnCours, setSondeEnCours] = useState(false);
+
+    const sonder = useCallback(async () => {
+        setSondeEnCours(true);
+        const disponible = await sonderServiceAuth();
+        setServiceIndisponible(!disponible);
+        setSondeEnCours(false);
+    }, []);
+
+    useEffect(() => {
+        if (isSupabaseConfigured) void sonder();
+    }, [sonder]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -40,7 +56,9 @@ export function AuthScreen() {
                 if (err) throw err;
                 setInfo('Lien de connexion envoyé. Ouvre le mail pour finaliser.');
             }
+            setServiceIndisponible(false);
         } catch (err) {
+            if (estIndisponibiliteService(err)) setServiceIndisponible(true);
             setError(messageErreurAuth(err));
         } finally {
             setLoading(false);
@@ -94,6 +112,28 @@ export function AuthScreen() {
                     </div>
                 </div>
 
+                {serviceIndisponible && !error && (
+                    <div
+                        role="alert"
+                        className="mb-4 rounded-lg p-3 text-[12px]"
+                        style={{ color: 'var(--system-red)', border: '1px solid var(--system-red)' }}
+                    >
+                        <p>
+                            Le service de connexion d'Organigrad ne répond pas pour le moment. La
+                            connexion risque d'échouer ; tes identifiants ne sont pas en cause.
+                        </p>
+                        <button
+                            type="button"
+                            onClick={() => void sonder()}
+                            disabled={sondeEnCours}
+                            className="mt-2 font-medium hover:underline"
+                            style={{ color: 'var(--accent)' }}
+                        >
+                            {sondeEnCours ? 'Vérification…' : 'Réessayer'}
+                        </button>
+                    </div>
+                )}
+
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <FormField label="Email">
                         <Input
@@ -121,7 +161,7 @@ export function AuthScreen() {
                     )}
 
                     {error && (
-                        <p className="text-[12px]" style={{ color: 'var(--system-red)' }}>
+                        <p role="alert" className="text-[12px]" style={{ color: 'var(--system-red)' }}>
                             {error}
                         </p>
                     )}
