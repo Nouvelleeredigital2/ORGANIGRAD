@@ -197,7 +197,7 @@ export class PgSuiteNativeStore implements SuiteNativeStore {
                 values(${input.projectId},${input.workspaceId},${input.synapseWorkspaceId},${input.idempotencyKey},${input.userId}) on conflict do nothing`;
             const links = await tx<LinkRow[]>`select project_id,workspace_id,synapse_workspace_id,idempotency_key,created_by from public.synapse_project_links where project_id=${input.projectId}`;
             const link = links[0];
-            if (!link || link.workspace_id !== input.workspaceId || link.synapse_workspace_id !== input.synapseWorkspaceId || link.idempotency_key !== input.idempotencyKey || link.created_by !== input.userId) {
+            if (!link || link.workspace_id !== input.workspaceId || link.synapse_workspace_id !== input.synapseWorkspaceId || link.idempotency_key !== input.idempotencyKey) {
                 throw new SuiteLaunchError(409, 'SYNAPSE_LINK_CONFLICT');
             }
             return this.ref(link);
