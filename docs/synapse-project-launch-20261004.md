@@ -12,6 +12,8 @@ Un membre déjà authentifié dans OrganiGrad ouvre un projet depuis Synapse ave
 4. Le backend vérifie l'appartenance native, échange le code avec Synapse au moyen du jeton applicatif serveur, crée ou relit le projet avec l'UUID exact du `ProjectRef`, persiste la liaison, puis confirme le compte natif.
 5. L'utilisateur est redirigé vers la vue projets avec les identifiants projet et espace natifs.
 
+La colonne `created_by` du lien conserve l'identité du membre qui a matérialisé le projet. Elle ne constitue pas une autorisation exclusive : un autre membre disposant d'un ticket Synapse valide, de l'adhésion native et d'un grant explicite peut rouvrir le même projet sans réécrire ce reçu d'origine.
+
 Les routes machine `/api/synapse/suite/spaces…` utilisent un credential distinct, constant-time, et ne passent jamais par le frontend. La préparation est idempotente. Une invitation Synapse ajoute le rôle `member` par défaut. Le retrait ne supprime une adhésion au workspace que si le pont l'avait lui-même créée et qu'aucun autre grant actif ne la nécessite.
 
 ## Schéma
@@ -42,6 +44,7 @@ Le frontend exige l'URL publique qualifiée de l'orchestrateur dans `VITE_ORCHES
 - Orchestrateur : typecheck, 735 tests réussis, 63 tests historiques ignorés, build réussi.
 - Migration : exécutée deux fois sur PGlite ; lignes projet préexistantes conservées et RLS vérifiée.
 - Tests spécifiques : code invalide, ordre persistance puis confirmation, conflits compte/projet, jeton serveur, routes humaines/machine, choix explicite d'espace et redirection.
+- Réouverture collaborative : un second membre autorisé relit le lien créé par le premier sans conflit sur `created_by`.
 
 Cette preuve est une validation du candidat de code. La migration distante, l'image immuable, le raccordement des secrets, la recette réelle A/B et la persistance après redémarrage restent à effectuer après fusion.
 
