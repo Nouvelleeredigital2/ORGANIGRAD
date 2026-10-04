@@ -38,6 +38,10 @@ npm run check         # typecheck + test
   du cache front.
 - Image Docker de l'orchestrateur : son healthcheck vise `/healthz`
   (`dockerHealthcheck.test.ts`).
+- Ouverture Synapse : contrat d'échange serveur, routes humaines/machine,
+  sélection explicite du workspace et migration rejouée deux fois
+  (`suiteLaunch.test.ts`, `suiteRoutes.test.ts`, `suiteMigration.test.ts`,
+  `SynapseLaunchView.test.tsx`).
 
 ## Tests PostgreSQL réels, isolés et reproductibles
 
