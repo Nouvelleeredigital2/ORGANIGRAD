@@ -52,9 +52,29 @@ environnement.
 
 Le fichier de référence est un extrait fidèle obtenu par introspection
 (`pg_get_functiondef`, `pg_get_constraintdef`, `pg_indexes`, `pg_policies`,
-`pg_get_triggerdef`). Il **n'a pas été rejoué sur une base vierge** — cela
-demanderait un projet Supabase jetable. Sa fidélité à l'existant est vérifiée ;
-sa capacité à reconstruire de zéro est raisonnée, pas prouvée.
+`pg_get_triggerdef`). Sa fidélité à l'existant est vérifiée.
+
+**Sa capacité à reconstruire de zéro est désormais PROUVÉE — 21/09/2026.** Le
+banc local ajouté par `supabase/config.toml` fournit la base jetable qui
+manquait. Marche exacte suivie, sur une base vierge :
+
+1. `baseline_2026-08-03.sql` → appliquée **sans une seule erreur** ;
+2. les **30** migrations datées après le 2026-08-03 → **30 appliquées, 0 échec**.
+
+Contrôle d'usage ensuite, refait le 21/09 avec **deux** comptes et non un seul :
+chacun est créé par l'API d'administration, se connecte par mot de passe, et le
+déclencheur `handle_new_user()` le rend **propriétaire** d'un espace. La base
+porte alors deux espaces ; chaque compte **ne voit que le sien**, et sans jeton
+la liste est vide.
+
+Deux comptes, parce qu'avec un seul propriétaire une liste non vide ne prouve
+rien : elle est compatible avec une absence totale de cloisonnement. C'est la
+contre-épreuve qui donne sa valeur au contrôle, pas la lecture réussie.
+
+Confirmé au passage : rejouer les migrations **sans** la base de référence
+échoue bien, comme annoncé plus haut (`workspace_role_of` puis le type
+`workspace_role` manquants). La marche à suivre ci-dessus n'est donc pas une
+précaution, c'est la seule qui fonctionne.
 
 Ne sont pas couverts : le schéma `auth` (géré par Supabase), les extensions
 autres que `pgcrypto`, les Edge Functions, et la configuration Auth

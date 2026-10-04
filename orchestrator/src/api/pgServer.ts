@@ -36,6 +36,7 @@ import { Notifier, PgAuditLogger } from '../observability/notifier.js';
 import { FixedWindowRateLimiter } from '../observability/rateLimiter.js';
 import { safeFetch } from '../net/ssrfGuard.js';
 import type { HybridNode } from '../domain/types.js';
+import { isSuiteMachinePath, registerSuiteRoutes, type SuiteRouteDeps } from './suiteRoutes.js';
 
 /**
  * Serveur HTTP de production — auth par clé API workspace, store Postgres.
@@ -103,6 +104,8 @@ export interface PgServerDeps {
     linkBridge?: LinkBridgeConfig;
     /** Horloge en secondes Unix pour la fraîcheur des assertions (tests). */
     linkBridgeNow?: () => number;
+    /** Pont de lancement Synapse, absent tant que l'opt-in et ses secrets ne sont pas complets. */
+    synapseSuite?: SuiteRouteDeps;
 }
 
 const PUBLIC_PATHS = new Set(['/healthz']);
@@ -238,6 +241,11 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
             if (!deps.linkBridge) return reply.code(404).send({ error: 'LINK_BRIDGE_NOT_FOUND' });
             return;
         }
+        if (isSuiteMachinePath(path)) {
+            reply.header('Cache-Control', 'private, no-store');
+            if (!deps.synapseSuite) return reply.code(404).send({ error: 'SYNAPSE_SUITE_NOT_FOUND' });
+            return; // Le plugin applique son secret machine constant-time.
+        }
         // Project reads run the existing auth inside their own error/cache boundary.
         if (deps.projectsEnabled === true && isProjectReadRoute(req)) return;
         if (!req.url.startsWith('/api/') && !req.url.startsWith('/mcp')) return;
@@ -245,6 +253,7 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
     });
 
     if (deps.projectsEnabled === true) registerProjectRoutes(app, deps);
+    if (deps.synapseSuite) registerSuiteRoutes(app, deps.synapseSuite);
     if (deps.projectServiceDelegationsEnabled === true && deps.projectsEnabled === true && deps.circuitsEnabled === true) {
         registerProjectServiceDelegationRoutes(app, deps.sql, deps.notifierOptions?.appUrl);
         registerProjectServiceTargetRoutes(app, deps.sql, deps.notifierOptions?.appUrl);
@@ -692,9 +701,18 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
             const body = validateBotMutation({ ...(req.body as object), id: req.params.id });
             if (!body.updated_at) throw new BotValidationError('updated_at', 'La version chargée est requise pour modifier un bot.');
             const store = new PgBotStore(deps.sql, req.workspaceId!);
-            const bot = await store.updateWithNode(body);
+            const { bot, nodeSync } = await store.updateWithNode(body);
+            // Le nœud d'un bot encore possédé par une autre application n'est pas
+            // réécrit. La fiche, elle, l'est : la divergence doit donc être dite,
+            // pas laissée à deviner par l'appelant.
+            if (!nodeSync.synchronized) {
+                req.log.warn(
+                    { botId: bot.id, ownedBy: nodeSync.ownedBy },
+                    'bots.update.noeud-non-synchronise',
+                );
+            }
             recordAudit(req, 'bots:update', bot.id, 'success');
-            return { bot };
+            return { bot, nodeSync };
         } catch (err) {
             recordAudit(req, 'bots:update', req.params.id, auditResultOf(err));
             return handleError(reply, err);

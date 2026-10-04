@@ -1,6 +1,6 @@
 # Vulnérabilités des dépendances — état et risques acceptés
 
-**Dernière revue : 2026-08-14.**
+**Dernière revue : 2026-10-04.**
 
 La CI n'utilise plus `npm audit --audit-level=high || true` : cette forme
 affichait les vulnérabilités puis passait quoi qu'il arrive, indéfiniment.
@@ -32,6 +32,38 @@ donc la correction reste non cassante.
 Résultat au 2026-09-01 : orchestrateur **0 vulnérabilité**, frontend **0
 vulnérabilité high/critical**. Les versions transitives vulnérables de
 `browserslist` et `postcss-selector-parser` ont été mises à jour dans le lockfile.
+
+## Corrigées le 2026-10-04
+
+| Paquet | Version corrigée | Chaîne | Portée |
+|---|---:|---|---|
+| `fastify` | 5.12.5 | direct | **runtime orchestrateur** |
+| `brace-expansion` | 1.1.21 et 5.0.12 | `minimatch`, `typescript-eslint` | dev |
+| `undici` | 7.29.1 | `jsdom` | dev (tests DOM) |
+
+Ces versions remplacent immédiatement les versions signalées par la porte npm,
+sans modifier son seuil.
+
+## Acceptation temporaire — `braces` et sa chaîne Tailwind
+
+| | |
+|---|---|
+| Avis | [GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm), récursion non bornée sur des motifs profondément imbriqués |
+| Version installée | `braces@3.0.3` |
+| Correctif publié | Aucun au 2026-10-04 |
+| Paquets remontés par npm | `braces`, `chokidar`, `fast-glob`, `micromatch`, `tailwindcss` |
+| Prochaine revue obligatoire | **2026-10-18** |
+
+**Exposition réelle.** Cette chaîne provient exclusivement de
+`tailwindcss`, déclaré en `devDependencies`. Elle s'exécute pendant le build sur
+les chemins et fichiers versionnés du dépôt. Ni le frontend produit ni
+l'orchestrateur déployé n'acceptent de motif glob utilisateur et aucun de ces
+paquets n'est une dépendance runtime.
+
+**Mesure et sortie.** La CI continue d'échouer si un autre paquet high/critical
+apparaît, si cette acceptation expire ou si npm ne remonte plus la chaîne. Dès
+qu'une version corrigée de `braces` est publiée et compatible avec Tailwind, le
+lockfile doit être mis à jour et les cinq entrées retirées de `ACCEPTES`.
 
 ## Correctifs livrés
 
