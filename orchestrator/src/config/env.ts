@@ -58,6 +58,10 @@ export interface OrchestratorEnv {
     organigradIdentitySigningPrivateKeyFile?: string;
     /** Base https du hub pour `POST /api/identity-links/<action>`. */
     identityLinksHubUrl?: string;
+    synapseUrl?: string;
+    synapseSuiteEnabled: boolean;
+    synapseSuiteAppToken?: string;
+    synapseSuiteServiceCredential?: string;
 }
 
 export class EnvValidationError extends Error {
@@ -112,6 +116,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): OrchestratorEn
         ['SLACK_FLUX', source.SLACK_FLUX?.trim() || undefined],
         ['SUPABASE_JWKS_URL', source.SUPABASE_JWKS_URL?.trim() || undefined],
         ['LINK_BASE_URL', source.LINK_BASE_URL?.trim() || undefined],
+        ['SYNAPSE_URL', source.SYNAPSE_URL?.trim() || undefined],
     ];
     for (const [name, value] of urlChecks) {
         if (value !== undefined && name !== 'SUPABASE_DB_URL' && !isHttpUrl(value)) {
@@ -152,6 +157,21 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): OrchestratorEn
     }
     if (projectsEnabled && (mode !== 'pg' || !(source.SUPABASE_JWT_SECRET?.trim() || source.SUPABASE_JWKS_URL?.trim()))) {
         issues.push('PROJECTS_ENABLED exige Postgres et une configuration de vérification des sessions humaines');
+    }
+
+    const synapseSuiteRaw = source.SYNAPSE_SUITE_ENABLED?.trim() || '0';
+    const synapseSuiteEnabled = synapseSuiteRaw === '1';
+    const synapseUrl = source.SYNAPSE_URL?.trim() || undefined;
+    const synapseSuiteAppToken = source.SYNAPSE_SUITE_APP_TOKEN?.trim() || undefined;
+    const synapseSuiteServiceCredential = source.SYNAPSE_SUITE_SERVICE_CREDENTIAL?.trim() || undefined;
+    if (!['0', '1'].includes(synapseSuiteRaw)) issues.push('SYNAPSE_SUITE_ENABLED doit valoir 0 ou 1');
+    if (synapseSuiteEnabled) {
+        if (mode !== 'pg' || !projectsEnabled) issues.push('SYNAPSE_SUITE_ENABLED exige Postgres et PROJECTS_ENABLED=true');
+        for (const [name, value] of [['APP_URL', source.APP_URL?.trim()], ['SYNAPSE_URL', synapseUrl]] as const) {
+            if (!value?.startsWith('https://')) issues.push(`${name} doit être une URL HTTPS quand SYNAPSE_SUITE_ENABLED=1`);
+        }
+        if (!synapseSuiteAppToken || synapseSuiteAppToken.length < 16) issues.push('SYNAPSE_SUITE_APP_TOKEN doit contenir au moins 16 caractères');
+        if (!synapseSuiteServiceCredential || synapseSuiteServiceCredential.length < 16) issues.push('SYNAPSE_SUITE_SERVICE_CREDENTIAL doit contenir au moins 16 caractères');
     }
 
     const privateRaw = source.PRIVATE_PROJECTS_ENABLED?.trim() || 'false';
@@ -258,5 +278,9 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): OrchestratorEn
         organigradIdentitySigningKid,
         organigradIdentitySigningPrivateKeyFile,
         identityLinksHubUrl,
+        synapseUrl,
+        synapseSuiteEnabled,
+        synapseSuiteAppToken,
+        synapseSuiteServiceCredential,
     };
 }

@@ -44,6 +44,9 @@ const PoleOrgChartView = lazy(() =>
 const PrintExportView = lazy(() =>
     import('./components/PrintExportView').then((m) => ({ default: m.PrintExportView })),
 );
+const SynapseLaunchView = lazy(() =>
+    import('./components/projects/SynapseLaunchView').then((m) => ({ default: m.SynapseLaunchView })),
+);
 import type { Agent } from './types/agent';
 import { countVisibleAgents } from './utils/dashboardStats';
 import { OriginProvider, useOrigin, OriginLoader } from './origin';
@@ -58,6 +61,12 @@ import { usePermissions } from './auth/usePermissions';
 import { ImportPreviewModal } from './components/import/ImportPreviewModal';
 
 function AppContent() {
+    return window.location.pathname === '/synapse/launch'
+        ? <Suspense fallback={<OriginLoader />}><SynapseLaunchView /></Suspense>
+        : <MainAppContent />;
+}
+
+function MainAppContent() {
     const { setFilamentState } = useOrigin();
     // Canal de retour unifié : un export ne se conclut jamais en « succès »
     // silencieux, chaque échec reste affiché jusqu'à lecture.

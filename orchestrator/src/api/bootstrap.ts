@@ -20,6 +20,7 @@ import { PgCircuitScheduler } from '../state/pgCircuitScheduler.js';
 import { registerCircuitWorker } from './circuitWorker.js';
 import { loadLinkBridgeConfig } from './linkBridgeConfig.js';
 import { createOrvionServiceClient, readOrvionMandateFile } from '../integrations/orvionServiceClient.js';
+import { createSuiteHub, createSuiteLaunchService, PgSuiteNativeStore } from '../synapse/suiteLaunch.js';
 
 export async function startOrchestrator() {
     // Validation centralisée — échoue tôt avec un message clair si config invalide.
@@ -48,6 +49,12 @@ export async function startOrchestrator() {
                 originHeader: new URL(appUrl ?? '').origin,
             }),
         } : undefined;
+        const suiteNative = env.synapseSuiteEnabled ? new PgSuiteNativeStore(sql, appUrl ?? '') : undefined;
+        const synapseSuite = suiteNative ? {
+            native: suiteNative,
+            service: createSuiteLaunchService(createSuiteHub(env.synapseUrl ?? '', env.synapseSuiteAppToken ?? ''), suiteNative),
+            serviceCredential: env.synapseSuiteServiceCredential ?? '',
+        } : undefined;
         const app = buildPgServer({
             sql,
             circuitDelivery,
@@ -69,6 +76,7 @@ export async function startOrchestrator() {
             // Pont LINK ↔ hub : lecture des clés au démarrage, échec explicite
             // si LINK_BRIDGE_ENABLED=1 et qu'un fichier est absent ou invalide.
             linkBridge: loadLinkBridgeConfig(env),
+            synapseSuite,
             notifierOptions: {
                 validationsWebhook: env.slackValidations,
                 fluxWebhook: env.slackFlux,
