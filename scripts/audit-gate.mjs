@@ -37,7 +37,15 @@ const BLOQUANTS = new Set(['high', 'critical']);
  * l'invocation en cours — sinon auditer l'orchestrateur seul signalerait à tort
  * l'acceptation d'une dépendance du frontend.
  */
-const ACCEPTES = {};
+const ACCEPTES = {
+    // GHSA-vfj7-8cjw-p6xm : aucun correctif publié au 2026-10-04.
+    // Chaîne exclusivement dev/build de Tailwind, sans motif fourni par un utilisateur.
+    braces: { paquet: '.', revoir: '2026-10-18' },
+    chokidar: { paquet: '.', revoir: '2026-10-18' },
+    'fast-glob': { paquet: '.', revoir: '2026-10-18' },
+    micromatch: { paquet: '.', revoir: '2026-10-18' },
+    tailwindcss: { paquet: '.', revoir: '2026-10-18' },
+};
 
 const paquets = process.argv.slice(2);
 const cibles = paquets.length ? paquets : ['.', 'orchestrator'];
