@@ -3,10 +3,12 @@ import { PGlite } from '@electric-sql/pglite';
 import { describe, expect, it } from 'vitest';
 
 const migration = readFileSync(new URL('../../supabase/migrations/20261004120000_synapse_suite_projects.sql', import.meta.url), 'utf8');
+const accessMigration = readFileSync(new URL('../../supabase/migrations/20261004160000_synapse_project_access.sql', import.meta.url), 'utf8');
 
 describe('migration projets Synapse', () => {
     it('garde le baseline documentaire identique à la migration livrée', () => {
         expect(readFileSync(new URL('../../supabase/schema/baseline_synapse_suite_projects_2026-10-04.sql', import.meta.url), 'utf8')).toBe(migration);
+        expect(readFileSync(new URL('../../supabase/schema/baseline_synapse_project_access_2026-10-04.sql', import.meta.url), 'utf8')).toBe(accessMigration);
     });
     it('est rejouable, privée et conserve les lignes existantes', async () => {
         const db = new PGlite();

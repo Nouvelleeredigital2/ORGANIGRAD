@@ -23,6 +23,13 @@ La migration `20261004120000_synapse_suite_projects.sql` ajoute :
 
 Les deux tables ont la RLS active, aucune policy cliente et aucun privilège `anon`/`authenticated`. Elles sont réservées au backend de confiance. La migration est additive et rejouable.
 
+La recette A/B a ensuite révélé que l'adhésion native au workspace rendait encore tous ses projets visibles à un membre invité. La migration additive `20261004160000_synapse_project_access.sql` ferme cette fuite :
+
+- un projet natif non lié conserve les droits historiques du workspace ;
+- un projet lié à Synapse reste visible aux `owner`/`admin`, à son créateur et aux comptes portant un grant explicite pour ce projet ;
+- les mêmes règles protègent les tâches via RLS ;
+- les routes serveur `/api/projects` et `/api/projects/:id/context` appliquent le même filtre, même lorsque leur connexion PostgreSQL contourne la RLS.
+
 ## Activation
 
 Le backend exige simultanément `SYNAPSE_SUITE_ENABLED=1`, Postgres, `PROJECTS_ENABLED=true`, `APP_URL` et `SYNAPSE_URL` en HTTPS, `SYNAPSE_SUITE_APP_TOKEN` et `SYNAPSE_SUITE_SERVICE_CREDENTIAL`. Ces deux secrets restent exclusivement côté serveur.
@@ -37,3 +44,11 @@ Le frontend exige l'URL publique qualifiée de l'orchestrateur dans `VITE_ORCHES
 - Tests spécifiques : code invalide, ordre persistance puis confirmation, conflits compte/projet, jeton serveur, routes humaines/machine, choix explicite d'espace et redirection.
 
 Cette preuve est une validation du candidat de code. La migration distante, l'image immuable, le raccordement des secrets, la recette réelle A/B et la persistance après redémarrage restent à effectuer après fusion.
+
+## État distant avant le correctif d'isolation
+
+- PR d'ouverture fusionnée dans `master` au SHA `38312d6e7173f5e8fab937226a0f7b642fc2f227` après CI verte.
+- Migration `20261004120000` appliquée sur la cible qualifiée `xucmfdggetwxmpquqjvj` ; 1 projet, 2 workspaces et 5 memberships préexistants conservés.
+- Images immuables `organigrad-backend:20261004-synapse-38312d6e` et `organigrad-frontend:20261004-synapse-38312d6e` déployées et saines.
+- Synapse et OrganiGrad raccordés par secrets serveur dédiés ; origine et adaptateur qualifiés, refus machine sans credential vérifié à HTTP 401.
+- La réception A/B demeure bloquée jusqu'à fusion, migration et déploiement du correctif d'isolation par projet. Le statut reste `PARTIELLEMENT VALIDÉ`.
