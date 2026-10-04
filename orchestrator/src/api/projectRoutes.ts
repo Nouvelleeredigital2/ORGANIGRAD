@@ -123,8 +123,20 @@ async function currentMember(tx: TransactionSql, workspaceId: string, userId: st
 }
 
 /** Shared projection only. Caller must authorize workspace/project in this transaction. */
-export async function readProjectContext(tx: TransactionSql, workspaceId: string, projectId: string) {
-    const projects = await tx<Record<string, unknown>[]>`
+export async function readProjectContext(tx: TransactionSql, workspaceId: string, projectId: string, userId?: string) {
+    const projects = userId ? await tx<Record<string, unknown>[]>`
+        select id, workspace_id, left(name, 160) as name, left(description, 500) as description,
+               archived_at, created_at,
+               to_char(updated_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as updated_at,
+               version
+        from public.projects
+        where workspace_id = ${workspaceId} and id = ${projectId}
+          and (not exists (select 1 from public.synapse_project_links link where link.project_id=projects.id and link.workspace_id=projects.workspace_id)
+               or exists (select 1 from public.workspace_members member where member.workspace_id=projects.workspace_id and member.user_id=${userId}::uuid and member.role::text in ('owner','admin'))
+               or exists (select 1 from public.synapse_project_links link where link.project_id=projects.id and link.workspace_id=projects.workspace_id and link.created_by=${userId}::uuid)
+               or exists (select 1 from public.synapse_project_grants grant_row where grant_row.project_id=projects.id and grant_row.workspace_id=projects.workspace_id and grant_row.user_id=${userId}::uuid))
+        limit 1
+    ` : await tx<Record<string, unknown>[]>`
         select id, workspace_id, left(name, 160) as name, left(description, 500) as description,
                archived_at, created_at,
                to_char(updated_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as updated_at,
@@ -229,6 +241,10 @@ export function registerProjectRoutes(app: FastifyInstance, deps: AuthDeps): voi
                            version
                     from public.projects
                     where workspace_id = ${workspaceId}
+                      and (not exists (select 1 from public.synapse_project_links link where link.project_id=projects.id and link.workspace_id=projects.workspace_id)
+                           or exists (select 1 from public.workspace_members member where member.workspace_id=projects.workspace_id and member.user_id=${req.userId!} and member.role::text in ('owner','admin'))
+                           or exists (select 1 from public.synapse_project_links link where link.project_id=projects.id and link.workspace_id=projects.workspace_id and link.created_by=${req.userId!})
+                           or exists (select 1 from public.synapse_project_grants grant_row where grant_row.project_id=projects.id and grant_row.workspace_id=projects.workspace_id and grant_row.user_id=${req.userId!}))
                       and (${cursor?.updatedAt ?? null}::timestamptz is null
                            or (updated_at, id) < (${cursor?.updatedAt ?? null}::timestamptz, ${cursor?.id ?? null}::uuid))
                     order by public.projects.updated_at desc, id desc
@@ -250,7 +266,7 @@ export function registerProjectRoutes(app: FastifyInstance, deps: AuthDeps): voi
             const workspaceId = req.workspaceId!;
             return deps.sql.begin('isolation level repeatable read read only', async tx => {
                 await currentMember(tx, workspaceId, req.userId!);
-                return readProjectContext(tx, workspaceId, projectId);
+                return readProjectContext(tx, workspaceId, projectId, req.userId!);
             });
         });
     });
