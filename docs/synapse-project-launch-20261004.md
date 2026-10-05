@@ -55,3 +55,11 @@ Cette preuve est une validation du candidat de code. La migration distante, l'im
 - Images immuables `organigrad-backend:20261004-synapse-38312d6e` et `organigrad-frontend:20261004-synapse-38312d6e` déployées et saines.
 - Synapse et OrganiGrad raccordés par secrets serveur dédiés ; origine et adaptateur qualifiés, refus machine sans credential vérifié à HTTP 401.
 - La réception A/B demeure bloquée jusqu'à fusion, migration et déploiement du correctif d'isolation par projet. Le statut reste `PARTIELLEMENT VALIDÉ`.
+
+## Mise à jour du 6 octobre 2026
+
+Synapse émet désormais un code compact signé `synapse-launch+jws`. La version `f80320c6` d’OrganiGrad refusait ce format avant l’échange serveur, car elle n’acceptait que le code opaque historique de 43 caractères. La PR #44 valide la forme bornée du JWS et son en-tête exact, puis laisse Synapse vérifier signature, expiration et usage unique.
+
+Le correctif a été fusionné au SHA `892a4c4bd25ef267806cf5db6161a2384fb604bc`, après réussite du lint, du typecheck, des tests frontend et orchestrateur, du build, de Playwright, de l’hygiène dépôt et de la sécurité SQL. L’image `organigrad-backend:20261006-892a4c4` est déployée et saine.
+
+La recette connectée n’a pas encore repris : l’incident décrit dans `security/incident-20261006-runtime-secrets.md` impose d’abord la rotation fournisseur de deux secrets Supabase encore actifs. Le statut demeure `PARTIELLEMENT VALIDÉ`.
