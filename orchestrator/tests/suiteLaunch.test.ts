@@ -81,12 +81,40 @@ describe('ouverture projet Synapse', () => {
     });
 
     it('échange et confirme uniquement côté serveur avec le jeton applicatif', async () => {
-        const fetcher = vi.fn(async () => new Response(JSON.stringify(launch), { status: 200 }));
+        const fetcher = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) =>
+            new Response(JSON.stringify(launch), { status: 200 }));
         const hub = createSuiteHub('https://synapse.example', 'server-secret-token', fetcher as typeof fetch);
         await hub.redeem('A'.repeat(43));
         expect(fetcher).toHaveBeenCalledWith('https://synapse.example/api/suite/launch/redeem', expect.objectContaining({
             method: 'POST', headers: expect.objectContaining({ authorization: 'Bearer server-secret-token' }),
         }));
+    });
+
+    it('transmet au hub un code d’ouverture Synapse signé', async () => {
+        const signedCode = [
+            Buffer.from(JSON.stringify({ alg: 'EdDSA', typ: 'synapse-launch+jws' })).toString('base64url'),
+            Buffer.from(JSON.stringify({ version: '1.0', launchId: launch.launchId })).toString('base64url'),
+            'A'.repeat(86),
+        ].join('.');
+        const fetcher = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) =>
+            new Response(JSON.stringify(launch), { status: 200 }));
+        const hub = createSuiteHub('https://synapse.example', 'server-secret-token', fetcher as typeof fetch);
+
+        await hub.redeem(signedCode);
+
+        expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toEqual({ code: signedCode });
+    });
+
+    it('refuse les JWS d’un autre type et les codes surdimensionnés avant tout appel réseau', async () => {
+        const fetcher = vi.fn();
+        const hub = createSuiteHub('https://synapse.example', 'server-secret-token', fetcher as typeof fetch);
+        const code = (header: object, payload = 'e30') => [
+            Buffer.from(JSON.stringify(header)).toString('base64url'), payload, 'A'.repeat(86),
+        ].join('.');
+
+        await expect(hub.redeem(code({ alg: 'EdDSA', typ: 'autre+jws' }))).rejects.toThrow('SYNAPSE_CODE_INVALID');
+        await expect(hub.redeem(code({ alg: 'EdDSA', typ: 'synapse-launch+jws' }, 'A'.repeat(3073)))).rejects.toThrow('SYNAPSE_CODE_INVALID');
+        expect(fetcher).not.toHaveBeenCalled();
     });
 });
 

@@ -1,7 +1,19 @@
 import type { Sql, TransactionSql } from 'postgres';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const CODE = /^[A-Za-z0-9_-]{43}$/;
+const LEGACY_CODE = /^[A-Za-z0-9_-]{43}$/;
+const SIGNED_CODE = /^[A-Za-z0-9_-]{1,512}\.[A-Za-z0-9_-]{1,3072}\.[A-Za-z0-9_-]{64,128}$/;
+
+function validCode(code: string) {
+    if (LEGACY_CODE.test(code)) return true;
+    if (code.length > 4096 || !SIGNED_CODE.test(code)) return false;
+    try {
+        const header = JSON.parse(Buffer.from(code.split('.')[0]!, 'base64url').toString('utf8')) as unknown;
+        return Boolean(header && typeof header === 'object' &&
+            (header as Record<string, unknown>).alg === 'EdDSA' &&
+            (header as Record<string, unknown>).typ === 'synapse-launch+jws');
+    } catch { return false; }
+}
 
 export class SuiteLaunchError extends Error {
     constructor(readonly status: number, readonly code: string) { super(code); }
@@ -139,7 +151,7 @@ export function createSuiteHub(baseUrl: string, token: string, fetcher: typeof f
     };
     return {
         async redeem(code) {
-            if (!CODE.test(code)) throw new SuiteLaunchError(400, 'SYNAPSE_CODE_INVALID');
+            if (!validCode(code)) throw new SuiteLaunchError(400, 'SYNAPSE_CODE_INVALID');
             return parseLaunchRedemption(await call('/api/suite/launch/redeem', { code }));
         },
         async confirm(launchId, nativeAccountId, nativeWorkspaceId) {
@@ -152,7 +164,7 @@ export function createSuiteHub(baseUrl: string, token: string, fetcher: typeof f
 export function createSuiteLaunchService(hub: SuiteHub, native: SuiteNativeStore, now = () => Date.now()) {
     return {
         async open(code: string, actor: { userId: string; workspaceId: string }) {
-            if (!CODE.test(code)) throw new SuiteLaunchError(400, 'SYNAPSE_CODE_INVALID');
+            if (!validCode(code)) throw new SuiteLaunchError(400, 'SYNAPSE_CODE_INVALID');
             const launch = parseLaunchRedemption(await hub.redeem(code));
             if (Date.parse(launch.confirmBefore) <= now()) throw new SuiteLaunchError(403, 'SYNAPSE_CONFIRM_EXPIRED');
             if (launch.accountLink && (launch.accountLink.nativeAccountId !== actor.userId ||
