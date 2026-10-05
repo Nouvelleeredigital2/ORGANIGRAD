@@ -81,8 +81,10 @@ describe('ouverture projet Synapse', () => {
     });
 
     it('échange et confirme uniquement côté serveur avec le jeton applicatif', async () => {
-        const fetcher = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) =>
-            new Response(JSON.stringify(launch), { status: 200 }));
+        const fetcher = vi.fn(async (...args: Parameters<typeof fetch>) => {
+            void args;
+            return new Response(JSON.stringify(launch), { status: 200 });
+        });
         const hub = createSuiteHub('https://synapse.example', 'server-secret-token', fetcher as typeof fetch);
         await hub.redeem('A'.repeat(43));
         expect(fetcher).toHaveBeenCalledWith('https://synapse.example/api/suite/launch/redeem', expect.objectContaining({
@@ -96,8 +98,10 @@ describe('ouverture projet Synapse', () => {
             Buffer.from(JSON.stringify({ version: '1.0', launchId: launch.launchId })).toString('base64url'),
             'A'.repeat(86),
         ].join('.');
-        const fetcher = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) =>
-            new Response(JSON.stringify(launch), { status: 200 }));
+        const fetcher = vi.fn(async (...args: Parameters<typeof fetch>) => {
+            void args;
+            return new Response(JSON.stringify(launch), { status: 200 });
+        });
         const hub = createSuiteHub('https://synapse.example', 'server-secret-token', fetcher as typeof fetch);
 
         await hub.redeem(signedCode);
