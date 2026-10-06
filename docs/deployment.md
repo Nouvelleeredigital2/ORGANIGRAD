@@ -4,6 +4,15 @@ La procédure complète de synchronisation, de recette et de retour arrière est
 [`synchronisation-livraison.md`](./synchronisation-livraison.md). Ce document
 résume les prérequis spécifiques à chaque cible.
 
+## Cible de production
+
+Le relevé du 2026-09-07 observe `orchestrator` et `organigrad-front` sur
+**apps2026-prod**. Voir [la référence infrastructure](../../apps2026-hub/ETAT_INFRA_ACTUEL.md).
+Les commandes Node ci-dessous décrivent le build et le lancement hors orchestration
+Docker. Pour changer une image en production : identifier le compose et le service
+réels, contrôler le verrou et utiliser `deployer-compose` avec une étiquette
+immuable, conformément aux consignes racine.
+
 ## Pré-requis
 
 - Projet Supabase (Postgres 15+) avec Auth activée.

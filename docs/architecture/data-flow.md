@@ -42,5 +42,5 @@ illégale lève `IllegalTransitionError` (→ 409) sans muter.
   pas autoritaire.
 
 ## Limites connues
-- Champ de **version** (verrou optimiste) non encore ajouté sur `hybrid_nodes`.
+- Verrou optimiste sur **`updated_at`** implémenté pour les écritures unitaires de nœuds et fiches RH lorsque la version chargée est fournie ; pas de colonne de version numérique dédiée. Sans `updated_at`, les chemins d'upsert restent distincts et ne donnent pas cette garantie. Voir [concurrence-ecritures.md](concurrence-ecritures.md).
 - Caches CSV legacy (`storageService`) globaux (organigramme RH mono-source).

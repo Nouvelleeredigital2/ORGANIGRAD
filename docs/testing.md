@@ -1,5 +1,46 @@
 # Tests
 
+## Relevé d’audit du 23 septembre 2026
+
+Environnement : Windows, Node `v22.20.0`, npm `10.9.3`. Le projet documente Node 20+ ; les dépendances locales étaient désynchronisées avant `npm ci` dans la racine et dans `orchestrator/`.
+
+| Surface | Commande / preuve | Résultat du jour | Statut |
+|---|---|---:|---|
+| Frontend typecheck | `npm run typecheck` | réussi | VALIDÉ statiquement |
+| Frontend build | `npm run build` | réussi, avertissement chunks > 500 kB | VALIDÉ compilation |
+| Frontend lint ciblé | ESLint sur les fichiers TS/TSX suivis hors orchestrateur | réussi | VALIDÉ ciblé |
+| Frontend lint global | `npm run lint` | interrompu : `.worktrees` non ignoré | ÉCHEC outillage |
+| Frontend Vitest | `npm test` | 497/498 ; le fichier en échec repasse 5/5 isolément | PARTIELLEMENT VALIDÉ |
+| Orchestrateur typecheck | `npm run typecheck` | réussi après `npm ci` | VALIDÉ statiquement |
+| Orchestrateur build | `npm run build` | réussi | VALIDÉ compilation |
+| Orchestrateur Vitest | `npm test` | 711 réussis, 8 timeouts ; 39/39 ciblés en série | PARTIELLEMENT VALIDÉ |
+| E2E hermétiques par défaut | `npm run test:e2e` | 39/47, fuite de `.env.local` | ÉCHEC reproductible |
+| E2E hermétiques isolés | même commande avec `VITE_ORCHESTRATOR_URL` vide | 47/47 | VALIDÉ sous condition |
+| Tests personas Python | `python -B -m unittest discover -s scripts/bots -p 'test_*.py'` | 20/20 | VALIDÉ automatisé |
+| Porte dépendances | `node scripts/audit-gate.mjs` sur les deux packages | 0 high/critical | VALIDÉ selon la porte |
+| PostgreSQL réel | scripts `test:pg:*` | non exécutés, base isolée absente | NON TESTÉ |
+| E2E Supabase connectés | `npm run test:e2e:connected` | non exécutés | NON TESTÉ |
+| Services externes et production | email, Slack, LINK, Synapse, MCP, Engine, Orvion, voix | non exercés | NON TESTÉ |
+
+Les détails des causes ouvertes sont dans `docs/KNOWN_ISSUES.md`. Un succès isolé avec timeout augmenté ne remplace pas la réussite de la commande par défaut.
+
+## Validation des portes déterministes — 23 septembre 2026
+
+Après correction, les commandes documentées ont été rejouées sans surcharge d’environnement :
+
+| Surface | Résultat |
+|---|---:|
+| `npm run lint` | réussi |
+| frontend `npm run typecheck` / `npm run build` | réussis ; avertissement connu sur les chunks PDF/XLSX |
+| frontend `npm test`, passage 1 | 71 fichiers, 500/500 tests |
+| frontend `npm test`, passage 2 | 71 fichiers, 500/500 tests |
+| orchestrateur `npm run typecheck` / `npm run build` | réussis |
+| orchestrateur `npm test`, passage 1 | 67 fichiers réussis, 4 ignorés ; 719/719 exécutés, 63 live ignorés |
+| orchestrateur `npm test`, passage 2 | même résultat |
+| `npm run test:e2e` | 47/47 en mode hors ligne, sans override shell |
+
+Les timeouts restent à 10 secondes. La stabilité est obtenue par `maxWorkers: 1`, pas par un assouplissement des assertions ou des délais. Les tests live/connectés restent non exécutés et exigent leurs environnements dédiés.
+
 ## Commandes
 
 ```bash

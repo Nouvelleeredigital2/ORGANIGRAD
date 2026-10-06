@@ -25,12 +25,22 @@ une erreur. Le déchiffrement échoue (tag GCM) si le contenu a été altéré.
 2. Re-chiffrer les valeurs existantes (lire avec l'ancienne, écrire avec la nouvelle).
 3. Le préfixe versionné (`v1`) permet d'introduire `v2` sans ambiguïté.
 
-## État du câblage (limite connue)
-Aujourd'hui, les secrets d'intégration (`notificationChannels.slackWebhook`…) sont
-écrits **directement par la SPA** dans `hybrid_nodes` (Supabase). Il n'existe pas
-encore de **chemin d'écriture côté serveur** où chiffrer. Le primitive ci-dessus
-est prêt et testé ; son branchement complet nécessite d'introduire une écriture des
-nœuds passant par l'orchestrateur (ou une Edge Function) qui chiffrera avant
-stockage et exposera uniquement `configured: true` (cf. DTO publics, Phase 6).
-Tant que ce chemin n'existe pas, considérer le chiffrement au repos comme
-**disponible mais non encore appliqué de bout en bout**.
+## État du câblage (audit du 23 septembre 2026)
+
+Le chemin serveur existe désormais : `PgGraphStore` chiffre `systemPrompt`,
+`mcpConfig` et `notificationChannels` avant écriture et les DTO publics
+n'exposent que des indicateurs de configuration. La SPA route les mutations par
+l'orchestrateur lorsqu'il est configuré et refuse le repli silencieux si ce
+service devient indisponible.
+
+La garantie reste toutefois **conditionnelle** :
+
+- `INTEGRATION_ENCRYPTION_KEY` est optionnelle ; sans elle, `SecretCipher` est
+  absent et les valeurs sont conservées en clair pour compatibilité ;
+- le mode local/non connecté peut encore utiliser le repository direct ou
+  `localStorage` selon l'environnement ;
+- la présence de la clé et le contenu réellement stocké en production n'ont
+  pas été vérifiés pendant cet audit.
+
+Ne déclarer le chiffrement au repos validé qu'après contrôle de la configuration
+de production et inspection non divulguante des valeurs stockées.

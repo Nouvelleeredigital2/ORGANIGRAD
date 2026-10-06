@@ -1,5 +1,9 @@
 # Organigrad — Orchestrator
 
+> En mode connecté, la persistance est assurée par `PgGraphStore` dans Postgres ;
+> le store mémoire sert au développement. Le conteneur `orchestrator` est observé
+> sur apps2026-prod au 2026-09-07 ; voir [le déploiement](../docs/deployment.md).
+
 Service long-running TypeScript/Node — la **source de vérité** de l'état des `HybridNode` du graphe. Piloté par MCP (côté agents) et REST + SSE (côté SPA Organigrad). Messagerie en sortie seule.
 
 ## Plans séparés (non négociable)
@@ -13,7 +17,7 @@ Service long-running TypeScript/Node — la **source de vérité** de l'état de
 orchestrator/
 └── src/
     ├── domain/         types.ts (HybridNode) · stateMachine.ts (transitions)
-    ├── state/          graphStore.ts (source de vérité in-memory)
+    ├── state/          graphStore.ts (dev) · pgGraphStore.ts (Postgres)
     ├── mcp/            mcpClient.ts (client MCP HTTP)
     ├── orchestration/  engine.ts (moteur + règles HITL)
     ├── api/            server.ts · routes.ts · bootstrap.ts
@@ -73,7 +77,11 @@ Route unique `POST /mcp` — Streamable HTTP. Auth identique aux routes `/api/*`
 - `tools/list` — énumère les 5 outils
 - `tools/call` — invoque par `name` + `arguments`
 
-Outils exposés :
+Outils exposés (l'énumération n'accorde pas le droit de les appeler) :
+
+En mode connecté, `approve_node`, `reject_node` et `reset_node` sont refusés
+aux clés techniques. Les gardes workspace et scopes de `src/mcp/mcpServer.ts`
+font autorité ; Hermes ne décide pas.
 
 | Outil | Description |
 |---|---|

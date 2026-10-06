@@ -105,7 +105,4 @@ mais peuvent être décidées plus tard.
 
 ## Suite
 
-Le test `concurrentWrites.integration.test.ts` doit être exécuté avec
-`TEST_DATABASE_URL` après application des migrations. Il doit alors être
-réécrit en test de conformité : la seconde écriture doit recevoir un conflit,
-et non plus reproduire l'ancien écrasement silencieux.
+Le test `orchestrator/tests/concurrentWrites.integration.test.ts` contient déjà des attentes de rejet sur une version périmée (lecture du 2026-09-07). Sa future exécution exige une base isolée autorisée ; aucun test DB n'a été lancé pendant cet audit. La protection unitaire dépend de la transmission de `updated_at` : ne pas extrapoler aux clients qui omettent ce champ.

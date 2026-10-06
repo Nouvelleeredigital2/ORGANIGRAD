@@ -6,28 +6,16 @@ consignés sur l'environnement de staging.
 
 ## 1. Synchroniser les branches
 
-La branche de travail est `feat/synapse-consumer-pg`. Les corrections de l'audit
-organigramme A-01 à A-04 sont dans `codex/audit-fixes` (commit `a1d059c`). Elles
-doivent être intégrées par revue dans la branche de travail, puis par pull request
-vers `master`. Ne pas fusionner depuis `.worktrees/audit-fixes`.
+Les noms `feat/synapse-consumer-pg`, `codex/audit-fixes` et le commit `a1d059c`
+appartiennent à une ancienne campagne. Ils ne constituent pas une instruction
+actuelle de changement de branche ou de fusion.
 
-```powershell
-$repo = 'C:\Users\5070 Ti\Downloads\---APPLICATION-2026---\ORGANIGRAD'
-git -C $repo fetch origin
-git -C $repo status --short
-git -C $repo diff --stat feat/synapse-consumer-pg...codex/audit-fixes
-git -C $repo switch feat/synapse-consumer-pg
-git -C $repo merge --no-ff codex/audit-fixes -m 'merge: corrections audit organigramme'
-git -C $repo push origin feat/synapse-consumer-pg
-```
-
-Ouvrir ensuite une pull request `feat/synapse-consumer-pg` vers `master`. Après
-revue, CI et recette, poser un tag immuable :
-
-```powershell
-git tag -a vYYYY.MM.DD -m 'Organigrad release vYYYY.MM.DD'
-git push origin vYYYY.MM.DD
-```
+Avant une livraison autorisée, relever la branche active et les changements tiers,
+identifier la révision à livrer et faire revoir son diff. Ne pas rejouer les
+anciennes commandes `switch/merge/push`. Le placement actuel est décrit dans
+[deployment.md](deployment.md) et la [référence infrastructure](../../apps2026-hub/ETAT_INFRA_ACTUEL.md).
+La production exige une image immuable et le chemin `deployer-compose`, après
+identification du service et contrôle du verrou.
 
 ## 2. Vérification avant intégration
 

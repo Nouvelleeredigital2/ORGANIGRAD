@@ -1,5 +1,12 @@
 # Organigrad
 
+> Reprise Synapse : [etat et preuves du 13 septembre 2026](ETAT-RESEAU-SYNAPSE-20260913.md). Les anciens rapports restent historiques.
+
+
+> **Production — relevé du 2026-09-07** : `orchestrator` et `organigrad-front`
+> sont observés sur **apps2026-prod**. Voir [la référence infrastructure](../apps2026-hub/ETAT_INFRA_ACTUEL.md)
+> et [le déploiement](docs/deployment.md). Cette présence ne certifie pas les parcours.
+
 Plateforme d'**orchestration hybride Humain · IA · MCP** : un organigramme exécutable
 où chaque nœud est un humain (garant/validation), un agent IA, ou un logiciel via MCP.
 Le flux avance d'un nœud à l'autre sous contrôle d'une machine à états, avec
@@ -85,23 +92,16 @@ cloisonnée par **RLS**.
 
 ## 7. Migrations
 
-Migrations versionnées dans `supabase/migrations/` :
+Les migrations antérieures au **2026-08-03 ne sont pas rejouables**, y compris
+les anciens scripts `init_schema` et `rls`. Voir
+[supabase/migrations/README.md](supabase/migrations/README.md).
 
-- `20260617120000_init_schema.sql` — schéma complet (déploiement *from scratch*)
-- `20260617130000_rls.sql` — politiques RLS (from scratch)
-- `20260617140000_notifications_idempotency.sql` — idempotence notifications
-- `20260618000000_reconcile_p2_p5_*.sql` — **réconciliation** appliquée à la base
-  de prod existante (déjà durcie) : ajoute `scopes`/`expires_at`, `idempotency_key`,
-  et met la RPC de clé API à jour, sans dupliquer les policies existantes.
+- **Projet neuf** : baseline `supabase/schema/baseline_2026-08-03.sql`, puis
+  migrations postérieures sélectionnées après revue.
+- **Projet existant** : comparer l'historique réel ; ne rejouer ni baseline ni
+  migrations anciennes, appliquer uniquement les évolutions inédites prévues.
 
-```bash
-supabase link --project-ref <ref>
-supabase db push
-```
-
-> ⚠️ Sur une base **déjà** dotée de RLS, n'applique pas `init_schema` + `rls`
-> tels quels (doublons) : utilise la migration de réconciliation. Sur une base
-> vierge, applique les 3 premières.
+Aucune migration distante n'a été exécutée ni vérifiée pendant cet audit.
 
 ## 8. Tests
 
