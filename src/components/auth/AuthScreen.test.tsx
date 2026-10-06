@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { act, render, screen, waitFor, fireEvent } from '@testing-library/react';
 
 /**
  * P1-9 / P1-10 — inscription et lien magique, moitié CLIENT.
@@ -32,6 +32,15 @@ const { AuthScreen } = await import('./AuthScreen');
 const champ = (nom: string) => screen.getByLabelText(nom) as HTMLInputElement;
 const boutonEnvoi = () =>
     screen.getByRole('button', { name: /Se connecter|Créer le compte|Envoyer le lien|…/ });
+
+/** Promesse résolue à la main, pour maîtriser l'instant où la sonde répond. */
+function differee<T>() {
+    let resoudre: (valeur: T) => void = () => {};
+    const promesse = new Promise<T>((r) => {
+        resoudre = r;
+    });
+    return { promesse, resoudre };
+}
 
 /** Remplit le formulaire puis soumet, dans le mode courant. */
 function soumettre(email: string, motDePasse?: string) {
@@ -103,8 +112,34 @@ describe('AuthScreen — service d’authentification indisponible', () => {
     });
 
     it('sonde au vert : aucun bandeau', async () => {
+        // On attend la RÉSOLUTION de la sonde, pas seulement son appel : sans
+        // cela, l'assertion passerait avant que le résultat ne soit appliqué.
+        const sonde = differee<boolean>();
+        sante.sonderServiceAuth.mockReturnValue(sonde.promesse);
         render(<AuthScreen />);
-        await waitFor(() => expect(sante.sonderServiceAuth).toHaveBeenCalledTimes(1));
+        expect(sante.sonderServiceAuth).toHaveBeenCalledTimes(1);
+
+        await act(async () => {
+            sonde.resoudre(true);
+            await sonde.promesse;
+        });
+        expect(screen.queryByText(/ne répond pas pour le moment/i)).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Réessayer' })).not.toBeInTheDocument();
+    });
+
+    it('sonde lente en échec après une connexion réussie : résultat ignoré', async () => {
+        const sonde = differee<boolean>();
+        sante.sonderServiceAuth.mockReturnValue(sonde.promesse);
+        render(<AuthScreen />);
+        soumettre('camille@test.fr', 'motdepasse1');
+        await waitFor(() =>
+            expect(screen.getByRole('button', { name: 'Se connecter' })).toBeEnabled(),
+        );
+
+        await act(async () => {
+            sonde.resoudre(false);
+            await sonde.promesse;
+        });
         expect(screen.queryByText(/ne répond pas pour le moment/i)).not.toBeInTheDocument();
     });
 });

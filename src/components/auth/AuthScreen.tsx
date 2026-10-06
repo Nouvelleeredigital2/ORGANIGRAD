@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { Button, FormField, Input, Surface } from '../../design/ui';
 import { estIndisponibiliteService, messageErreurAuth } from './authErrors';
@@ -22,21 +22,38 @@ export function AuthScreen() {
     // affichée en bandeau, distincte d'un refus d'identifiants.
     const [serviceIndisponible, setServiceIndisponible] = useState(false);
     const [sondeEnCours, setSondeEnCours] = useState(false);
+    // Une sonde peut durer jusqu'à 5 s. Chaque sonde reçoit un numéro ; seul le
+    // résultat de la plus récente s'applique. Une tentative de connexion ou le
+    // démontage incrémentent le compteur : une sonde lente ne peut plus réafficher
+    // le bandeau après une connexion réussie, ni écrire dans un écran démonté.
+    const derniereSonde = useRef(0);
+
+    const invaliderSonde = useCallback(() => {
+        derniereSonde.current += 1;
+        setSondeEnCours(false);
+    }, []);
 
     const sonder = useCallback(async () => {
+        const numero = ++derniereSonde.current;
         setSondeEnCours(true);
         const disponible = await sonderServiceAuth();
+        if (numero !== derniereSonde.current) return;
         setServiceIndisponible(!disponible);
         setSondeEnCours(false);
     }, []);
 
     useEffect(() => {
         if (isSupabaseConfigured) void sonder();
+        return () => {
+            derniereSonde.current += 1;
+        };
     }, [sonder]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!supabase) return;
+        // Le résultat de la tentative fait foi sur une sonde encore en vol.
+        invaliderSonde();
         setLoading(true);
         setError(null);
         setInfo(null);

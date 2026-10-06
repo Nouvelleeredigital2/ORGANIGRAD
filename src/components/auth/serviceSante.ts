@@ -18,15 +18,23 @@ export async function sonderServiceAuth(): Promise<boolean> {
     const key = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
     if (!url || !key || typeof fetch !== 'function') return true;
 
+    // `AbortSignal.timeout` n'existe pas avant Safari 16 : l'appeler y lèverait,
+    // et le `catch` conclurait à tort à une panne. AbortController + minuterie
+    // couvrent les mêmes navigateurs que `fetch`.
+    const controleur = typeof AbortController === 'function' ? new AbortController() : null;
+    const minuterie = controleur ? setTimeout(() => controleur.abort(), DELAI_MS) : null;
+
     try {
         const reponse = await fetch(`${url.replace(/\/+$/, '')}/auth/v1/health`, {
             headers: { apikey: key },
-            signal: AbortSignal.timeout(DELAI_MS),
+            signal: controleur?.signal,
         });
         // Un 4xx prouve que le service répond : seule une réponse serveur 5xx,
         // ou l'absence de réponse, signale une indisponibilité.
         return reponse.status < 500;
     } catch {
         return false;
+    } finally {
+        if (minuterie !== null) clearTimeout(minuterie);
     }
 }
