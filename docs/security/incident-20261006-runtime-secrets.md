@@ -51,6 +51,22 @@ Preuves après redémarrage :
 6. vérifier SQL, Auth Admin, e-mail, santé et refus de l’ancienne valeur ;
 7. révoquer définitivement l’ancienne valeur et seulement alors dégeler la recette.
 
+### Qualification complémentaire du 6 octobre
+
+Une recherche par égalité exacte sur les fichiers de configuration du VPS confirme que
+les deux valeurs actives sont chargées depuis `/opt/organigrad/.env`. Les autres
+occurrences trouvées sur le VPS sont uniquement des sauvegardes privées OrganiGrad ou
+une sauvegarde privée de raccordement conservée par Synapse. Aucun second consommateur
+actif Docker n'a été trouvé.
+
+Cette observation ne couvre pas les consommateurs gérés par le fournisseur : secrets
+d'Edge Functions, connecteurs MCP, automatisations et outils extérieurs au VPS. La clé
+`service_role` est en outre utilisée comme secret d'authentification par `notify-email`
+dans le code. Aucune fenêtre de coexistence ni procédure de révocation fournisseur n'a
+pu être prouvée avec les accès disponibles. La rotation a donc été explicitement gelée,
+sans tentative répétée ni substitution de cible. La recette A/B demeure gelée pour la
+même raison.
+
 ## Livraison associée
 
 La PR #44 accepte les codes JWS signés émis par Synapse tout en conservant le format historique. Elle a été fusionnée après CI verte au SHA `892a4c4bd25ef267806cf5db6161a2384fb604bc`. L’image `organigrad-backend:20261006-892a4c4` est en service et saine ; retour arrière applicatif disponible vers `organigrad-backend:20261004-shared-f80320c6`.
