@@ -10,7 +10,11 @@ if (!process.env.VITE_SUPABASE_ANON_KEY) throw new Error('Clé publique Supabase
 
 const server = await createServer({
   root: fileURLToPath(new URL('../', import.meta.url)),
-  define: { 'import.meta.env.VITE_ORCHESTRATOR_URL': JSON.stringify('/api') },
+  define: {
+    'import.meta.env.VITE_ORCHESTRATOR_URL': JSON.stringify('/api'),
+    // Local owner-session recipe only; does not enable server circuits or workers.
+    'import.meta.env.VITE_PROJECTS_ENABLED': JSON.stringify('true'),
+  },
   server: {
     host: '127.0.0.1', port: 5174, strictPort: true,
     proxy: {
