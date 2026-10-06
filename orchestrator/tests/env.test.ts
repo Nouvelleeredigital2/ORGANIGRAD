@@ -2,6 +2,20 @@ import { describe, it, expect } from 'vitest';
 import { loadEnv, EnvValidationError } from '../src/config/env.js';
 
 describe('loadEnv (validation des variables d\'environnement)', () => {
+    it('active le pont suite seulement avec Postgres, projets, URLs HTTPS et secrets serveur', () => {
+        const base = {
+            SUPABASE_DB_URL: 'postgresql://user:pass@localhost:5432/db',
+            SUPABASE_JWT_SECRET: 'test', PROJECTS_ENABLED: 'true', APP_URL: 'https://organigrad.example',
+            SYNAPSE_URL: 'https://synapse.example', SYNAPSE_SUITE_ENABLED: '1',
+            SYNAPSE_SUITE_APP_TOKEN: 'a'.repeat(32), SYNAPSE_SUITE_SERVICE_CREDENTIAL: 'b'.repeat(32),
+        };
+        const env = loadEnv(base);
+        expect(env.synapseSuiteEnabled).toBe(true);
+        expect(env.synapseUrl).toBe('https://synapse.example');
+        expect(() => loadEnv({ ...base, SYNAPSE_URL: 'http://synapse.example' })).toThrow(/SYNAPSE_URL/);
+        expect(() => loadEnv({ ...base, SYNAPSE_SUITE_APP_TOKEN: 'short' })).toThrow(/SYNAPSE_SUITE_APP_TOKEN/);
+        expect(() => loadEnv({ ...base, PROJECTS_ENABLED: 'false' })).toThrow(/SYNAPSE_SUITE_ENABLED/);
+    });
     it('scheduler requires an explicit project allowlist and authenticated circuits', () => {
         expect(loadEnv({ORCHESTRATOR_ALLOW_MEMORY:'1'}).circuitSchedulerEnabled).toBe(false);
         const base={SUPABASE_DB_URL:'postgresql://localhost/test',SUPABASE_JWT_SECRET:'test',PROJECTS_ENABLED:'true',CIRCUITS_ENABLED:'true',APP_URL:'https://example.org',CIRCUIT_SCHEDULER_ENABLED:'true'};

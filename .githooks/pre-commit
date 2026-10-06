@@ -5,6 +5,6 @@ changed=$(git diff --cached --name-only)
 case "$changed" in
   *synapseEmittedTypes*|*synapse-emit-conformance*)
     echo "[synapse] verification emissions vs registre partage…"
-    ( cd orchestrator __TESTCMD____TESTCMD__ npx vitest run tests/synapse-emit-conformance.test.ts ) || { echo "[synapse] type non declare au registre — commit bloque."; exit 1; }
+    ( cd orchestrator && npx vitest run tests/synapse-emit-conformance.test.ts ) || { echo "[synapse] type non declare au registre — commit bloque."; exit 1; }
     ;;
 esac

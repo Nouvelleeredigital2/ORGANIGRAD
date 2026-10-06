@@ -33,6 +33,7 @@ import { Notifier, PgAuditLogger } from '../observability/notifier.js';
 import { FixedWindowRateLimiter } from '../observability/rateLimiter.js';
 import { safeFetch } from '../net/ssrfGuard.js';
 import type { HybridNode } from '../domain/types.js';
+import { isSuiteMachinePath, registerSuiteRoutes, type SuiteRouteDeps } from './suiteRoutes.js';
 
 /**
  * Serveur HTTP de production — auth par clé API workspace, store Postgres.
@@ -99,6 +100,8 @@ export interface PgServerDeps {
     linkBridge?: LinkBridgeConfig;
     /** Horloge en secondes Unix pour la fraîcheur des assertions (tests). */
     linkBridgeNow?: () => number;
+    /** Pont de lancement Synapse, absent tant que l'opt-in et ses secrets ne sont pas complets. */
+    synapseSuite?: SuiteRouteDeps;
 }
 
 const PUBLIC_PATHS = new Set(['/healthz']);
@@ -234,6 +237,11 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
             if (!deps.linkBridge) return reply.code(404).send({ error: 'LINK_BRIDGE_NOT_FOUND' });
             return;
         }
+        if (isSuiteMachinePath(path)) {
+            reply.header('Cache-Control', 'private, no-store');
+            if (!deps.synapseSuite) return reply.code(404).send({ error: 'SYNAPSE_SUITE_NOT_FOUND' });
+            return; // Le plugin applique son secret machine constant-time.
+        }
         // Project reads run the existing auth inside their own error/cache boundary.
         if (deps.projectsEnabled === true && isProjectReadRoute(req)) return;
         if (!req.url.startsWith('/api/') && !req.url.startsWith('/mcp')) return;
@@ -241,6 +249,7 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
     });
 
     if (deps.projectsEnabled === true) registerProjectRoutes(app, deps);
+    if (deps.synapseSuite) registerSuiteRoutes(app, deps.synapseSuite);
     if (deps.projectServiceDelegationsEnabled === true && deps.projectsEnabled === true && deps.circuitsEnabled === true) {
         registerProjectServiceDelegationRoutes(app, deps.sql, deps.notifierOptions?.appUrl);
         registerProjectServiceTargetRoutes(app, deps.sql, deps.notifierOptions?.appUrl);

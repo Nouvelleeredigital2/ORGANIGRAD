@@ -9,14 +9,18 @@ const A = '20000000-0000-4000-8000-000000000001';
 const B = '20000000-0000-4000-8000-000000000002';
 const P = '30000000-0000-4000-8000-000000000001';
 const T = '40000000-0000-4000-8000-000000000001';
+const Q = '30000000-0000-4000-8000-000000000002';
 const db = new PGlite();
 const migration = readFileSync(new URL('../../supabase/migrations/20260909090010_projects_and_tasks.sql', import.meta.url), 'utf8');
+const suiteMigration = readFileSync(new URL('../../supabase/migrations/20261004120000_synapse_suite_projects.sql', import.meta.url), 'utf8');
+const accessMigration = readFileSync(new URL('../../supabase/migrations/20261004160000_synapse_project_access.sql', import.meta.url), 'utf8');
 
 // PostgreSQL réel embarqué, identités synthétiques uniquement, aucun Supabase distant.
 beforeAll(async () => {
     await db.exec(`
-      create role anon; create role authenticated;
+      create role anon; create role authenticated; create role service_role bypassrls;
       create schema auth;
+      create table auth.users(id uuid primary key);
       create function auth.uid() returns uuid language sql stable as
         $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
       grant usage on schema public, auth to anon, authenticated;
@@ -50,10 +54,13 @@ beforeAll(async () => {
         using (public.is_workspace_member(workspace_id));
       grant select on public.workspace_members to authenticated;
       insert into public.workspaces values ('${A}'),('${B}');
+      insert into auth.users values ('${U}'),('${V}'),('${X}');
       insert into public.workspace_members values ('${A}','${U}','owner'),
         ('${A}','${V}','viewer'),('${B}','${X}','admin');
     `);
     await db.exec(migration);
+    await db.exec(suiteMigration);
+    await db.exec(accessMigration);
 }, 30000);
 afterAll(async () => { await db.close(); });
 
@@ -82,6 +89,19 @@ describe.sequential('projets : migration, RLS et persistance réelle', () => {
         expect((await as(V,'select id from public.projects')).rows).toHaveLength(1);
         expect((await as(X,'select id from public.projects')).rows).toHaveLength(0);
         expect((await as(X,'select id from public.project_tasks')).rows).toHaveLength(0);
+    });
+    it('limite un projet Synapse au créateur, aux administrateurs et aux grants explicites', async () => {
+        await db.query('insert into public.projects(id,workspace_id,name) values ($1,$2,$3)',[Q,A,'TEST-SYNAPSE-Isolé']);
+        await db.query('insert into public.synapse_project_links(project_id,workspace_id,synapse_workspace_id,idempotency_key,created_by) values ($1,$2,$3,$4,$5),($6,$2,$3,$7,$5)',
+            [P,A,'synapse-ws','synapse-ws/project-p/organigrad',U,Q,'synapse-ws/project-q/organigrad']);
+        await db.query('insert into public.synapse_project_grants(project_id,workspace_id,user_id,membership_created) values ($1,$2,$3,false)',[P,A,V]);
+        expect((await as(V,'select id from public.projects order by id')).rows).toEqual([{id:P}]);
+        expect((await as(V,'select project_id from public.project_tasks')).rows).toEqual([{project_id:P}]);
+        expect((await as(U,'select id from public.projects where id in ($1,$2) order by id',[P,Q])).rows).toEqual([{id:P},{id:Q}]);
+        await db.query('delete from public.synapse_project_grants where project_id=$1 and user_id=$2',[P,V]);
+        expect((await as(V,'select id from public.projects where id in ($1,$2)',[P,Q])).rows).toHaveLength(0);
+        await db.query('delete from public.synapse_project_links where project_id in ($1,$2)',[P,Q]);
+        await db.query('delete from public.projects where id=$1',[Q]);
     });
     it('refuse une création par viewer et une insertion dans un autre espace', async () => {
         await expect(as(V,'insert into public.projects(workspace_id,name) values ($1,$2)',[A,'Interdit'])).rejects.toThrow(/row-level security/);

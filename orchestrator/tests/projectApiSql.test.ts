@@ -8,7 +8,9 @@ const A='21000000-0000-4000-8000-000000000001';
 const B='21000000-0000-4000-8000-000000000002';
 const U='11000000-0000-4000-8000-000000000001';
 const X='11000000-0000-4000-8000-000000000002';
+const V='11000000-0000-4000-8000-000000000003';
 const P='31000000-0000-4000-8000-000000000001';
+const Q='31000000-0000-4000-8000-000000000002';
 const db=new PGlite();
 
 // Seul l'adaptateur du pilote postgres.js est remplacé. Toutes les requêtes
@@ -28,12 +30,13 @@ const sql=Object.assign(tag(db), {
     }),
 }) as unknown as Sql;
 const app=buildPgServer({sql,projectsEnabled:true,verifyUserToken:async token=>
-    token==='TEST-OWNER' ? {sub:U} : token==='TEST-OTHER' ? {sub:X} : null});
+    token==='TEST-OWNER' ? {sub:U} : token==='TEST-OTHER' ? {sub:X} : token==='TEST-LIMITED' ? {sub:V} : null});
 
 beforeAll(async()=>{
     await db.exec(`
-      create role anon; create role authenticated;
+      create role anon; create role authenticated; create role service_role bypassrls;
       create schema auth;
+      create table auth.users(id uuid primary key);
       create function auth.uid() returns uuid language sql stable as
         $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
       grant usage on schema auth,public to authenticated;
@@ -42,9 +45,12 @@ beforeAll(async()=>{
         primary key(workspace_id,user_id));
       grant select on public.workspace_members to authenticated;
       insert into public.workspaces values ('${A}'),('${B}');
+      insert into auth.users values ('${U}'),('${X}'),('${V}');
       insert into public.workspace_members values ('${A}','${U}','owner'),('${B}','${X}','admin');
     `);
     await db.exec(readFileSync(new URL('../../supabase/migrations/20260909090010_projects_and_tasks.sql',import.meta.url),'utf8'));
+    await db.exec(readFileSync(new URL('../../supabase/migrations/20261004120000_synapse_suite_projects.sql',import.meta.url),'utf8'));
+    await db.exec(readFileSync(new URL('../../supabase/migrations/20261004160000_synapse_project_access.sql',import.meta.url),'utf8'));
     await db.query('insert into public.projects(id,workspace_id,name) values ($1,$2,$3)',[P,A,'TEST-SYNAPSE-API']);
     for(const status of ['todo','running','blocked','done']) {
         await db.query('insert into public.project_tasks(workspace_id,project_id,title,status) values ($1,$2,$3,$4)',[A,P,`TEST-SYNAPSE-${status}`,status]);
@@ -76,6 +82,22 @@ describe.sequential('projection API sur le SQL réel local',()=>{
         expect((await get(`/api/projects/${P}/context`,'TEST-OTHER',A)).statusCode).toBe(403);
         expect((await get(`/api/projects/${P}/context`,'TEST-OTHER',B)).statusCode).toBe(404);
         expect((await get('/api/projects','TEST-OTHER',B)).json().projects).toHaveLength(0);
+    });
+    it('filtre aussi côté API directe les projets Synapse non accordés',async()=>{
+        await db.query('insert into public.workspace_members(workspace_id,user_id,role) values ($1,$2,$3)',[A,V,'member']);
+        await db.query('insert into public.projects(id,workspace_id,name) values ($1,$2,$3)',[Q,A,'TEST-SYNAPSE-API-B']);
+        await db.query('insert into public.synapse_project_links(project_id,workspace_id,synapse_workspace_id,idempotency_key,created_by) values ($1,$2,$3,$4,$5),($6,$2,$3,$7,$5)',[P,A,'synapse-ws','synapse-ws/a/organigrad',U,Q,'synapse-ws/b/organigrad']);
+        await db.query('insert into public.synapse_project_grants(project_id,workspace_id,user_id,membership_created) values ($1,$2,$3,false)',[P,A,V]);
+        const list=await get('/api/projects','TEST-LIMITED',A);
+        expect(list.statusCode).toBe(200);
+        expect(list.json().projects.map((row:{id:string})=>row.id)).toEqual([P]);
+        expect((await get(`/api/projects/${P}/context`,'TEST-LIMITED',A)).statusCode).toBe(200);
+        expect((await get(`/api/projects/${Q}/context`,'TEST-LIMITED',A)).statusCode).toBe(404);
+        await db.query('delete from public.synapse_project_grants where project_id=$1 and user_id=$2',[P,V]);
+        expect((await get(`/api/projects/${P}/context`,'TEST-LIMITED',A)).statusCode).toBe(404);
+        await db.query('delete from public.synapse_project_links where project_id in ($1,$2)',[P,Q]);
+        await db.query('delete from public.projects where id=$1',[Q]);
+        await db.query('delete from public.workspace_members where user_id=$1',[V]);
     });
     it('parcourt des pages sans perdre les microsecondes du curseur',async()=>{
         await db.query('insert into public.projects(workspace_id,name) values ($1,$2)',[A,'TEST-SYNAPSE-Page']);

@@ -54,6 +54,8 @@ beforeAll(async()=>{
       insert into auth.users(id) values ('${U}'),('${V}');
       insert into public.workspaces values ('${W}'),('${X}');`);
     await db.exec(readFileSync(new URL('../../supabase/migrations/20260909090010_projects_and_tasks.sql',import.meta.url),'utf8'));
+    await db.exec(readFileSync(new URL('../../supabase/migrations/20261004120000_synapse_suite_projects.sql',import.meta.url),'utf8'));
+    await db.exec(readFileSync(new URL('../../supabase/migrations/20261004160000_synapse_project_access.sql',import.meta.url),'utf8'));
     // Explicit qualified rights of this fixture, not a claim about production grants.
     await db.exec('grant select on auth.users,auth.sessions,public.workspace_members,public.projects,public.project_tasks to service_role');
     // Before implementation, leave the missing migration absent so failure is a behavioral assertion.
