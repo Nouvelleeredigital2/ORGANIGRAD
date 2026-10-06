@@ -20,6 +20,11 @@ La même sortie de diagnostic a aussi affiché `SUPABASE_DB_URL` et `SUPABASE_SE
 
 La recette réelle est gelée jusqu’à leur rotation coordonnée. Voir `docs/security/incident-20261006-runtime-secrets.md`. Les comptes et workspaces de recette déjà créés sont conservés pour reprise ; aucun circuit ni décision métier n’a encore été validé de bout en bout.
 
+Qualification complémentaire : le VPS ne montre qu'un consommateur actif des deux
+valeurs, `/opt/organigrad/.env`. Les consommateurs Supabase gérés hors VPS ne sont pas
+inventoriables avec les accès présents et la coexistence des anciennes/nouvelles valeurs
+n'est pas prouvée. Aucune rotation fournisseur n'a donc été exécutée.
+
 ## Reste à faire
 
 - [ ] Qualifier tous les consommateurs de `SUPABASE_DB_URL` et `SUPABASE_SERVICE_ROLE_KEY`, puis tourner les deux secrets côté fournisseur avec sauvegarde, fenêtre de coexistence ou rollback documenté.
