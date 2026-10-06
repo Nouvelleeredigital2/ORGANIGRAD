@@ -419,6 +419,49 @@ describe('Notifier — transport email', () => {
     const EMAIL_URL = 'https://abc.supabase.co/functions/v1/notify-email';
     const SERVICE_KEY = 'service_role_key_xxx';
 
+    it('utilise apikey avec une nouvelle clé serveur Supabase', async () => {
+        const store = makeStore();
+        const fetchMock = makeFetch(200);
+        const notifier = new Notifier({
+            store,
+            workspaceId: 'ws-1',
+            fetchImpl: fetchMock as typeof fetch,
+            emailEdgeFunctionUrl: EMAIL_URL,
+            supabaseSecretKey: 'sb_secret_new',
+        });
+        notifier.attach();
+
+        store.applyTransition('hum', 'EXECUTING');
+        fetchMock.mockClear();
+        store.applyTransition('hum', 'WAITING_HUMAN_APPROVAL');
+        await new Promise((r) => setImmediate(r));
+
+        const emailCall = fetchMock.mock.calls.find((c) => (c[0] as string) === EMAIL_URL);
+        expect(emailCall?.[1].headers).toMatchObject({ apikey: 'sb_secret_new' });
+        expect(emailCall?.[1].headers).not.toHaveProperty('authorization');
+    });
+
+    it('conserve Bearer pour service_role pendant la coexistence', async () => {
+        const store = makeStore();
+        const fetchMock = makeFetch(200);
+        const notifier = new Notifier({
+            store,
+            workspaceId: 'ws-1',
+            fetchImpl: fetchMock as typeof fetch,
+            emailEdgeFunctionUrl: EMAIL_URL,
+            supabaseServiceRoleKey: SERVICE_KEY,
+        });
+        notifier.attach();
+
+        store.applyTransition('hum', 'EXECUTING');
+        fetchMock.mockClear();
+        store.applyTransition('hum', 'WAITING_HUMAN_APPROVAL');
+        await new Promise((r) => setImmediate(r));
+
+        const emailCall = fetchMock.mock.calls.find((c) => (c[0] as string) === EMAIL_URL);
+        expect(emailCall?.[1].headers).toMatchObject({ authorization: `Bearer ${SERVICE_KEY}` });
+    });
+
     it('appelle l\'Edge Function pour WAITING_HUMAN_APPROVAL si email configuré', async () => {
         const store = makeStore();
         const fetchMock = makeFetch(200);

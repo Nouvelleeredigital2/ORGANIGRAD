@@ -2,36 +2,39 @@
  * Edge Function : notify-email
  *
  * Reçoit une requête POST de l'orchestrateur, construit le HTML via les
- * templates et envoie l'email via Resend, puis journalise dans `notifications`.
+ * templates et envoie l'email via Brevo, puis journalise dans `notifications`.
  *
  * DURCISSEMENT (Priorité 5) :
- *   1. Vérification du CALLER : seule une requête portant la clé service_role en
- *      Bearer est acceptée (l'orchestrateur). Le SPA ne peut PLUS appeler
- *      directement cette fonction (anti-relais).
+ *   1. Vérification du CALLER : une nouvelle clé serveur dans `apikey`, ou la
+ *      clé service_role pendant la coexistence, est exigée. La SPA ne peut pas
+ *      appeler directement cette fonction (anti-relais).
  *   2. Validation runtime du payload (contrat partagé — copie du validateur de
  *      orchestrator/src/observability/notificationContract.ts, runtimes séparés).
  *   3. Restriction du DESTINATAIRE : `to` doit correspondre exactement à l'email
  *      configuré sur le nœud (`hybrid_nodes.notification_channels.email`) pour ce
  *      workspace — pas d'envoi vers une adresse arbitraire.
- *   4. Expéditeur (`from`) JAMAIS issu de la requête : fixé par EMAIL_FROM.
+ *   4. Expéditeur JAMAIS issu de la requête : fixé par les secrets Brevo.
  *   5. Idempotence : la clé est RÉSERVÉE en base (`status = 'pending'`) AVANT
  *      l'envoi. C'est la contrainte d'unicité qui arbitre entre deux
  *      invocations concurrentes, donc une seule envoie. Vérifier avant d'agir
  *      (SELECT puis envoi) laissait passer deux e-mails.
- *   6. `response.ok` Resend vérifié ; échec réel journalisé.
+ *   6. `response.ok` Brevo vérifié ; échec réel journalisé.
  *
  * Variables d'environnement :
- *   RESEND_API_KEY            — clé API Resend (absent : mode simulé en dev)
- *   EMAIL_FROM                — expéditeur fixe
+ *   BREVO_API_KEY             — clé API Brevo (absence = échec visible)
+ *   BREVO_SENDER_EMAIL        — adresse expéditrice qualifiée dans Brevo
+ *   BREVO_SENDER_NAME         — nom affiché (défaut : Organigrad)
  *   SUPABASE_URL              — injecté
- *   SUPABASE_SERVICE_ROLE_KEY — injecté ; sert AUSSI à authentifier le caller
+ *   SUPABASE_SECRET_KEYS      — JSON des nouvelles clés serveur injecté
+ *   SUPABASE_SERVICE_ROLE_KEY — repli legacy pendant la rotation
  */
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { buildHitlEmail, buildFluxEmail } from './templates.ts';
 import type { HitlEmailData, FluxEmailData } from './templates.ts';
+import { notifyEmailCallerKey, resolveNotifyEmailServerKeys } from './serverKeys.ts';
 
-const RESEND_API = 'https://api.resend.com/emails';
+const BREVO_API = 'https://api.brevo.com/v3/smtp/email';
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 interface EmailRequest {
@@ -67,13 +70,15 @@ function parsePayload(input: unknown): { ok: true; value: EmailRequest } | { ok:
 Deno.serve(async (req: Request): Promise<Response> => {
     if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
 
-    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+    const serverKeys = resolveNotifyEmailServerKeys({
+        SUPABASE_SECRET_KEYS: Deno.env.get('SUPABASE_SECRET_KEYS'),
+        SUPABASE_SERVICE_ROLE_KEY: Deno.env.get('SUPABASE_SERVICE_ROLE_KEY'),
+    });
 
     // ── 1. Vérification du caller (anti-relais) ──────────────────────────────
-    const auth = req.headers.get('authorization') ?? '';
-    const token = auth.replace(/^Bearer\s+/i, '').trim();
-    if (!serviceRoleKey || token !== serviceRoleKey) {
+    const token = notifyEmailCallerKey(req.headers);
+    if (!serverKeys || !serverKeys.callerKeys.has(token)) {
         return json({ error: 'unauthorized' }, 401);
     }
 
@@ -88,7 +93,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (!parsed.ok) return json({ error: parsed.error }, 400);
     const { workspaceId, nodeId, to, type, data, idempotencyKey } = parsed.value;
 
-    const supabase = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
+    const supabase = createClient(supabaseUrl, serverKeys.adminKey, { auth: { persistSession: false } });
 
     // ── 3. Restriction du destinataire au workflow ───────────────────────────
     const { data: node, error: nodeErr } = await supabase
@@ -142,38 +147,39 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
 
     // ── Envoi ─────────────────────────────────────────────────────────────────
-    const resendKey = Deno.env.get('RESEND_API_KEY');
-    const fromEmail = Deno.env.get('EMAIL_FROM') ?? 'Organigrad <no-reply@organigrad.app>';
+    const brevoKey = Deno.env.get('BREVO_API_KEY')?.trim();
+    const senderEmail = Deno.env.get('BREVO_SENDER_EMAIL')?.trim();
+    const senderName = Deno.env.get('BREVO_SENDER_NAME')?.trim() || 'Organigrad';
 
     let status: 'sent' | 'failed' = 'sent';
     let errorMsg: string | null = null;
     let sentAt: string | null = null;
 
-    if (!resendKey) {
-        console.warn('[notify-email] RESEND_API_KEY absent — envoi simulé');
-        sentAt = new Date().toISOString();
+    if (!brevoKey || !senderEmail || !EMAIL_RE.test(senderEmail)) {
+        status = 'failed';
+        errorMsg = 'configuration Brevo incomplète';
+        console.error('[notify-email] configuration Brevo incomplète');
     } else {
         try {
-            const resendRes = await fetch(RESEND_API, {
+            const brevoRes = await fetch(BREVO_API, {
                 method: 'POST',
-                headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
+                headers: { 'api-key': brevoKey, 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    from: fromEmail, // expéditeur fixe — jamais issu de la requête
-                    to: [to],
+                    sender: { name: senderName, email: senderEmail },
+                    to: [{ email: to }],
                     subject: email.subject,
-                    html: email.html,
-                    text: email.text,
+                    htmlContent: email.html,
+                    textContent: email.text,
                 }),
             });
-            const resendBody = (await resendRes.json().catch(() => ({}))) as { id?: string; message?: string };
-            if (!resendRes.ok) {
-                throw new Error(`Resend ${resendRes.status}: ${resendBody.message ?? 'erreur'}`);
+            if (!brevoRes.ok) {
+                throw new Error(`Brevo HTTP ${brevoRes.status}`);
             }
             sentAt = new Date().toISOString();
         } catch (err) {
             status = 'failed';
             errorMsg = err instanceof Error ? err.message : String(err);
-            console.error('[notify-email] échec envoi Resend'); // pas de contenu sensible loggé
+            console.error('[notify-email] échec envoi Brevo'); // pas de contenu sensible loggé
         }
     }
 

@@ -50,6 +50,8 @@ export interface PgNotifierConfig {
     sqlForAudit?: Sql;
     /** URL de l'Edge Function notify-email. */
     emailEdgeFunctionUrl?: string;
+    /** Nouvelle clé serveur Supabase (`sb_secret_…`), prioritaire. */
+    supabaseSecretKey?: string;
     /** Clé service_role pour appeler l'Edge Function. */
     supabaseServiceRoleKey?: string;
 }
@@ -355,6 +357,7 @@ export function buildPgServer(deps: PgServerDeps): FastifyInstance {
                 appUrl: nc.appUrl,
                 auditLogger,
                 emailEdgeFunctionUrl: nc.emailEdgeFunctionUrl,
+                supabaseSecretKey: nc.supabaseSecretKey,
                 supabaseServiceRoleKey: nc.supabaseServiceRoleKey,
                 rateLimiter: outboundRateLimiter,
             });

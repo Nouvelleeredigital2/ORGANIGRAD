@@ -87,6 +87,8 @@ export interface NotifierOptions {
      * Ex. https://<ref>.supabase.co/functions/v1/notify-email
      */
     emailEdgeFunctionUrl?: string;
+    /** Nouvelle clé serveur Supabase ; transmise dans l'en-tête `apikey`. */
+    supabaseSecretKey?: string;
     /**
      * Clé service_role Supabase — requise pour appeler l'Edge Function
      * en mode service (bypass RLS). Ne jamais exposer côté client.
@@ -283,6 +285,7 @@ export class Notifier {
     private readonly appUrl?: string;
     private readonly auditLogger?: AuditLogger;
     private readonly emailEdgeFunctionUrl?: string;
+    private readonly supabaseSecretKey?: string;
     private readonly supabaseServiceRoleKey?: string;
     private readonly workspaceId?: string;
     private readonly ssrfPolicy: SsrfPolicy;
@@ -297,6 +300,7 @@ export class Notifier {
         this.appUrl = opts.appUrl;
         this.auditLogger = opts.auditLogger;
         this.emailEdgeFunctionUrl = opts.emailEdgeFunctionUrl;
+        this.supabaseSecretKey = opts.supabaseSecretKey;
         this.supabaseServiceRoleKey = opts.supabaseServiceRoleKey;
         this.workspaceId = opts.workspaceId;
         this.ssrfPolicy = opts.ssrfPolicy ?? {};
@@ -515,7 +519,9 @@ export class Notifier {
         }
 
         const headers: Record<string, string> = { 'content-type': 'application/json' };
-        if (this.supabaseServiceRoleKey) {
+        if (this.supabaseSecretKey) {
+            headers.apikey = this.supabaseSecretKey;
+        } else if (this.supabaseServiceRoleKey) {
             headers['authorization'] = `Bearer ${this.supabaseServiceRoleKey}`;
         }
 

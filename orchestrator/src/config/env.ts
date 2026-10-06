@@ -28,6 +28,9 @@ export interface OrchestratorEnv {
     port: number;
     appUrl?: string;
     supabaseDbUrl?: string;
+    /** Nouvelle clé serveur Supabase (`sb_secret_…`), préférée pour les appels API. */
+    supabaseSecretKey?: string;
+    /** Repli legacy pendant la rotation coordonnée. */
     supabaseServiceRoleKey?: string;
     emailEdgeFunctionUrl?: string;
     slackValidations?: string;
@@ -127,12 +130,15 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): OrchestratorEn
         issues.push('SUPABASE_DB_URL doit être une connection string postgres://');
     }
 
-    // En mode pg, l'e-mail exige la clé service_role pour authentifier l'appel.
+    // L'e-mail exige une clé serveur. La nouvelle clé `sb_secret_…` est
+    // prioritaire ; service_role reste accepté uniquement pour permettre une
+    // rotation coordonnée sans interruption, puis sera retiré.
     const emailUrl = source.EMAIL_EDGE_FUNCTION_URL?.trim() || undefined;
+    const secretKey = source.SUPABASE_SECRET_KEY?.trim() || undefined;
     const serviceRole = source.SUPABASE_SERVICE_ROLE_KEY?.trim() || undefined;
-    if (emailUrl && !serviceRole) {
+    if (emailUrl && !secretKey && !serviceRole) {
         issues.push(
-            'SUPABASE_SERVICE_ROLE_KEY est requise quand EMAIL_EDGE_FUNCTION_URL est défini',
+            'SUPABASE_SECRET_KEY ou SUPABASE_SERVICE_ROLE_KEY est requise quand EMAIL_EDGE_FUNCTION_URL est défini',
         );
     }
 
@@ -260,6 +266,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): OrchestratorEn
         port,
         appUrl: source.APP_URL?.trim() || undefined,
         supabaseDbUrl: dbUrl,
+        supabaseSecretKey: secretKey,
         supabaseServiceRoleKey: serviceRole,
         emailEdgeFunctionUrl: emailUrl,
         slackValidations: source.SLACK_VALIDATIONS?.trim() || undefined,

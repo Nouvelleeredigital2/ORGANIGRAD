@@ -83,6 +83,7 @@ export async function startOrchestrator() {
                 appUrl,
                 sqlForAudit: sql,
                 emailEdgeFunctionUrl: env.emailEdgeFunctionUrl,
+                supabaseSecretKey: env.supabaseSecretKey,
                 supabaseServiceRoleKey: env.supabaseServiceRoleKey,
             },
         });
@@ -124,6 +125,7 @@ export async function startOrchestrator() {
         fluxWebhook: env.slackFlux,
         appUrl,
         emailEdgeFunctionUrl: env.emailEdgeFunctionUrl,
+        supabaseSecretKey: env.supabaseSecretKey,
         supabaseServiceRoleKey: env.supabaseServiceRoleKey,
     });
     notifier.attach();
