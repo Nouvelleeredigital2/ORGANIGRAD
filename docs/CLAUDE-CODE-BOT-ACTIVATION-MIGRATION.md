@@ -1,12 +1,12 @@
-# Claude Code — activation vérifiée des personas OrganiGrad
+# Claude Code — contrat d'activation vérifiée des personas OrganiGrad
 
 ## But
 
-Préparer l'activation humaine des personas sans modifier les profils existants. Le code local ajoute l'interface et les routes de l'orchestrateur ; la migration ci-dessous reste **non appliquée** tant que la cible OrganiGrad n'est pas requalifiée.
+Raccorder l'interface à l'activation humaine des personas sans modifier les profils existants. La migration est **déjà appliquée** sur OrganiGrad : version Supabase `20260914150653`. Les versions enregistrées par Supabase ne sont pas les horodatages des fichiers locaux.
 
-Fichier candidat : `supabase/migrations/20260914170000_bot_activation_workflow.sql`.
+Référence d'autorité : `apps2026-hub/docs/CONTRAT-RPC-AUTORISATION-RESEAU.md`, section 2.3. Le fichier local `supabase/migrations/20260914170000_bot_activation_workflow.sql` est une copie de travail ; il ne doit jamais être réappliqué sur une cible qui porte déjà les RPC.
 
-## Ce que la migration fait
+## Contrat installé
 
 - conserve le brouillon par défaut et le déclencheur `guard_bot_activation` ;
 - interdit toujours une écriture directe de `enabled=true` ;
@@ -14,6 +14,8 @@ Fichier candidat : `supabase/migrations/20260914170000_bot_activation_workflow.s
 - n'autorise l'activation qu'à un `owner` ou `admin` authentifié ;
 - inscrit chaque activation ou désactivation dans `bot_activation_receipts` ;
 - n'active aucun des 14 profils à l'application de la migration.
+
+Les trois RPC sont appelées avec le **JWT de la session humaine** via le client Supabase : `bot_activation_status(p_bot_id uuid)`, `activate_verified_bot(p_bot_id uuid)`, `deactivate_bot(p_bot_id uuid, p_reason text)`. `EXECUTE` appartient à `authenticated`, jamais à `service_role`. L'orchestrateur et un connecteur d'administration ne doivent donc pas les appeler avec une clé technique.
 
 Le canal Telegram, Vox ou Engine n'est pas considéré comme vérifié par cette première version : il n'existe pas encore de registre de connexions qui puisse fournir cette preuve. L'écran doit donc présenter ces contrôles comme un prérequis du prochain lot, et non comme une connexion déjà validée.
 
@@ -31,8 +33,8 @@ Le canal Telegram, Vox ou Engine n'est pas considéré comme vérifié par cette
    npm run typecheck
    ```
 
-5. Appliquer **uniquement** `20260914170000_bot_activation_workflow.sql` par le canal OrganiGrad qualifié. Ne pas rejouer les migrations historiques et ne pas contourner le déclencheur par `DISABLE TRIGGER`.
-6. Après application, vérifier en lecture :
+5. Vérifier en lecture que les RPC installées correspondent au contrat. Ne pas rejouer les migrations historiques et ne pas contourner le déclencheur par `DISABLE TRIGGER`.
+6. Vérifier :
 
    ```sql
    select to_regclass('public.bot_activation_receipts') as receipts_table;
@@ -50,4 +52,3 @@ Le canal Telegram, Vox ou Engine n'est pas considéré comme vérifié par cette
 ## Retour arrière
 
 Ne pas supprimer les reçus pendant un retour arrière : ils sont l'historique de décision. Le retour fonctionnel est de désactiver le bot avec `deactivate_bot`, ce qui conserve la trace. Un retour de schéma exige une décision séparée après export des reçus ; il ne fait pas partie de cette migration.
-

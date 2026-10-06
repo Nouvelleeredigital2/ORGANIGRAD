@@ -197,7 +197,6 @@ describe('/api/bots', () => {
         const deactivate = await inject('DELETE', `/api/bots/${VALID_BODY.id}/activation`, MEMBER_JWT, { reason: 'Révision demandée' });
         expect(deactivate.statusCode).toBe(200);
         expect(deactivate.json().activation).toMatchObject({ status: 'draft', botId: VALID_BODY.id });
-
         const queries = (sql as unknown as ReturnType<typeof vi.fn>).mock.calls.map(call => String(call[0]).toLowerCase());
         expect(queries.some(query => query.includes('activate_verified_bot'))).toBe(true);
         expect(queries.some(query => query.includes('deactivate_bot'))).toBe(true);

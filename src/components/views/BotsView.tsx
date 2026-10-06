@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Bot, Link2, Loader2, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { Bot, Download, Link2, Loader2, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import type { BotProfile } from '../../types/botProfile';
 import { BotPortrait } from '../bots/BotPortrait';
 import { BOT_FAMILIES, BOT_FAMILY_LABEL, emptyBotProfile } from '../../types/botProfile';
@@ -11,7 +11,10 @@ import { usePermissions } from '../../auth/usePermissions';
 import { useFeedback } from '../../feedback/FeedbackContext';
 import { messageErreurUtilisateur } from '../../utils/asyncGuard';
 import { randomUuid } from '../../utils/randomId';
-import type { BotActivationStatus, BotBundle } from '../../services/orchestratorService';
+import type { BotBundle } from '../../services/orchestratorService';
+import { activateBot, deactivateBot, fetchBotActivation, type BotActivationStatus } from '../../services/botActivationRepo';
+import { buildBotBundle, fetchBotProfiles } from '../../services/botProfileRepo';
+import { useWorkspaceContext } from '../../contexts/WorkspaceContext';
 
 /**
  * BotsView — création et paramétrage visuel des bots conversationnels Hermès.
@@ -21,11 +24,12 @@ import type { BotActivationStatus, BotBundle } from '../../services/orchestrator
  * « Voir dans l'Orchestration ») — les deux restent des vues d'une même
  * identité, jamais deux copies divergentes du prompt (B3).
  *
- * Nécessite un orchestrateur connecté (Paramètres) : c'est lui qui compile et
- * sert les prompts, il n'y a pas de mode brouillon local pour les bots.
+ * L'orchestrateur compile et sert les prompts. La revue et l'activation lisent
+ * néanmoins directement les fiches RLS afin de rester disponibles en local.
  */
 export function BotsView() {
     const bridge = useOrchestratorBridge();
+    const { activeId: workspaceId } = useWorkspaceContext();
     const { can } = usePermissions();
     const feedback = useFeedback();
     const peutEcrire = can('bots:write');
@@ -44,16 +48,21 @@ export function BotsView() {
     const [bundleLoading, setBundleLoading] = useState(false);
     const [activations, setActivations] = useState<Record<string, BotActivationStatus | undefined>>({});
     const [activationBusyId, setActivationBusyId] = useState<string | null>(null);
+    const [reviewOpen, setReviewOpen] = useState(false);
+    const [reviewLoading, setReviewLoading] = useState(false);
+    const [reviewSelected, setReviewSelected] = useState<Set<string>>(new Set());
+    const [reviewOutcomes, setReviewOutcomes] = useState<Record<string, { state: 'activated' | 'failed'; error?: string }>>({});
+    const [reviewErrors, setReviewErrors] = useState<Record<string, string>>({});
+    const [reviewRunning, setReviewRunning] = useState(false);
 
     const client = bridge.client;
     const activeClient = useRef(client);
 
     const reload = useCallback(async (showLoading = true) => {
-        if (!client) return;
         if (showLoading) setLoadState('loading');
         setLoadError(null);
         try {
-            const list = await client.fetchBots();
+            const list = client ? await client.fetchBots() : await fetchBotProfiles(workspaceId);
             if (activeClient.current !== client) return;
             setBots(list);
             setLoadState('ready');
@@ -62,11 +71,11 @@ export function BotsView() {
             setLoadError(messageErreurUtilisateur(err));
             setLoadState('error');
         }
-    }, [client]);
+    }, [client, workspaceId]);
 
     useEffect(() => {
         activeClient.current = client;
-        if (client) void reload();
+        void reload();
         return () => { activeClient.current = null; };
     }, [client, reload]);
 
@@ -149,10 +158,9 @@ export function BotsView() {
     };
 
     const handleExport = async () => {
-        if (!client) return;
         setBundleLoading(true);
         try {
-            const result = await client.fetchBotBundle();
+            const result = client ? await client.fetchBotBundle() : buildBotBundle(bots);
             setBundle(result);
             setBundleOpen(true);
         } catch (err) {
@@ -163,10 +171,9 @@ export function BotsView() {
     };
 
     const handleInspectActivation = async (bot: BotProfile) => {
-        if (!client) return;
         setActivationBusyId(bot.id);
         try {
-            const activation = await client.fetchBotActivation(bot.id);
+            const activation = await fetchBotActivation(bot.id);
             setActivations(previous => ({ ...previous, [bot.id]: activation }));
         } catch (err) {
             feedback.error(`Vérification impossible : ${messageErreurUtilisateur(err)}`);
@@ -175,11 +182,22 @@ export function BotsView() {
         }
     };
 
+    /** Télécharge le paquet signé localement ; aucun transport vers Hermès ici. */
+    const downloadBundle = () => {
+        if (!bundle) return;
+        const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `organigrad-personas-${new Date().toISOString().slice(0, 10)}.json`;
+        link.click();
+        URL.revokeObjectURL(url);
+    };
+
     const handleActivate = async (bot: BotProfile) => {
-        if (!client) return;
         setActivationBusyId(bot.id);
         try {
-            const result = await client.activateBot(bot.id);
+            const result = await activateBot(bot.id);
             setActivations(previous => ({ ...previous, [bot.id]: result.verification ?? previous[bot.id] }));
             feedback.success(`« ${bot.displayName} » est activé.`);
             await reload(false);
@@ -191,12 +209,11 @@ export function BotsView() {
     };
 
     const handleDeactivate = async (bot: BotProfile) => {
-        if (!client) return;
         const reason = window.prompt(`Pourquoi retirer « ${bot.displayName} » du service ?`);
         if (reason === null) return;
         setActivationBusyId(bot.id);
         try {
-            await client.deactivateBot(bot.id, reason);
+            await deactivateBot(bot.id, reason);
             setActivations(previous => ({ ...previous, [bot.id]: { ...previous[bot.id], enabled: false } as BotActivationStatus }));
             feedback.success(`« ${bot.displayName} » est repassé en brouillon.`);
             await reload(false);
@@ -207,48 +224,64 @@ export function BotsView() {
         }
     };
 
-    if (bridge.connectionState === 'local') {
-        return (
-            <div className="w-full overflow-y-auto px-12 py-12">
-                <div className="mx-auto max-w-2xl">
-                    <p className="eyebrow">Bots</p>
-                    <h1 className="t-h1 mt-2">Bots.</h1>
-                    <Surface className="mt-6 p-6">
-                        <p className="t-body">
-                            Les bots ont besoin d'un orchestrateur connecté : c'est lui qui compile et sert
-                            leur prompt système. Configure l'URL et la clé de l'orchestrateur dans{' '}
-                            <strong>Paramètres</strong>, puis reviens ici.
-                        </p>
-                    </Surface>
-                </div>
-            </div>
-        );
-    }
+    const openActivationReview = async () => {
+        const drafts = bots.filter(bot => !bot.enabled);
+        setReviewOpen(true);
+        setReviewLoading(true);
+        setReviewOutcomes({});
+        setReviewErrors({});
+        const checks = await Promise.allSettled(drafts.map(async bot => [bot.id, await fetchBotActivation(bot.id)] as const));
+        const statuses: Record<string, BotActivationStatus> = {};
+        const errors: Record<string, string> = {};
+        checks.forEach((check, index) => {
+            const bot = drafts[index];
+            if (!bot) return;
+            if (check.status === 'fulfilled') statuses[bot.id] = check.value[1];
+            else errors[bot.id] = messageErreurUtilisateur(check.reason);
+        });
+        setActivations(previous => ({ ...previous, ...statuses }));
+        setReviewErrors(errors);
+        setReviewSelected(new Set(drafts.filter(bot => statuses[bot.id]?.ready).map(bot => bot.id)));
+        setReviewLoading(false);
+    };
 
-    if (bridge.connectionState === 'connecting' || (loadState === 'loading' && bots.length === 0)) {
+    const activateReviewedBots = async (ids = reviewSelected) => {
+        const targets = bots.filter(bot => ids.has(bot.id) && !bot.enabled && activations[bot.id]?.ready);
+        if (!targets.length) return;
+        setReviewRunning(true);
+        const outcomes: Record<string, { state: 'activated' | 'failed'; error?: string }> = {};
+        for (const bot of targets) {
+            try {
+                const result = await activateBot(bot.id);
+                outcomes[bot.id] = { state: 'activated' };
+                setActivations(previous => ({ ...previous, [bot.id]: result.verification ?? previous[bot.id] }));
+                setBots(previous => previous.map(item => item.id === bot.id ? { ...item, enabled: true } : item));
+            } catch (err) {
+                outcomes[bot.id] = { state: 'failed', error: messageErreurUtilisateur(err) };
+            }
+            setReviewOutcomes(previous => ({ ...previous, ...outcomes }));
+        }
+        setReviewRunning(false);
+        if (Object.values(outcomes).some(outcome => outcome.state === 'failed')) {
+            feedback.error('Certaines activations doivent être réessayées.');
+        } else {
+            feedback.success(`${targets.length} persona${targets.length > 1 ? 's sont' : ' est'} activé${targets.length > 1 ? 's' : ''}.`);
+        }
+        await reload(false);
+    };
+
+    const toggleReviewedBot = (botId: string) => {
+        setReviewSelected(previous => {
+            const next = new Set(previous);
+            if (next.has(botId)) next.delete(botId); else next.add(botId);
+            return next;
+        });
+    };
+
+    if (loadState === 'loading' && bots.length === 0) {
         return (
             <div className="flex h-full w-full items-center justify-center">
                 <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
-            </div>
-        );
-    }
-
-    if (bridge.connectionState === 'failed' || bridge.connectionState === 'degraded') {
-        return (
-            <div className="w-full overflow-y-auto px-12 py-12">
-                <div className="mx-auto max-w-2xl">
-                    <p className="eyebrow">Bots</p>
-                    <h1 className="t-h1 mt-2">Bots.</h1>
-                    <Surface className="mt-6 p-6">
-                        <p className="t-body" style={{ color: 'var(--system-red)' }}>
-                            Orchestrateur injoignable. Vérifie sa connexion dans Paramètres, puis réessaie.
-                        </p>
-                        <Button tone="slate" variant="soft" size="sm" className="mt-3" onClick={() => void reload()}>
-                            <RefreshCw size={13} strokeWidth={1.8} />
-                            Réessayer
-                        </Button>
-                    </Surface>
-                </div>
             </div>
         );
     }
@@ -267,6 +300,11 @@ export function BotsView() {
                         </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
+                        {peutActiver && (
+                            <Button tone="blue" variant="soft" onClick={() => void openActivationReview()}>
+                                Revue d’activation
+                            </Button>
+                        )}
                         {peutExporter && (
                             <Button tone="slate" variant="soft" onClick={() => void handleExport()} disabled={bundleLoading}>
                                 {bundleLoading ? <Loader2 size={14} className="animate-spin" strokeWidth={1.8} /> : <RefreshCw size={14} strokeWidth={1.8} />}
@@ -433,8 +471,8 @@ export function BotsView() {
                             </h2>
                             <p className="t-body mt-2 text-[13px]">
                                 Un fichier par bot actif, empreinte SHA-256 incluse. À installer dans{' '}
-                                <code>/opt/data/pipeline/personas/</code> sur hermes-vps — sans redémarrer le
-                                lecteur automatiquement.
+                                <code>/opt/data/pipeline/personas/</code> sur l’instance Hermès explicitement
+                                désignée pour LINK — sans redémarrer le lecteur automatiquement.
                             </p>
                         </header>
                         <div className="max-h-[50vh] space-y-2 overflow-y-auto p-6">
@@ -448,9 +486,47 @@ export function BotsView() {
                             ))}
                         </div>
                         <footer className="flex justify-end gap-2 border-t border-slate-100 bg-slate-50/60 p-6">
+                            <Button tone="blue" variant="soft" onClick={downloadBundle}>
+                                <Download size={14} strokeWidth={1.8} />
+                                Télécharger le paquet
+                            </Button>
                             <Button tone="slate" variant="ghost" onClick={() => setBundleOpen(false)}>
                                 Fermer
                             </Button>
+                        </footer>
+                    </Surface>
+                </div>
+            )}
+
+            {reviewOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 px-4 py-6 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="activation-review-title">
+                    <Surface variant="modal" className="my-auto w-full max-w-2xl overflow-hidden">
+                        <header className="border-b border-slate-100 p-6">
+                            <p className="eyebrow">Validation humaine</p>
+                            <h2 id="activation-review-title" className="t-h2 mt-1">Revue d’activation</h2>
+                            <p className="t-body mt-2 text-[13px]">Chaque activation crée son propre reçu. Les profils bloqués ne peuvent pas être sélectionnés.</p>
+                        </header>
+                        <div className="max-h-[50vh] space-y-2 overflow-y-auto p-6">
+                            {reviewLoading ? <p role="status">Vérification des profils…</p> : bots.filter(bot => !bot.enabled).map(bot => {
+                                const status = activations[bot.id];
+                                const outcome = reviewOutcomes[bot.id];
+                                const verificationError = reviewErrors[bot.id];
+                                const ready = Boolean(status?.ready) && !outcome;
+                                return <label key={bot.id} className="flex items-center gap-3 rounded-xl border border-slate-200 px-3 py-3 text-sm">
+                                    <input type="checkbox" checked={reviewSelected.has(bot.id)} disabled={!ready || reviewRunning} onChange={() => toggleReviewedBot(bot.id)} />
+                                    <span className="min-w-0 flex-1"><strong>{bot.displayName}</strong><span className="ml-2 text-xs text-slate-500">{outcome?.state === 'activated' ? `${bot.displayName} — activé` : outcome?.state === 'failed' ? `Échec : ${outcome.error}` : verificationError ? `Vérification indisponible : ${verificationError}` : status?.ready ? 'Prêt à activer' : 'À compléter'}</span></span>
+                                </label>;
+                            })}
+                            {!reviewLoading && (() => {
+                                const readyCount = bots.filter(bot => !bot.enabled && activations[bot.id]?.ready && !reviewOutcomes[bot.id]).length;
+                                const failedCount = Object.values(reviewOutcomes).filter(outcome => outcome.state === 'failed').length;
+                                return <div className="pt-2 text-sm text-slate-600"><p>{readyCount} profil{readyCount > 1 ? 's' : ''} prêt{readyCount > 1 ? 's' : ''} à activer</p>{failedCount > 0 && <p className="mt-1 text-rose-600">{failedCount} activation{failedCount > 1 ? 's' : ''} à réessayer</p>}</div>;
+                            })()}
+                        </div>
+                        <footer className="flex flex-wrap justify-end gap-2 border-t border-slate-100 bg-slate-50/60 p-6">
+                            {Object.values(reviewOutcomes).some(outcome => outcome.state === 'failed') && <Button tone="blue" variant="outline" disabled={reviewRunning} onClick={() => void activateReviewedBots(new Set(Object.entries(reviewOutcomes).filter(([, outcome]) => outcome.state === 'failed').map(([id]) => id)))}>Réessayer les échecs</Button>}
+                            <Button tone="slate" variant="ghost" disabled={reviewRunning} onClick={() => setReviewOpen(false)}>Fermer</Button>
+                            <Button tone="blue" disabled={reviewLoading || reviewRunning || reviewSelected.size === 0} onClick={() => void activateReviewedBots()}>Activer les {reviewSelected.size} profils</Button>
                         </footer>
                     </Surface>
                 </div>

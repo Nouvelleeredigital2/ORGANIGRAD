@@ -310,6 +310,39 @@ export type Database = {
                 Update: Partial<Database['public']['Tables']['notifications']['Insert']>;
                 Relationships: [];
             };
+            /** Fiches de personas OrganiGrad (migration 20260911120000). */
+            bot_profiles: {
+                Row: {
+                    id: string;
+                    workspace_id: string;
+                    runtime_id: string;
+                    file_name: string;
+                    display_name: string;
+                    avatar_url: string | null;
+                    family: 'veilleur' | 'redacteur' | 'design' | 'gardien';
+                    brand: string | null;
+                    network: string | null;
+                    telegram_username: string | null;
+                    mission: string;
+                    personality: string;
+                    research: string;
+                    watch: string;
+                    deliverables: string;
+                    method: string;
+                    limits: string;
+                    useful_context: string;
+                    sources: Json;
+                    model: Json;
+                    enabled: boolean;
+                    compiled_prompt: string;
+                    compiled_sha256: string;
+                    created_at: string;
+                    updated_at: string;
+                };
+                Insert: Database['public']['Tables']['bot_profiles']['Row'];
+                Update: Partial<Database['public']['Tables']['bot_profiles']['Row']>;
+                Relationships: [];
+            };
         };
         Views: {
             workspace_members_view: {
@@ -367,6 +400,9 @@ export type Database = {
             is_workspace_member: { Args: { ws: string }; Returns: boolean };
             verify_workspace_api_key: { Args: { raw_key: string }; Returns: string | null };
             workspace_role_of: { Args: { ws: string }; Returns: WorkspaceRole };
+            bot_activation_status: { Args: { p_bot_id: string }; Returns: Json };
+            activate_verified_bot: { Args: { p_bot_id: string }; Returns: Json };
+            deactivate_bot: { Args: { p_bot_id: string; p_reason: string }; Returns: Json };
         };
         Enums: { workspace_role: WorkspaceRole };
         CompositeTypes: Record<string, never>;

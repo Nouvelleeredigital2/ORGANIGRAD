@@ -81,7 +81,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
         setOrchSaved(true);
         setOrchChecking(true);
-        const joignable = await new OrchestratorClient({ baseUrl, apiKey }).isReachable();
+        const getUserAuth = async () => {
+            if (!supabase || !workspaceId) return null;
+            const { data } = await supabase.auth.getSession();
+            const token = data.session?.access_token;
+            return token ? { token, workspaceId } : null;
+        };
+        const joignable = await new OrchestratorClient({ baseUrl, apiKey, getUserAuth }).isReachable();
         setOrchChecking(false);
 
         if (joignable) {
@@ -233,8 +239,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     </h3>
                     <p className="text-slate-600 mb-6 max-w-xl text-sm">
                         Le service orchestrateur héberge le moteur de transitions et les filaments
-                        live. Fournis son URL et une clé API de workspace (gérée dans la vue Clés API)
-                        pour le brancher depuis cette SPA.
+                        live. Une session OrganiGrad connectée suffit pour les actions humaines ; une clé API
+                        reste facultative pour les services techniques.
                     </p>
                     <div className="space-y-3 max-w-xl">
                         <label className="block text-sm font-bold text-slate-700">URL de l'API</label>
@@ -248,7 +254,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                             placeholder="http://localhost:3001/api"
                             className="w-full px-5 py-4 bg-slate-50/90 border border-slate-200 rounded-2xl text-sm focus:ring-4 focus:ring-sky-500/20 transition-all outline-none text-slate-700"
                         />
-                        <label className="block text-sm font-bold text-slate-700 mt-2">Clé API workspace</label>
+                        <label className="block text-sm font-bold text-slate-700 mt-2">Clé API workspace (facultative)</label>
                         <input
                             type="password"
                             value={orchKey}
@@ -263,7 +269,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         <div className="flex flex-wrap items-center gap-3 pt-2">
                             <button
                                 onClick={() => void handleSaveOrchestrator()}
-                                disabled={!orchUrl.trim() || !orchKey.trim() || orchChecking}
+                                disabled={!orchUrl.trim() || orchChecking}
                                 className="flex items-center gap-2 px-6 py-3 bg-slate-900 text-white font-bold rounded-xl shadow-[0_16px_34px_rgba(15,23,42,0.18)] hover:bg-slate-800 transition-all disabled:opacity-50"
                             >
                                 <Save className="w-4 h-4" />

@@ -36,4 +36,10 @@ describe('useOrchestratorConfig', () => {
         const { result } = renderHook(() => useOrchestratorConfig());
         expect(result.current.config).toEqual({ baseUrl: '', apiKey: '' });
     });
+
+    it('considère une URL seule comme une connexion utilisable par une session humaine', () => {
+        const { result } = renderHook(() => useOrchestratorConfig());
+        act(() => result.current.save({ baseUrl: 'http://127.0.0.1:3002/api', apiKey: '' }));
+        expect(result.current.isConfigured).toBe(true);
+    });
 });

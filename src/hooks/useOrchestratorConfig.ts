@@ -4,7 +4,8 @@ import { useCallback, useEffect, useState } from 'react';
  * Configuration de l'orchestrateur côté front — persistée en localStorage.
  *
  * - `baseUrl` : URL HTTP du service orchestrateur (ex. http://localhost:3001/api)
- * - `apiKey`  : clé API workspace (`ok_…`) à envoyer en Bearer
+ * - `apiKey`  : clé API workspace (`ok_…`) facultative ; une session humaine
+ *               authentifiée peut appeler l'orchestrateur sans clé technique.
  *
  * Les deux sont optionnelles. Si absentes, la SPA reste en mode "direct Supabase"
  * et la vue Orchestration simule les transitions localement.
@@ -69,5 +70,5 @@ export function useOrchestratorConfig() {
         }
     }, []);
 
-    return { config, save, clear, isConfigured: Boolean(config.baseUrl && config.apiKey) };
+    return { config, save, clear, isConfigured: Boolean(config.baseUrl) };
 }

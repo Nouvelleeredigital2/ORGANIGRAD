@@ -5,7 +5,11 @@ import type { BotProfile } from '../../types/botProfile';
 import type { WorkspaceRole } from '../../auth/permissions';
 import type { OrchestratorClient } from '../../services/orchestratorService';
 
-type TestClient = Pick<OrchestratorClient, 'fetchBots' | 'fetchBotActivation'>;
+type TestClient = Pick<OrchestratorClient, 'fetchBots'>;
+
+const supabaseMock = vi.hoisted(() => ({ rpc: vi.fn(), from: vi.fn() }));
+
+vi.mock('../../lib/supabase', () => ({ supabase: supabaseMock }));
 
 const bridgeMock = vi.hoisted(() => ({
     connected: false,
@@ -59,11 +63,8 @@ describe('BotsView', () => {
         bridgeMock.connectionState = 'local';
         bridgeMock.client = null;
         permissionsMock.can.mockImplementation(() => true);
-    });
-
-    it("invite à configurer l'orchestrateur quand aucun n'est connecté", () => {
-        render(<BotsView />);
-        expect(screen.getByText(/besoin d'un orchestrateur connecté/i)).toBeInTheDocument();
+        supabaseMock.rpc.mockReset();
+        supabaseMock.from.mockReset();
     });
 
     it('liste les bots une fois connecté', async () => {
@@ -92,21 +93,138 @@ describe('BotsView', () => {
         expect(screen.queryByRole('button', { name: 'Supprimer Anita' })).not.toBeInTheDocument();
     });
 
+    it('lit les profils dans OrganiGrad quand le moteur local est indisponible', async () => {
+        supabaseMock.from.mockReturnValue({
+            select: vi.fn(() => ({
+                order: vi.fn(async () => ({
+                    data: [{
+                        id: BOT.id,
+                        runtime_id: BOT.runtimeId,
+                        file_name: BOT.fileName,
+                        display_name: BOT.displayName,
+                        avatar_url: BOT.avatarUrl,
+                        family: BOT.family,
+                        brand: BOT.brand,
+                        network: BOT.network,
+                        telegram_username: BOT.telegramUsername,
+                        mission: BOT.mission,
+                        personality: BOT.personality,
+                        research: BOT.research,
+                        watch: BOT.watch,
+                        deliverables: BOT.deliverables,
+                        method: BOT.method,
+                        limits: BOT.limits,
+                        useful_context: BOT.usefulContext,
+                        sources: BOT.sources,
+                        model: BOT.model,
+                        enabled: false,
+                        compiled_prompt: BOT.compiledPrompt,
+                        compiled_sha256: BOT.compiledSha256,
+                        updated_at: '2026-09-14T10:00:00Z',
+                    }],
+                    error: null,
+                })),
+                eq: vi.fn(() => ({
+                    order: vi.fn(async () => ({
+                        data: [{
+                            id: BOT.id,
+                            runtime_id: BOT.runtimeId,
+                            file_name: BOT.fileName,
+                            display_name: BOT.displayName,
+                            avatar_url: BOT.avatarUrl,
+                            family: BOT.family,
+                            brand: BOT.brand,
+                            network: BOT.network,
+                            telegram_username: BOT.telegramUsername,
+                            mission: BOT.mission,
+                            personality: BOT.personality,
+                            research: BOT.research,
+                            watch: BOT.watch,
+                            deliverables: BOT.deliverables,
+                            method: BOT.method,
+                            limits: BOT.limits,
+                            useful_context: BOT.usefulContext,
+                            sources: BOT.sources,
+                            model: BOT.model,
+                            enabled: false,
+                            compiled_prompt: BOT.compiledPrompt,
+                            compiled_sha256: BOT.compiledSha256,
+                            updated_at: '2026-09-14T10:00:00Z',
+                        }],
+                        error: null,
+                    })),
+                })),
+            })),
+        });
+        render(<BotsView />);
+        expect(await screen.findByText('Anita')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Revue d’activation' })).toBeInTheDocument();
+        expect(supabaseMock.from).toHaveBeenCalledWith('bot_profiles');
+    });
+
     it('shows a verified activation decision to an administrator', async () => {
         bridgeMock.connectionState = 'connected';
         bridgeMock.client = {
             fetchBots: vi.fn(async () => [{ ...BOT, enabled: false }]),
-            fetchBotActivation: vi.fn(async () => ({
-                ready: true,
-                enabled: false,
-                checks: [{ code: 'mission', label: 'Mission définie', passed: true }],
-            })),
         };
+        supabaseMock.rpc.mockResolvedValue({ data: {
+            ready: true,
+            enabled: false,
+            checks: [{ code: 'mission', label: 'Mission définie', passed: true }],
+        }, error: null });
         render(<BotsView />);
         await screen.findByText('Anita');
         fireEvent.click(screen.getByRole('button', { name: 'Vérifier Anita' }));
         expect(await screen.findByText('Prêt à activer')).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Activer Anita' })).toBeInTheDocument();
+        expect(supabaseMock.rpc).toHaveBeenCalledWith('bot_activation_status', { p_bot_id: BOT.id });
+    });
+
+    it('reviews ready drafts together and retries only the activation that failed', async () => {
+        const secondBot = { ...BOT, id: '00000000-0000-4000-8000-000000000002', displayName: 'Benoît', runtimeId: 'benoit.watch.bot' };
+        bridgeMock.connectionState = 'connected';
+        bridgeMock.client = { fetchBots: vi.fn(async () => [{ ...BOT, enabled: false }, { ...secondBot, enabled: false }]) };
+        supabaseMock.rpc.mockImplementation((name: string, args: { p_bot_id: string }) => {
+            if (name === 'bot_activation_status') {
+                return Promise.resolve({ data: { ready: true, enabled: false, checks: [{ code: 'mission', label: 'Mission définie', passed: true }] }, error: null });
+            }
+            if (name === 'activate_verified_bot' && args.p_bot_id === BOT.id) {
+                return Promise.resolve({ data: { status: 'activated', botId: BOT.id, actorId: 'admin' }, error: null });
+            }
+            if (name === 'activate_verified_bot') {
+                return Promise.resolve({ data: null, error: new Error('Réseau indisponible') });
+            }
+            return Promise.resolve({ data: null, error: null });
+        });
+
+        render(<BotsView />);
+        await screen.findByText('Anita');
+        fireEvent.click(screen.getByRole('button', { name: 'Revue d’activation' }));
+        expect(await screen.findByText('2 profils prêts à activer')).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'Activer les 2 profils' }));
+
+        await screen.findByText('1 activation à réessayer');
+        expect(supabaseMock.rpc).toHaveBeenCalledWith('activate_verified_bot', { p_bot_id: BOT.id });
+        expect(supabaseMock.rpc).toHaveBeenCalledWith('activate_verified_bot', { p_bot_id: secondBot.id });
+        expect(screen.getByText('Anita — activé')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Réessayer les échecs' })).toBeInTheDocument();
+    });
+
+    it('keeps ready profiles selectable when one verification is unavailable', async () => {
+        const secondBot = { ...BOT, id: '00000000-0000-4000-8000-000000000003', displayName: 'Claire', runtimeId: 'claire.design.bot' };
+        bridgeMock.connectionState = 'connected';
+        bridgeMock.client = { fetchBots: vi.fn(async () => [{ ...BOT, enabled: false }, { ...secondBot, enabled: false }]) };
+        supabaseMock.rpc.mockImplementation((name: string, args: { p_bot_id: string }) => {
+            if (name === 'bot_activation_status' && args.p_bot_id === secondBot.id) return Promise.resolve({ data: null, error: new Error('Service indisponible') });
+            return Promise.resolve({ data: { ready: true, enabled: false, checks: [] }, error: null });
+        });
+
+        render(<BotsView />);
+        await screen.findByText('Anita');
+        fireEvent.click(screen.getByRole('button', { name: 'Revue d’activation' }));
+        expect(await screen.findByText('1 profil prêt à activer')).toBeInTheDocument();
+        expect(screen.getByText(/Vérification indisponible/)).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Activer les 1 profils' })).toBeEnabled();
     });
 
     it('ignores an old workspace response after the new workspace has loaded', async()=>{
