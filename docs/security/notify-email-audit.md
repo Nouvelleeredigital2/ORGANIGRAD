@@ -1,6 +1,6 @@
 # Edge Function `notify-email` — audit et points à vérifier
 
-**Revue de code du 2026-08-14** (P1-8 du plan de correction).
+**Revue initiale du 2026-08-14, mise à jour le 2026-10-06**.
 
 L'Edge Function tourne sous Deno : elle n'est ni exécutable ni déployable depuis
 cet environnement. Ce document sépare donc ce qui a été **vérifié dans le code**
@@ -10,10 +10,10 @@ de ce qui reste à **constater sur le projet déployé**.
 
 | Exigence du plan | État |
 |---|---|
-| Authentification de l'appelant | ✅ le Bearer doit être **exactement** `SUPABASE_SERVICE_ROLE_KEY`, sinon 401. La SPA ne peut pas appeler la fonction (anti-relais). |
+| Authentification de l'appelant | ✅ `apikey` doit correspondre à une clé de `SUPABASE_SECRET_KEYS`; Bearer `service_role` reste accepté uniquement pendant la coexistence. |
 | Destinataire non arbitraire | ✅ `to` doit correspondre à `hybrid_nodes.notification_channels.email` **du nœud et du workspace visés**, sinon 403. |
-| Expéditeur non contrôlable | ✅ `from` vient de `EMAIL_FROM`, jamais de la requête. |
-| Service e-mail indisponible | ✅ échec Resend → statut `failed`, ligne d'audit avec l'erreur, réponse **502** — pas un faux succès. |
+| Expéditeur non contrôlable | ✅ expéditeur Brevo issu des secrets Edge, jamais de la requête. |
+| Service e-mail indisponible | ✅ configuration Brevo absente ou HTTP en erreur → statut `failed`, ligne d'audit et réponse **502** — aucun mode simulé. |
 | Fuite de données en journal | ✅ aucun contenu d'e-mail journalisé ; l'appelant masque l'adresse (`maskEmail`). |
 
 ## Corrigé côté orchestrateur — la clé d'idempotence ignorait l'occurrence
@@ -103,10 +103,9 @@ Ces points ne se lisent pas dans le dépôt.
    à déployer : `supabase functions deploy notify-email`.
 2. Le code déployé correspond-il à `supabase/functions/notify-email/index.ts` ?
    Même question que pour le schéma en P0-2 : le dépôt doit être la source.
-3. Les variables sont-elles renseignées : `RESEND_API_KEY`, `EMAIL_FROM` ?
-   **Sans `RESEND_API_KEY`, la fonction bascule en « envoi simulé » et répond
-   `ok: true` sans envoyer aucun e-mail** — le cas le plus trompeur, puisque
-   tout paraît fonctionner de bout en bout.
+3. Les variables sont-elles renseignées : `BREVO_API_KEY`,
+   `BREVO_SENDER_EMAIL`, `BREVO_SENDER_NAME` et la clé serveur dédiée ? Sans
+   elles, la fonction doit répondre 502 et libérer sa clé d'idempotence.
 4. Test réel : déclencher une validation HITL et **confirmer la réception**.
    Un appel HTTP réussi ne prouve pas la réception — voir le point 3.
 5. Déclencher deux fois la même transition et vérifier que **deux** e-mails

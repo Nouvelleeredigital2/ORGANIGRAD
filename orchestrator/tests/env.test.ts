@@ -63,10 +63,10 @@ describe('loadEnv (validation des variables d\'environnement)', () => {
         expect(() => loadEnv({ APP_URL: 'ftp://x' })).toThrow(EnvValidationError);
     });
 
-    it('exige la clé service_role si EMAIL_EDGE_FUNCTION_URL est défini', () => {
+    it('exige une clé serveur Supabase si EMAIL_EDGE_FUNCTION_URL est défini', () => {
         expect(() =>
             loadEnv({ EMAIL_EDGE_FUNCTION_URL: 'https://x.functions.supabase.co/notify-email' }),
-        ).toThrow(/SERVICE_ROLE/);
+        ).toThrow(/SUPABASE_SECRET_KEY.*SUPABASE_SERVICE_ROLE_KEY/);
         expect(
             loadEnv({
                 ORCHESTRATOR_ALLOW_MEMORY: '1',
@@ -74,6 +74,17 @@ describe('loadEnv (validation des variables d\'environnement)', () => {
                 SUPABASE_SERVICE_ROLE_KEY: 'k',
             }).emailEdgeFunctionUrl,
         ).toBeDefined();
+    });
+
+    it('préfère SUPABASE_SECRET_KEY et conserve service_role comme repli de rotation', () => {
+        const env = loadEnv({
+            ORCHESTRATOR_ALLOW_MEMORY: '1',
+            EMAIL_EDGE_FUNCTION_URL: 'https://x.functions.supabase.co/notify-email',
+            SUPABASE_SECRET_KEY: 'sb_secret_new',
+            SUPABASE_SERVICE_ROLE_KEY: 'legacy',
+        });
+        expect(env.supabaseSecretKey).toBe('sb_secret_new');
+        expect(env.supabaseServiceRoleKey).toBe('legacy');
     });
 
     it('parse CORS_ALLOWED_ORIGINS en liste', () => {

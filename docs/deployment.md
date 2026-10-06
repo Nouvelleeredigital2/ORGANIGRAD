@@ -29,7 +29,8 @@ les migrations antérieures au 2026-08-03 ne sont **pas** rejouables.
 ## Déploiement des services
 
 ```bash
-# Edge Function (après configuration de RESEND_API_KEY et EMAIL_FROM)
+# Edge Function (après configuration de BREVO_API_KEY,
+# BREVO_SENDER_EMAIL et BREVO_SENDER_NAME)
 supabase functions deploy notify-email
 
 # Orchestrateur
@@ -45,6 +46,7 @@ vérification des sessions humaines : `SUPABASE_JWT_SECRET` (projets legacy,
 jetons HS256) **ou** `SUPABASE_JWKS_URL` (projets migrés vers les « JWT signing
 keys », jetons ES256 — cas du projet `xucmfdggetwxmpquqjvj` : sans cette
 variable, approve/reject/reset et le CRUD de nœuds échouent en 401). Ajouter
+`SUPABASE_SECRET_KEY` (préférée) ou le repli legacy
 `SUPABASE_SERVICE_ROLE_KEY` si `EMAIL_EDGE_FUNCTION_URL` est configurée. La SPA requiert
 `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` et l'URL publique de l'orchestrateur.
 

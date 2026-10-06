@@ -44,6 +44,12 @@ enable_signup = true
 double_confirm_changes = false
 enable_confirmations = false
 
+# Authentification applicative stricte dans la fonction : nouvelle clé serveur
+# via `apikey`, ou service_role pendant la fenêtre de coexistence. Le gateway ne
+# doit pas interpréter `sb_secret_…` comme un JWT utilisateur.
+[functions.notify-email]
+verify_jwt = false
+
 [analytics]
 enabled = true
 port = 57507

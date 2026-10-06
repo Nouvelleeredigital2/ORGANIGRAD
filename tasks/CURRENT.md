@@ -25,9 +25,15 @@ valeurs, `/opt/organigrad/.env`. Les consommateurs Supabase gérés hors VPS ne 
 inventoriables avec les accès présents et la coexistence des anciennes/nouvelles valeurs
 n'est pas prouvée. Aucune rotation fournisseur n'a donc été exécutée.
 
+Préparation locale : la compatibilité avec une clé serveur `sb_secret_…`, la fenêtre
+de coexistence Edge/orchestrateur et le transport Brevo à échec fermé sont implémentés
+et couverts par les tests ciblés. La cible Supabase exacte reste inaccessible depuis
+les connecteurs disponibles ; aucune clé ni fonction distante n'a été modifiée.
+
 ## Reste à faire
 
-- [ ] Qualifier tous les consommateurs de `SUPABASE_DB_URL` et `SUPABASE_SERVICE_ROLE_KEY`, puis tourner les deux secrets côté fournisseur avec sauvegarde, fenêtre de coexistence ou rollback documenté.
+- [x] Inventorier les consommateurs VPS et préparer dans le code une coexistence nouvelle clé serveur / service_role avec rollback.
+- [ ] Obtenir l'accès fournisseur à `xucmfdggetwxmpquqjvj`, inventorier les secrets Edge, puis appliquer la rotation préparée.
 - [ ] Vérifier SQL, Auth Admin, `notify-email`, santé orchestrateur et refus des anciennes valeurs après rotation.
 - [ ] Reprendre les deux comptes, deux workspaces et deux projets avec le même `ProjectRef` de bout en bout.
 - [ ] Créer un circuit réel, affecter un membre, démarrer, décider, redémarrer puis relire l’audit.

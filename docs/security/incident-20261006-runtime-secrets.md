@@ -67,6 +67,20 @@ pu être prouvée avec les accès disponibles. La rotation a donc été explicit
 sans tentative répétée ni substitution de cible. La recette A/B demeure gelée pour la
 même raison.
 
+### Préparation de la rotation sans coupure
+
+Le code prépare désormais une coexistence explicite : l'orchestrateur préfère
+`SUPABASE_SECRET_KEY` et transmet cette clé dans `apikey`; la fonction accepte les
+clés injectées dans `SUPABASE_SECRET_KEYS` tout en conservant le Bearer legacy pendant
+la seule fenêtre de bascule. Un JSON de clés invalide échoue fermé. La fonction utilise
+Brevo et ne transforme plus une configuration fournisseur absente en faux succès.
+
+Cette préparation est une validation de code, pas une rotation distante. L'accès au
+projet exact `xucmfdggetwxmpquqjvj` reste nécessaire pour inventorier les secrets Edge,
+créer la clé dédiée, déployer la fonction, vérifier les notifications et désactiver
+l'ancienne clé. Le mot de passe PostgreSQL sera tourné séparément après la même
+qualification fournisseur.
+
 ## Livraison associée
 
 La PR #44 accepte les codes JWS signés émis par Synapse tout en conservant le format historique. Elle a été fusionnée après CI verte au SHA `892a4c4bd25ef267806cf5db6161a2384fb604bc`. L’image `organigrad-backend:20261006-892a4c4` est en service et saine ; retour arrière applicatif disponible vers `organigrad-backend:20261004-shared-f80320c6`.
