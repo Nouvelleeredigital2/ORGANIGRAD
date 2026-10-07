@@ -12,6 +12,7 @@
 - [x] Dérive de contrat identifiée : Synapse émettait un JWS `synapse-launch+jws`, tandis que l’image OrganiGrad `f80320c6` n’acceptait que le code opaque historique de 43 caractères.
 - [x] PR [#44](https://github.com/Nouvelleeredigital2/ORGANIGRAD/pull/44) fusionnée au commit `892a4c4bd25ef267806cf5db6161a2384fb604bc` après CI verte.
 - [x] Image immuable `organigrad-backend:20261006-892a4c4` construite depuis le commit fusionné et déployée via `deployer-compose`; conteneur sain et label de révision vérifié.
+- [x] Backend aligné le 7 octobre 2026 sur `master` fusionné `69cfb1db3c99f13bb56d7ac27ee72f2068defed0` : image immuable `organigrad-backend:sha-69cfb1db3c99f13bb56d7ac27ee72f2068defed0`, conteneur sain, `/healthz` local 200 et consommateur Synapse actif. Sauvegarde Compose : `/opt/organigrad/docker-compose.yml.bak-20261007T111024Z`.
 - [x] Trois credentials applicatifs exposés dans une sortie de diagnostic ont été tournés de façon coordonnée : pont LINK, jeton applicatif Synapse et credential d’adaptateur Synapse. Les anciennes valeurs répondent 401 et les nouvelles 200/404 selon la route attendue.
 
 ## Blocage actif
