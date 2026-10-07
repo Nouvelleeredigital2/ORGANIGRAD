@@ -20,6 +20,8 @@ import { PgCircuitScheduler } from '../state/pgCircuitScheduler.js';
 import { registerCircuitWorker } from './circuitWorker.js';
 import { loadLinkBridgeConfig } from './linkBridgeConfig.js';
 import { createOrvionServiceClient, readOrvionMandateFile } from '../integrations/orvionServiceClient.js';
+import { createEngineTaskClient } from '../integrations/engineTaskClient.js';
+import { readFileSync } from 'node:fs';
 import { createSuiteHub, createSuiteLaunchService, PgSuiteNativeStore } from '../synapse/suiteLaunch.js';
 
 export async function startOrchestrator() {
@@ -48,6 +50,11 @@ export async function startOrchestrator() {
                 mandateId: readOrvionMandateFile(env.orvionServiceMandateFile ?? ''),
                 originHeader: new URL(appUrl ?? '').origin,
             }),
+            // Génération Engine : clé API lue depuis un fichier au démarrage, jamais journalisée.
+            engine: env.engineGenerationEnabled ? {
+                client: createEngineTaskClient({ baseUrl: env.engineBaseUrl ?? '', qualifiedOrigin: env.engineQualifiedOrigin ?? '', apiKey: readFileSync(env.engineApiKeyFile ?? '', 'utf8').trim() }),
+                engineId: env.engineId ?? '',
+            } : undefined,
         } : undefined;
         const suiteNative = env.synapseSuiteEnabled ? new PgSuiteNativeStore(sql, appUrl ?? '') : undefined;
         const synapseSuite = suiteNative ? {
