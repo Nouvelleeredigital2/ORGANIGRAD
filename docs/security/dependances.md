@@ -44,26 +44,22 @@ vulnérabilité high/critical**. Les versions transitives vulnérables de
 Ces versions remplacent immédiatement les versions signalées par la porte npm,
 sans modifier son seuil.
 
-## Acceptation temporaire — `braces` et sa chaîne Tailwind
+## Acceptation levée le 2026-10-23 — `braces` et sa chaîne Tailwind
 
-| | |
-|---|---|
-| Avis | [GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm), récursion non bornée sur des motifs profondément imbriqués |
-| Version installée | `braces@3.0.3` |
-| Correctif publié | Aucun au 2026-10-04 |
-| Paquets remontés par npm | `braces`, `chokidar`, `fast-glob`, `micromatch`, `tailwindcss` |
-| Prochaine revue obligatoire | **2026-10-18** |
+L'avis [GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm) n'est plus
+remonté par `npm audit` : les cinq entrées (`braces`, `chokidar`, `fast-glob`, `micromatch`,
+`tailwindcss`) sont retirées de `ACCEPTES`.
 
-**Exposition réelle.** Cette chaîne provient exclusivement de
-`tailwindcss`, déclaré en `devDependencies`. Elle s'exécute pendant le build sur
-les chemins et fichiers versionnés du dépôt. Ni le frontend produit ni
-l'orchestrateur déployé n'acceptent de motif glob utilisateur et aucun de ces
-paquets n'est une dépendance runtime.
+## Corrigées le 2026-10-23 (audit du 22/10, Lot 0)
 
-**Mesure et sortie.** La CI continue d'échouer si un autre paquet high/critical
-apparaît, si cette acceptation expire ou si npm ne remonte plus la chaîne. Dès
-qu'une version corrigée de `braces` est publiée et compatible avec Tailwind, le
-lockfile doit être mis à jour et les cinq entrées retirées de `ACCEPTES`.
+| Paquet | Version corrigée | Chaîne | Portée |
+|---|---:|---|---|
+| `dompurify` | 3.4.17 | `jspdf` | **runtime frontend** (critique) |
+| `vite` | 7.3.7 | direct | dev / build |
+
+**Non corrigé** : `vite` 8.0.16 dans l'orchestrateur (dépendance de `vitest`, dev seulement).
+`npm update` / `npm install` y échouent sur un bogue interne de npm
+(`Cannot read properties of null (reading 'edgesOut')`) ; à reprendre.
 
 ## Correctifs livrés
 
