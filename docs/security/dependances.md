@@ -57,9 +57,25 @@ remonté par `npm audit` : les cinq entrées (`braces`, `chokidar`, `fast-glob`,
 | `dompurify` | 3.4.17 | `jspdf` | **runtime frontend** (critique) |
 | `vite` | 7.3.7 | direct | dev / build |
 
-**Non corrigé** : `vite` 8.0.16 dans l'orchestrateur (dépendance de `vitest`, dev seulement).
-`npm update` / `npm install` y échouent sur un bogue interne de npm
-(`Cannot read properties of null (reading 'edgesOut')`) ; à reprendre.
+Orchestrateur : `vitest` 4.1.11 et `vite` 8.3.5 (dev). `npm install` de npm 10.9.3 y
+échoue sur un bogue de résolution des pairs (`Cannot read properties of null (reading
+'edgesOut')`, `build-ideal-tree.js`) : la mise à jour a été faite avec `npx npm@11 install` ;
+le fichier de verrouillage obtenu passe `npm ci` avec npm 10.
+
+## Acceptation temporaire — `zod` 3 dans l'orchestrateur (2026-10-23)
+
+| | |
+|---|---|
+| Avis | [GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5), épuisement mémoire en validant des collections contraintes surdimensionnées |
+| Version installée | `zod@3.25.76` (direct et via `@apps2026/contracts`) |
+| Correctif publié | `zod` 4.6.6 seulement ; aucun en 3.x |
+| Prochaine revue obligatoire | **2026-11-06** |
+
+**Exposition réelle.** `zod` valide les corps d'API de l'orchestrateur (runtime). Fastify
+plafonne chaque corps à 1 Mio par défaut (2 Kio sur les routes de jetons privés), ce qui borne
+la taille des collections validées. **Sortie** : migrer l'orchestrateur et le contrat partagé
+vers zod 4, ou une version 3.x corrigée si elle paraît.
+
 
 ## Correctifs livrés
 

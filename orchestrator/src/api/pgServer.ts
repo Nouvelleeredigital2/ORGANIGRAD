@@ -34,6 +34,7 @@ import { FixedWindowRateLimiter } from '../observability/rateLimiter.js';
 import { safeFetch } from '../net/ssrfGuard.js';
 import type { HybridNode } from '../domain/types.js';
 import { isSuiteMachinePath, registerSuiteRoutes, type SuiteRouteDeps } from './suiteRoutes.js';
+import { fastifyLoggerOptions, logRouteError } from '../lib/logger.js';
 
 /**
  * Serveur HTTP de production — auth par clé API workspace, store Postgres.
@@ -113,7 +114,8 @@ function isSseStreamPath(url: string): boolean {
 }
 
 export function buildPgServer(deps: PgServerDeps): FastifyInstance {
-    const app = Fastify({ logger: false });
+    const app = Fastify({ logger: fastifyLoggerOptions(), disableRequestLogging: true });
+    app.addHook('onError', logRouteError);
     const mcp = deps.mcpClient ?? new McpClient({ timeoutMs: 30_000 });
     // Producteur de bus APPS-2026 (hop 1 + hop 5). Auto-inactif sans SYNAPSE_URL.
     const synapseProducer = createSynapseProducer({ appUrl: deps.notifierOptions?.appUrl });
