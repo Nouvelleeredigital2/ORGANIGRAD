@@ -38,13 +38,15 @@ const BLOQUANTS = new Set(['high', 'critical']);
  * l'acceptation d'une dépendance du frontend.
  */
 const ACCEPTES = {
-    // GHSA-vfj7-8cjw-p6xm : aucun correctif publié au 2026-10-04.
-    // Chaîne exclusivement dev/build de Tailwind, sans motif fourni par un utilisateur.
-    braces: { paquet: '.', revoir: '2026-10-18' },
-    chokidar: { paquet: '.', revoir: '2026-10-18' },
-    'fast-glob': { paquet: '.', revoir: '2026-10-18' },
-    micromatch: { paquet: '.', revoir: '2026-10-18' },
-    tailwindcss: { paquet: '.', revoir: '2026-10-18' },
+    // Chaîne `braces` de Tailwind (GHSA-vfj7-8cjw-p6xm) : plus remontée par npm audit au
+    // 23/10/2026, entrées retirées (audit du 22/10, Lot 0, tâche 0.5).
+
+    // GHSA-mrhx-c7xc-m3w5 (zod < 4.6.6, épuisement mémoire sur collections contraintes
+    // surdimensionnées) : publié après le 22/10, aucun correctif en 3.x. L'orchestrateur et
+    // le contrat partagé reposent sur zod 3 ; corps de requête plafonnés par Fastify (1 Mio
+    // par défaut, 2 Kio sur les jetons). Voir docs/security/dependances.md.
+    zod: { paquet: 'orchestrator', revoir: '2026-11-06' },
+    '@apps2026/contracts': { paquet: 'orchestrator', revoir: '2026-11-06' },
 };
 
 const paquets = process.argv.slice(2);

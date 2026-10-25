@@ -44,26 +44,38 @@ vulnérabilité high/critical**. Les versions transitives vulnérables de
 Ces versions remplacent immédiatement les versions signalées par la porte npm,
 sans modifier son seuil.
 
-## Acceptation temporaire — `braces` et sa chaîne Tailwind
+## Acceptation levée le 2026-10-23 — `braces` et sa chaîne Tailwind
+
+L'avis [GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm) n'est plus
+remonté par `npm audit` : les cinq entrées (`braces`, `chokidar`, `fast-glob`, `micromatch`,
+`tailwindcss`) sont retirées de `ACCEPTES`.
+
+## Corrigées le 2026-10-23 (audit du 22/10, Lot 0)
+
+| Paquet | Version corrigée | Chaîne | Portée |
+|---|---:|---|---|
+| `dompurify` | 3.4.17 | `jspdf` | **runtime frontend** (critique) |
+| `vite` | 7.3.7 | direct | dev / build |
+
+Orchestrateur : `vitest` 4.1.11 et `vite` 8.3.5 (dev). `npm install` de npm 10.9.3 y
+échoue sur un bogue de résolution des pairs (`Cannot read properties of null (reading
+'edgesOut')`, `build-ideal-tree.js`) : la mise à jour a été faite avec `npx npm@11 install` ;
+le fichier de verrouillage obtenu passe `npm ci` avec npm 10.
+
+## Acceptation temporaire — `zod` 3 dans l'orchestrateur (2026-10-23)
 
 | | |
 |---|---|
-| Avis | [GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm), récursion non bornée sur des motifs profondément imbriqués |
-| Version installée | `braces@3.0.3` |
-| Correctif publié | Aucun au 2026-10-04 |
-| Paquets remontés par npm | `braces`, `chokidar`, `fast-glob`, `micromatch`, `tailwindcss` |
-| Prochaine revue obligatoire | **2026-10-18** |
+| Avis | [GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5), épuisement mémoire en validant des collections contraintes surdimensionnées |
+| Version installée | `zod@3.25.76` (direct et via `@apps2026/contracts`) |
+| Correctif publié | `zod` 4.6.6 seulement ; aucun en 3.x |
+| Prochaine revue obligatoire | **2026-11-06** |
 
-**Exposition réelle.** Cette chaîne provient exclusivement de
-`tailwindcss`, déclaré en `devDependencies`. Elle s'exécute pendant le build sur
-les chemins et fichiers versionnés du dépôt. Ni le frontend produit ni
-l'orchestrateur déployé n'acceptent de motif glob utilisateur et aucun de ces
-paquets n'est une dépendance runtime.
+**Exposition réelle.** `zod` valide les corps d'API de l'orchestrateur (runtime). Fastify
+plafonne chaque corps à 1 Mio par défaut (2 Kio sur les routes de jetons privés), ce qui borne
+la taille des collections validées. **Sortie** : migrer l'orchestrateur et le contrat partagé
+vers zod 4, ou une version 3.x corrigée si elle paraît.
 
-**Mesure et sortie.** La CI continue d'échouer si un autre paquet high/critical
-apparaît, si cette acceptation expire ou si npm ne remonte plus la chaîne. Dès
-qu'une version corrigée de `braces` est publiée et compatible avec Tailwind, le
-lockfile doit être mis à jour et les cinq entrées retirées de `ACCEPTES`.
 
 ## Correctifs livrés
 
