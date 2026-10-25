@@ -127,3 +127,58 @@ Les tables sont fermées aux rôles navigateur. L'API circuits exige une session
 humaine ; le planificateur préparé exige un grant de service dédié au projet.
 Aucun worker n'est branché au démarrage et aucun circuit n'est activé par cette
 préparation. Les miroirs ne constituent pas une preuve d'application distante.
+
+## Relevé en production du 25 octobre 2026 (Lot 1 de l'audit du 22/10)
+
+Relevé en lecture sur `xucmfdggetwxmpquqjvj`, objet par objet (`to_regclass`, `pg_proc`,
+`pg_policies`), et non par nom de migration. Il remplace, pour les migrations ci-dessous,
+la réserve « application distante non attestée » des sections précédentes.
+
+### Migrations postérieures au 11/09 : toutes appliquées
+
+| Fichier du dépôt | Version au registre | Objets vérifiés présents |
+|---|---|---|
+| `20260911120000_bot_profiles` | `20260912152254` | table `bot_profiles` |
+| `20260911143000_bot_portraits` | `20260912152311` | `bot_profiles.avatar_url`, contrainte `bot_profiles_avatar_url_check` |
+| `20260911150000_circuits` | `20260912152425` | tables `team_circuits`, `circuit_executions` |
+| `20260911160000_circuit_schedules` | `20260912152437` | tables `circuit_schedule_cursors`, `circuit_schedule_occurrences`, `circuit_service_grants` |
+| `20260911162000_bot_draft_activation` | `20260912152517` | `guard_bot_activation` |
+| `20260911165000_circuit_attempts` | `20260912152530` | table `circuit_step_attempts` |
+| `20260912100000_hybrid_nodes_presence` | **absente** | colonnes posées par `20260912115702` (voir plus bas) |
+| `20260912115702_hybrid_nodes_presence` | `20260912115702` | `hybrid_nodes.presence`, `presence_observed_at`, `cadence` |
+| `20260912152335_bot_portraits_correctif_conforme_depot` | `20260912152335` | contrainte `bot_profiles_avatar_url_check` |
+| `20260914110000_project_service_delegations` | `20260914022552` | tables `project_service_delegations`, `project_service_delegation_audit` ; index `project_service_delegations_project*` ; fonctions `project_service_delegation_command`, `create_scoped_workspace_api_key` |
+| `20260914150000_project_service_target_discovery` | `20260914022643` | `list_project_service_targets` |
+| `20260914160000_project_service_missions` | `20260914022716` | `list_project_service_missions` |
+| `20260914170000_bot_activation_workflow` | `20260914150653` | table `bot_activation_receipts` et son index ; `activate_verified_bot`, `bot_activation_status`, `deactivate_bot`, `guard_bot_activation` |
+| `20260915120000_circuit_execution_receipts` | `20260915104415` | table `circuit_execution_receipts` et son index ; les quatre `circuit_receipt_*` |
+| `20261004120000_synapse_suite_projects` | `20261004120000` | tables `synapse_project_links`, `synapse_project_grants` et leur index |
+| `20261004160000_synapse_project_access` | `20261004160000` | `can_access_project` ; policies `projects_*`, `project_tasks_*` |
+| `20261023100000_workspace_members_view_comember_read` | `20261023211634` | Lot 0, vérifié le 24/10 |
+| `20261023100100_guard_invitation_role_owner` | `20261023211646` | Lot 0, vérifié le 24/10 |
+| `20261025145236_index_cles_etrangeres_post_0812` | `20261025145236` | 16 index ; 0 clé étrangère non couverte |
+| `20261025145248_liberer_reservations_notifications` | `20261025145248` | `release_stale_notification_reservations`, exécutable par `service_role` seul |
+
+Les versions au registre diffèrent de celles des fichiers quand la migration a été
+appliquée par le connecteur MCP, qui horodate lui-même. Les fichiers ne sont pas
+renommés : ils restent l'historique d'intention (voir `../migrations/README.md`).
+
+### Le doublon `hybrid_nodes_presence`
+
+`20260912100000` et `20260912115702` ajoutent les trois mêmes colonnes, avec
+`add column if not exists`. Seule la seconde est inscrite au registre ; la première n'a
+jamais été appliquée sous son nom. Rejouées l'une après l'autre sur une base neuve, elles
+ne se gênent pas.
+
+**Procédure retenue : aucune écriture dans le registre.** Ce dépôt ne pousse pas ses
+migrations par `supabase db push` (la production se reconstruit depuis la baseline, puis
+les reports). Le registre diverge d'ailleurs bien au-delà de ce doublon : 33 versions
+inscrites n'ont pas de fichier (historique antérieur au 03/08, applications directes),
+28 fichiers ne sont pas inscrits sous leur version. Si un `db push` devenait un jour
+l'outil de déploiement, il faudrait d'abord un réalignement complet et sauvegardé du
+registre (`supabase migration repair`), décidé pour lui-même — pas une correction
+ponctuelle de ce seul doublon.
+
+### Report
+
+`baseline_lot1_fondations_2026-10-25.sql` reporte les deux migrations du 25/10.

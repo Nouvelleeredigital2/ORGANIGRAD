@@ -189,18 +189,33 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // partiel (`where idempotency_key is not null`) : la ligne d'audit du
     // rattrapage échoué est donc conservée, tout en laissant un retry légitime
     // repasser. Supprimer la ligne aurait effacé la trace de l'échec.
-    try {
-        await supabase
-            .from('notifications')
-            .update({
-                status,
-                error: errorMsg,
-                sent_at: sentAt,
-                ...(status === 'failed' ? { idempotency_key: null } : {}),
-            })
-            .eq('id', reservation.id);
-    } catch {
-        console.error('[notify-email] échec cloture audit DB');
+    //
+    // supabase-js ne lève pas d'exception sur une erreur PostgREST : il renvoie
+    // `{ error }`. Le seul `try/catch` laissait donc passer en silence une
+    // clôture refusée, et la ligne restait `pending` (clé bloquée à jamais). On
+    // lit `error`, on retente une fois, et l'échec persistant est journalisé :
+    // `release_stale_notification_reservations()` libérera la ligne plus tard,
+    // au risque, si l'e-mail est parti, d'un second envoi lors d'un nouvel essai.
+    const closeReservation = async () => {
+        try {
+            const { error } = await supabase
+                .from('notifications')
+                .update({
+                    status,
+                    error: errorMsg,
+                    sent_at: sentAt,
+                    ...(status === 'failed' ? { idempotency_key: null } : {}),
+                })
+                .eq('id', reservation.id);
+            return error ? (error.code ?? 'postgrest') : null;
+        } catch {
+            return 'network';
+        }
+    };
+    let closeError = await closeReservation();
+    if (closeError) closeError = await closeReservation();
+    if (closeError) {
+        console.error(`[notify-email] clôture impossible (${closeError}) ; réservation ${reservation.id} restée pending, envoi=${status}`);
     }
 
     return status === 'failed' ? json({ ok: false, error: errorMsg }, 502) : json({ ok: true, sentAt });
