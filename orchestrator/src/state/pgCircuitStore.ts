@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { Sql, TransactionSql } from 'postgres';
 import { CircuitDefinitionSchema, type ArtifactReference, type CircuitDefinition, type CircuitDecision } from '@apps2026/contracts';
-import { CircuitError, startExecution, decideStep, controlExecution, completeStep, nextOccurrences, type CircuitExecution } from '../orchestration/circuits.js';
+import { CircuitError, startExecution, decideStep, controlExecution, completeStep, waitForEngine, nextOccurrences, type CircuitExecution } from '../orchestration/circuits.js';
 
 export interface StoredCircuit { id:string; version:number; definition:CircuitDefinition; enabled:boolean; }
 export class PgCircuitStore {
@@ -88,7 +88,17 @@ export class PgCircuitStore {
    return state;
   }) as unknown as CircuitExecution;
  }
- async control(id:string,input:{action:'pause'|'resume'|'cancel';expectedVersion:number;idempotencyKey:string},actorId:string):Promise<CircuitExecution> {
+ /** Frontière service : Engine a refusé la soumission ; l'exécution attend explicitement, sans image. */
+ async waitForEngine(id:string,input:{stepId:string;expectedVersion:number}):Promise<CircuitExecution> {
+  return await this.sql.begin(async tx=>{
+   const rows=await tx<{state:CircuitExecution}[]>`select state from public.circuit_executions where id=${id} and workspace_id=${this.workspaceId} for update`;
+   if(!rows[0])throw new CircuitError('RUN_NOT_FOUND',404);
+   const state=waitForEngine(rows[0].state,input.stepId,input.expectedVersion);
+   await tx`update public.circuit_executions set state=${tx.json(state as unknown as Record<string,never>)},version=${state.version},updated_at=clock_timestamp() where id=${id} and workspace_id=${this.workspaceId}`;
+   return state;
+  }) as unknown as CircuitExecution;
+ }
+ async control(id:string,input:{action:'pause'|'resume'|'cancel'|'retry_engine';expectedVersion:number;idempotencyKey:string},actorId:string):Promise<CircuitExecution> {
   return await this.sql.begin(async tx=>{
    await this.member(tx,actorId,true);
    const rows=await tx<{state:CircuitExecution}[]>`select state from public.circuit_executions where id=${id} and workspace_id=${this.workspaceId} for update`;
