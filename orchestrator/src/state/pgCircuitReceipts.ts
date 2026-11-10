@@ -77,6 +77,46 @@ export class PgCircuitReceipts {
             || typeof input.stepId !== 'string' || !input.stepId.trim() || input.stepId.length > 128 || !/^[a-f0-9]{64}$/.test(input.payloadSha256)) throw new CircuitReceiptError('INVALID_RECEIPT', 400);
         return this.rpc(tx => tx<Array<{ r: Row }>>`select public.circuit_receipt_reserve(${this.workspaceId},${input.runId},${input.runVersion},${input.stepId},${tx.json(input.project as unknown as Record<string, never>)},${input.idempotencyKey},${input.payloadSha256},${input.mandateId}) as r`);
     }
+    /**
+     * Atomically reserve and enter uncertainty BEFORE an external effect. Only a
+     * newly inserted receipt grants dispatch to this caller. Legacy reserved rows
+     * are ambiguous after a crash and cannot grant another send. No network I/O is
+     * held inside the transaction; mutations use the installed receipt RPCs.
+     */
+    async reserveForDispatch(input: CircuitReceiptReservation): Promise<{ receipt: CircuitReceipt; dispatchAllowed: boolean }> {
+        if (!uuid.test(input.runId) || !uuid.test(input.idempotencyKey) || !uuid.test(input.mandateId)) throw new CircuitReceiptError('INVALID_RECEIPT', 400);
+        let dispatchAllowed = false;
+        const receipt = await this.rpc(async tx => {
+            // Same lock order as circuit_receipt_reserve: execution, then receipt.
+            const runs = await tx<Array<{ state: { history: Array<{ stepId: string; version: number; kind: string; outputs?: ArtifactReference[] }> } }>>`select state from public.circuit_executions where id=${input.runId} and workspace_id=${this.workspaceId} for update`;
+            // Pause/resume changes the version, not the certainty of an older effect.
+            const unresolved = await tx<Array<{ id: string }>>`select id from public.circuit_execution_receipts
+                where workspace_id=${this.workspaceId} and run_id=${input.runId} and step_id=${input.stepId}
+                and run_version<>${input.runVersion} and status in ('reserved','uncertain') limit 1`;
+            if (unresolved.length) throw new CircuitReceiptError('RECEIPT_UNCERTAIN');
+            // An accepted reference can still be absent from run state after a
+            // crash. A new version must not create it again. Completed historical
+            // outputs remain eligible for an intentional later correction.
+            const accepted = await tx<Array<{ run_version: number; reference: ArtifactReference }>>`select run_version,reference from public.circuit_execution_receipts
+                where workspace_id=${this.workspaceId} and run_id=${input.runId} and step_id=${input.stepId}
+                and run_version<>${input.runVersion} and status='accepted'`;
+            const history = runs[0]?.state.history ?? [];
+            const sameReference = (a: ArtifactReference, b: ArtifactReference) => a.id===b.id && a.kind===b.kind &&
+                a.version===b.version && a.sourceApp===b.sourceApp && a.canonicalUrl===b.canonicalUrl;
+            if (accepted.some(old => !history.some(event => event.kind==='completed' && event.stepId===input.stepId &&
+                event.version===old.run_version && event.outputs?.some(output => sameReference(output,old.reference))))) {
+                throw new CircuitReceiptError('RECEIPT_UNCERTAIN');
+            }
+            const existing = await tx<Array<{ id: string }>>`select id from public.circuit_execution_receipts
+                where workspace_id=${this.workspaceId} and run_id=${input.runId} and step_id=${input.stepId} and idempotency_key=${input.idempotencyKey}`;
+            const reserved = await tx<Array<{ r: Row }>>`select public.circuit_receipt_reserve(${this.workspaceId},${input.runId},${input.runVersion},${input.stepId},${tx.json(input.project as unknown as Record<string, never>)},${input.idempotencyKey},${input.payloadSha256},${input.mandateId}) as r`;
+            const row = reserved[0]?.r;
+            if (!row || row.reference) return reserved;
+            dispatchAllowed = existing.length === 0;
+            return tx<Array<{ r: Row }>>`select public.circuit_receipt_mark_uncertain(${row.id}) as r`;
+        });
+        return { receipt, dispatchAllowed };
+    }
     /** Accepte SEULEMENT après une réponse vérifiée : la référence du livrable, jamais son contenu. */
     accept(receiptId: string, reference: ArtifactReference): Promise<CircuitReceipt> {
         if (!uuid.test(receiptId)) throw new CircuitReceiptError('INVALID_RECEIPT', 400);

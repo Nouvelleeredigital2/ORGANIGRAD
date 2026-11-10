@@ -12,7 +12,7 @@ import { PgCircuitStore } from '../src/state/pgCircuitStore.js';
 import { createOrvionServiceClient, readOrvionMandateFile, type OrvionArtifactKind } from '../src/integrations/orvionServiceClient.js';
 import { deliverProductionStep, deliveryIdempotencyKey, uuidV5, type ReceiptedDeliveryDeps } from '../src/orchestration/receiptedDelivery.js';
 import { registerCircuitDeliveryRoutes } from '../src/api/circuitDeliveryRoutes.js';
-import { startExecution, completeStep, decideStep, type CircuitExecution } from '../src/orchestration/circuits.js';
+import { startExecution, completeStep, decideStep, controlExecution, type CircuitExecution } from '../src/orchestration/circuits.js';
 import { loadEnv } from '../src/config/env.js';
 import { buildPgServer } from '../src/api/pgServer.js';
 
@@ -190,18 +190,17 @@ it('(5) un refus de délégation ne crée aucun reçu et n’émet aucun POST', 
     expect((await current()).version).toBe(run.version);
 });
 
-it('(6) un 403 d’Orvion laisse le reçu réservé, l’état inchangé, et relaie le code', async () => {
+it('(6) un 403 d’Orvion conserve le blocage durable, l’état inchangé, et relaie le code', async () => {
     const run = await readyToWrite();
     mode = 'reject';
     await expect(deliver('write', run.version, 'article:create')).rejects.toMatchObject({ code: 'ORVION_REJECTED', detail: { httpStatus: 403, orvionCode: 'MANDATE_REVOKED' } });
     expect(posts()).toBe(1);
-    expect((await rows())[0]).toMatchObject({ status: 'reserved', reference: null });
+    expect((await rows())[0]).toMatchObject({ status: 'uncertain', reference: null });
     expect((await current()).version).toBe(run.version);
-    // Après correction côté Orvion, la même clé rejoue la réservation puis un POST unique.
+    // Même un refus explicite exige réconciliation : aucune réouverture implicite.
     mode = 'ok';
-    expect((await deliver('write', run.version, 'article:create')).reused).toBe(false);
-    expect(posts()).toBe(2);
-    expect(calls[0]!.body.idempotencyKey).toBe(calls[1]!.body.idempotencyKey);
+    await expect(deliver('write', run.version, 'article:create')).rejects.toMatchObject({code:'DELIVERY_UNRESOLVED'});
+    expect(posts()).toBe(1);
 });
 
 it('(7) correction : la référence v1 reste, le contrôle R1 est remplacé par R2, l’historique garde tout', async () => {
@@ -245,6 +244,44 @@ async function api(logger?: FastifyInstance['log']) {
     const post = async (stepId: string, payload: Record<string, unknown>) => await app.inject({ method: 'POST', url: `/api/circuit-runs/${runId}/steps/${stepId}/deliver`, payload });
     return { app, actor, body, post };
 }
+
+it('a pause/resume cannot dispatch a second effect while an older version is uncertain', async () => {
+    let run = await readyToWrite();
+    mode = 'lost';
+    await expect(deliver('write',run.version,'article:create')).rejects.toMatchObject({code:'DELIVERY_UNRESOLVED'});
+    run = controlExecution(run,'pause',run.version,human);
+    run = controlExecution(run,'resume',run.version,human);
+    await persist(run);
+    mode = 'ok';
+    await expect(deliver('write',run.version,'article:create')).rejects.toMatchObject({code:'DELIVERY_UNRESOLVED'});
+    expect(posts()).toBe(1);
+    expect(await rows()).toHaveLength(1);
+});
+
+it('route refuses a board different from the delegated resource before reservation', async () => {
+    const run = await readyToWrite();
+    const {app,body,post} = await api();
+    try {
+        const response = await post('write',body(run.version,{editorial:{boardId:randomUUID(),dossierId}}));
+        expect(response.statusCode).toBe(403);
+        expect(response.json()).toEqual({error:'TARGET_MISMATCH'});
+        expect(posts()).toBe(0);
+        expect(await rows()).toHaveLength(0);
+    } finally {await app.close();}
+});
+
+it('accepted output not yet completed cannot be duplicated by pause/resume', async () => {
+    let run = await readyToWrite();
+    const failing = {getRun:(id:string)=>store.getRun(id),complete:vi.fn(async ():Promise<never>=>{throw new Error('crash before completion');})};
+    await expect(deliver('write',run.version,'article:create',secret,{store:failing})).rejects.toMatchObject({code:'RECEIPT_ACCEPTED_STATE_UNPERSISTED'});
+    expect((await rows())[0]!.status).toBe('accepted');
+    run=controlExecution(run,'pause',run.version,human);
+    run=controlExecution(run,'resume',run.version,human);
+    await persist(run);
+    await expect(deliver('write',run.version,'article:create')).rejects.toMatchObject({code:'DELIVERY_UNRESOLVED'});
+    expect(posts()).toBe(1);
+    expect(await rows()).toHaveLength(1);
+});
 
 it('(8) route : clé de service seulement, grant requis, corps strict, réponse sans contenu', async () => {
     const run = await readyToWrite();
@@ -366,4 +403,103 @@ it('configuration : drapeau fermé par défaut, exigences explicites, mandat lu 
     const stub = (() => Promise.resolve([])) as unknown as Sql;
     expect(() => buildPgServer({ sql: stub, circuitDelivery: { orvion: orvion() }, projectsEnabled: true, circuitsEnabled: true, projectServiceDelegationsEnabled: false, notifierOptions: { appUrl } })).toThrow('CIRCUIT_DELIVERY_CONFIG_INCOMPLETE');
     expect(() => buildPgServer({ sql: stub, circuitDelivery: { orvion: orvion() }, projectsEnabled: true, circuitsEnabled: true, projectServiceDelegationsEnabled: true, notifierOptions: { appUrl: 'http://organigrad.example' } })).toThrow('CIRCUIT_DELIVERY_CONFIG_INCOMPLETE');
+});
+
+const batchInput = () => ({key:{runId,runVersion:1,stepId:'watch'},editorial:{boardId,dossierId},deliveries:[
+    {operation:'watch:create',payload:{content:'Veille de recette',sources:['https://example.org/source']}},
+    {operation:'version:create',payload:{content:'Sujet sourcé',kind:'subject',sources:['https://example.org/source']}}
+]});
+const batch = (input = batchInput(), extra: Partial<ReceiptedDeliveryDeps> = {}) =>
+    deliverProductionStep(input as unknown as Parameters<typeof deliverProductionStep>[0], deps(extra));
+
+it('batch: accepts watch and subject with distinct receipts and completes once', async () => {
+    const result = await batch();
+    expect(posts()).toBe(2);
+    expect(new Set(calls.map(c=>c.body.idempotencyKey)).size).toBe(2);
+    expect(await rows()).toHaveLength(2);
+    expect(result.run.outputs.watch?.map(r=>r.kind)).toEqual(['watch','subject']);
+    expect(result.run.currentStepId).toBe('select');
+});
+
+it('batch: second response lost preserves first receipt; reconciliation reconstructs all references', async () => {
+    const original = orvion(); let count = 0;
+    const failing = {...original, command: async (input: Parameters<typeof original.command>[0]) => {
+        count++; if(count===2) throw new Error('process interrupted after sending');
+        return original.command(input);
+    }};
+    await expect(batch(batchInput(),{orvion:failing})).rejects.toMatchObject({code:'DELIVERY_UNRESOLVED'});
+    const saved = await rows();
+    expect(saved.map(r=>r.status)).toEqual(['accepted','uncertain']);
+    expect((await current()).currentStepId).toBe('watch');
+    await expect(batch()).rejects.toMatchObject({code:'DELIVERY_UNRESOLVED'});
+    expect(posts()).toBe(1);
+    const changed = batchInput(); changed.deliveries[1]!.payload.content = 'changed';
+    await expect(batch(changed)).rejects.toMatchObject({code:'PAYLOAD_CONFLICT'});
+    // Explicit reconciliation from a verified external reference, never another send.
+    await receipts.accept(saved[1]!.id,artifact('subject'));
+    const result = await batch();
+    expect(result.run.outputs.watch?.map(r=>r.kind)).toEqual(['watch','subject']);
+    expect(posts()).toBe(1);
+});
+
+it('batch: accepted receipts survive a crash before completion', async () => {
+    const failing = {getRun:(id:string)=>store.getRun(id),complete:vi.fn(async():Promise<never>=>{throw new Error('state unavailable');})};
+    await expect(batch(batchInput(),{store:failing})).rejects.toMatchObject({code:'RECEIPT_ACCEPTED_STATE_UNPERSISTED'});
+    expect((await rows()).map(r=>r.status)).toEqual(['accepted','accepted']);
+    const result = await batch();
+    expect(result.run.outputs.watch).toHaveLength(2);
+    expect(posts()).toBe(2);
+});
+
+it('dispatch: concurrent service calls have a single durable owner', async () => {
+    const run = await readyToWrite(); const original=orvion();
+    let release!:()=>void; const gate=new Promise<void>(resolve=>{release=resolve;});
+    const command=vi.fn(async(input:Parameters<typeof original.command>[0])=>{await gate;return original.command(input);});
+    const client={...original,command};
+    const first=deliver('write',run.version,'article:create',secret,{orvion:client});
+    await vi.waitFor(()=>expect(command).toHaveBeenCalledTimes(1));
+    const second=deliver('write',run.version,'article:create',secret,{orvion:client});
+    const settled=Promise.allSettled([first,second]);
+    try {
+        const outcome=await Promise.race([second.then(()=> 'completed',e=>e.code),new Promise(resolve=>setTimeout(()=>resolve('not blocked'),500))]);
+        expect(outcome).toBe('DELIVERY_UNRESOLVED');
+        expect(command).toHaveBeenCalledTimes(1);
+        expect((await rows())[0]!.status).toBe('uncertain');
+    } finally {release();await settled;}
+    expect(command).toHaveBeenCalledTimes(1);
+});
+
+it('batch: HTTP accepts a strict list and returns all receipts without content', async () => {
+    const {app,post} = await api();
+    const payload = {grantId:grant,target,runVersion:1,editorial:{boardId,dossierId},deliveries:batchInput().deliveries};
+    try {
+        expect((await post('watch',{...payload,operation:'watch:create'})).statusCode).toBe(400);
+        expect((await post('watch',{...payload,deliveries:[payload.deliveries[0],{operation:'review:create',payload:{content:'wrong role'}}]})).statusCode).toBe(400);
+        expect(posts()).toBe(0);
+        const response=await post('watch',payload);
+        expect(response.statusCode).toBe(200);
+        expect(response.json().references.map((r:ArtifactReference)=>r.kind)).toEqual(['watch','subject']);
+        expect(response.json().receiptIds).toHaveLength(2);
+        expect(response.body).not.toContain('Veille de recette');
+    } finally {await app.close();}
+});
+
+it('batch: a failure before reserving the next item resumes only that item', async () => {
+    let reservations=0;
+    const proxy = new Proxy(receipts,{get(object,property){
+        if(property==='reserveForDispatch') return async (...args:Parameters<PgCircuitReceipts['reserveForDispatch']>)=>{
+            if(++reservations===2)throw new Error('database offline before reservation');
+            return object.reserveForDispatch(...args);
+        };
+        const value=Reflect.get(object,property); return typeof value==='function'?value.bind(object):value;
+    }});
+    await expect(batch(batchInput(),{receipts:proxy})).rejects.toThrow('database offline');
+    expect(posts()).toBe(1); expect(await rows()).toHaveLength(1);
+    const result=await batch();
+    expect(posts()).toBe(2); expect(result.run.outputs.watch).toHaveLength(2);
+});
+
+it('batch: a watch feeding selection requires at least one subject before any effect', async () => {
+    await expect(deliver('watch',1,'watch:create')).rejects.toMatchObject({code:'INVALID_INPUT'});
+    expect(posts()).toBe(0); expect(await rows()).toHaveLength(0);
 });
