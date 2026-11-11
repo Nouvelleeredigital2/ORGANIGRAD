@@ -37,7 +37,8 @@ jobs:
   # vide volontairement les variables) : aucun secret n'est requis.
   e2e:
     name: E2E (Playwright · chromium)
-    runs-on: ubuntu-latest
+    # La version Playwright du lock ne fournit pas Chromium pour Ubuntu 26.04.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -154,7 +155,7 @@ jobs:
   connectee:
     name: E2E connectée (Supabase de test · manuel)
     if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
