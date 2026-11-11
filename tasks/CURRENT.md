@@ -31,6 +31,24 @@ de coexistence Edge/orchestrateur et le transport Brevo à échec fermé sont im
 et couverts par les tests ciblés. La cible Supabase exacte reste inaccessible depuis
 les connecteurs disponibles ; aucune clé ni fonction distante n'a été modifiée.
 
+## Images candidates du 11 novembre
+
+La [PR #54](https://github.com/Nouvelleeredigital2/ORGANIGRAD/pull/54) est
+fusionnée au SHA `5e391385e3fa7d059cc724fa4c30ecb012e027f1`. La
+[CI du merge](https://github.com/Nouvelleeredigital2/ORGANIGRAD/actions/runs/43066618900)
+est verte. Les deux images ont été construites sur le VPS depuis ce SHA.
+Leur label OCI correspond au merge. Le bundle frontend pointe vers
+`xucmfdggetwxmpquqjvj` et vers l’orchestrateur public attendu.
+
+| Image | Identifiant Docker |
+| --- | --- |
+| `organigrad-backend:sha-5e391385e3fa7d059cc724fa4c30ecb012e027f1` | `sha256:a7b7a0a6ece24376dbd347f2288ce262aef9c9bbc9c454ba0244c7f54e05d598` |
+| `organigrad-frontend:sha-5e391385e3fa7d059cc724fa4c30ecb012e027f1` | `sha256:b81826a548219ef22d9c6e9646f81730764fd49ecc46f0074bc65f51ad3d9871` |
+
+Les services en ligne restent sur la révision `a70cc12` et sont sains.
+Les images candidates attendent la bascule coordonnée de l’incident et la
+recette métier sur les deux comptes témoins.
+
 ## Reste à faire
 
 Le 11 novembre, le frontend, Auth Admin et PostgreSQL ont répondu sur la
