@@ -64,21 +64,22 @@ le fichier de verrouillage obtenu passe `npm ci` avec npm 10.
 
 ## Remplacement de Zod 3 — 11 novembre 2026
 
-Les deux paquets utilisent `zod@4.6.7` et le candidat
+Les deux paquets utilisent `zod@4.6.7` et la préversion publiée
 `@apps2026/contracts@2.0.0-zod4.2`. Ce tarball fournit les déclarations générées
 avec Zod 4. Le paquet 1.7.0 a été essayé, mais ses déclarations Zod 3 font
 échouer le typage des composants de circuits avec Zod 4.
 
-Le candidat provient de
+Le paquet provient de
 [la PR contracts #14](https://github.com/Nouvelleeredigital2/apps2026-contracts/pull/14),
-au commit `4083f00a3501e81077a68045e96122a6ace3a56e`. Les deux copies du tarball
+au commit `e8d35c140c4f8ed7b7b588f7852348d1b7f8aa88`. Les deux copies du tarball
 ont l'empreinte SHA-256
-`5822b7a8cbf8ef9b013aeec8d487ade036755bd7e3fefa03550728a224cf8e99`.
+`1356f55e89c0dc92480fed26ec187833a0f3600fb823bcf6c60d377934be81f4`.
 Les deux audits ne signalent plus de vulnérabilité élevée ou critique.
 Les acceptations temporaires relatives à
 [GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5) sont
-retirées. La fusion et la publication du candidat amont restent des prérequis
-à son adoption.
+retirées. Le code, les déclarations et les schémas correspondent au candidat testé
+dans OrganiGrad. Les deux archives proviennent de
+[la préversion attestée](https://github.com/Nouvelleeredigital2/apps2026-contracts/releases/tag/v2.0.0-zod4.2).
 
 ## Correctifs livrés
 
