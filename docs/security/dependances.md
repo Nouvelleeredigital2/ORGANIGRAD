@@ -62,20 +62,24 @@ Orchestrateur : `vitest` 4.1.11 et `vite` 8.3.5 (dev). `npm install` de npm 10.9
 'edgesOut')`, `build-ideal-tree.js`) : la mise à jour a été faite avec `npx npm@11 install` ;
 le fichier de verrouillage obtenu passe `npm ci` avec npm 10.
 
-## Acceptation temporaire — `zod` 3 dans l'orchestrateur (2026-10-23)
+## Remplacement de Zod 3 — 11 novembre 2026
 
-| | |
-|---|---|
-| Avis | [GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5), épuisement mémoire en validant des collections contraintes surdimensionnées |
-| Version installée | `zod@3.25.76` (direct et via `@apps2026/contracts`) |
-| Correctif publié | `zod` 4.6.6 seulement ; aucun en 3.x |
-| Prochaine revue obligatoire | **2026-11-06** |
+Les deux paquets utilisent `zod@4.6.7` et la préversion publiée
+`@apps2026/contracts@2.0.0-zod4.2`. Ce tarball fournit les déclarations générées
+avec Zod 4. Le paquet 1.7.0 a été essayé, mais ses déclarations Zod 3 font
+échouer le typage des composants de circuits avec Zod 4.
 
-**Exposition réelle.** `zod` valide les corps d'API de l'orchestrateur (runtime). Fastify
-plafonne chaque corps à 1 Mio par défaut (2 Kio sur les routes de jetons privés), ce qui borne
-la taille des collections validées. **Sortie** : migrer l'orchestrateur et le contrat partagé
-vers zod 4, ou une version 3.x corrigée si elle paraît.
-
+Le paquet provient de
+[la PR contracts #14](https://github.com/Nouvelleeredigital2/apps2026-contracts/pull/14),
+au commit `e8d35c140c4f8ed7b7b588f7852348d1b7f8aa88`. Les deux copies du tarball
+ont l'empreinte SHA-256
+`1356f55e89c0dc92480fed26ec187833a0f3600fb823bcf6c60d377934be81f4`.
+Les deux audits ne signalent plus de vulnérabilité élevée ou critique.
+Les acceptations temporaires relatives à
+[GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5) sont
+retirées. Le code, les déclarations et les schémas correspondent au candidat testé
+dans OrganiGrad. Les deux archives proviennent de
+[la préversion attestée](https://github.com/Nouvelleeredigital2/apps2026-contracts/releases/tag/v2.0.0-zod4.2).
 
 ## Correctifs livrés
 

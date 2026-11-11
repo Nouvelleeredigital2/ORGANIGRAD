@@ -37,7 +37,11 @@ jobs:
   # vide volontairement les variables) : aucun secret n'est requis.
   e2e:
     name: E2E (Playwright · chromium)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    # Le conteneur fournit Chromium et les bibliothèques du lock Playwright.
+    container:
+      image: mcr.microsoft.com/playwright:v1.60.0-noble@sha256:9bd26ad900bb5e0f4dee75839e957a89ae89c2b7ab1e76050e559790e946b948
+      options: --user 1001
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -45,8 +49,6 @@ jobs:
           node-version: '20'
           cache: npm
       - run: npm ci
-      - name: Installer chromium
-        run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
       - name: Rapport en cas d'échec
         if: failure()
@@ -154,7 +156,11 @@ jobs:
   connectee:
     name: E2E connectée (Supabase de test · manuel)
     if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    # Le conteneur fournit Chromium et les bibliothèques du lock Playwright.
+    container:
+      image: mcr.microsoft.com/playwright:v1.60.0-noble@sha256:9bd26ad900bb5e0f4dee75839e957a89ae89c2b7ab1e76050e559790e946b948
+      options: --user 1001
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -162,8 +168,6 @@ jobs:
           node-version: '20'
           cache: npm
       - run: npm ci
-      - name: Installer chromium
-        run: npx playwright install --with-deps chromium
       - name: Écrire .env.connected depuis les secrets
         run: |
           # Sans identifiants, toute la suite se SAUTE et le job passerait au

@@ -86,3 +86,41 @@ qualification fournisseur.
 La PR #44 accepte les codes JWS signés émis par Synapse tout en conservant le format historique. Elle a été fusionnée après CI verte au SHA `892a4c4bd25ef267806cf5db6161a2384fb604bc`. L’image `organigrad-backend:20261006-892a4c4` est en service et saine ; retour arrière applicatif disponible vers `organigrad-backend:20261004-shared-f80320c6`.
 
 Deux bascules intermédiaires ont déclenché leur retour arrière automatique à cause du script de vérification de livraison (état health encore en démarrage, puis fin de ligne shell). Les deux retours arrière ont restauré l’image précédente saine. La troisième bascule, corrigée pour attendre `healthy`, a abouti ; aucun verrou ne subsiste.
+
+## Requalification du 11 novembre 2026
+
+- Le frontend public répond 200 et son bundle charge
+  `https://xucmfdggetwxmpquqjvj.supabase.co`. L'orchestrateur
+  `organigrad-backend:sha-a70cc12e09cff550d8b7bafba47674467c2d8a98`
+  utilise le JWKS de cette même référence.
+- Depuis l'orchestrateur, la clé legacy chargée porte le rôle `service_role`
+  et la référence attendue. L'endpoint Auth Admin répond 200. La connexion
+  PostgreSQL chargée rejoint le pooler sous cette même référence. Une lecture
+  de `public.workspaces` réussit. Aucun résultat ne correspond à l'identifiant
+  et au slug attendus par le harnais réseau.
+- Le connecteur de gestion disponible côté Codex ne retourne toujours pas
+  ce projet. Le compte de gestion a été qualifié en lecture par Claude dans
+  le rapport réseau du 11 novembre. La sonde applicative ne démontre ni une
+  rotation ni des droits d'administration du projet côté Codex.
+- Le coffre de recette réseau `apps2026-pilot` ne contient pas la paire
+  OrganiGrad. Vérifier les anciens comptes de recette et provisionner une
+  paire dédiée si nécessaire après rotation. Ne pas écraser des comptes
+  existants pour les faire correspondre au coffre.
+
+### Relais de la prochaine opération
+
+Dans Claude Code, ouvrir le connecteur OrganiGrad et confirmer que
+`get_project_url` renvoie exactement
+`https://xucmfdggetwxmpquqjvj.supabase.co`. Inventorier les consommateurs de
+`notify-email` et les noms des secrets, sans retourner leurs valeurs.
+Qualifier la création d'une clé serveur dédiée avec coexistence de la clé
+legacy et la publication de `notify-email` depuis le code fusionné de la
+[PR #48](https://github.com/Nouvelleeredigital2/ORGANIGRAD/pull/48).
+Consigner les droits observés et la procédure de coexistence vérifiée. Si le
+connecteur peut uniquement lire, préciser l'action fournisseur encore requise.
+
+Coordonner la bascule avec le conteneur et le test Brevo avant toute
+révocation. Traiter ensuite le mot de passe PostgreSQL dans sa propre
+fenêtre. La campagne A/B reprend après vérification des nouveaux accès et
+révocation des anciennes valeurs. Aucun changement de compte, de secret,
+de fonction ou de schéma n'a été exécuté pendant cette requalification.
