@@ -31,6 +31,30 @@ de coexistence Edge/orchestrateur et le transport Brevo à échec fermé sont im
 et couverts par les tests ciblés. La cible Supabase exacte reste inaccessible depuis
 les connecteurs disponibles ; aucune clé ni fonction distante n'a été modifiée.
 
+## Contrôle navigateur et API en ligne — 11 novembre à 21 h 22 UTC
+
+Sur le frontend `a70cc12` (asset `/assets/index-B0txwGrw.js`), Chromium a
+connecté un compte de démonstration sur `xucmfdggetwxmpquqjvj`. Supabase Auth
+et la lecture de son appartenance propriétaire ont répondu 200. Dans un
+contexte navigateur neuf, la vue Circuits affiche brièvement une invitation
+à configurer l’orchestrateur pendant le chargement. Une fois la connexion
+établie, le navigateur a reçu HTTP 200 sur `/api/graph`, `/api/circuits`
+et `/api/circuits/options` à l’origine orchestrateur attendue. Le bouton
+« Créer un circuit » est apparu.
+
+Avec la même session normale, l’API a retourné zéro circuit et trois projets
+dans les options de l’espace accessible. Une lecture de la liste avec une
+référence d’espace témoin hors appartenance a retourné HTTP 403
+`NOT_A_WORKSPACE_MEMBER`. L’orchestrateur en ligne indique les projets,
+projets privés et circuits actifs. Sa configuration JWT et sa connexion
+PostgreSQL correspondent à la cible Supabase ci-dessus.
+
+Cette vérification couvre la connexion et la lecture des circuits. La rotation
+coordonnée, l’ouverture du même `ProjectRef` depuis Synapse, la création et
+l’exécution d’un circuit témoin, la décision humaine et la relecture de
+l’audit après redémarrage restent à faire. Aucun circuit ni secret n’a été
+modifié pendant le contrôle.
+
 ## Images candidates du 11 novembre
 
 La [PR #54](https://github.com/Nouvelleeredigital2/ORGANIGRAD/pull/54) est
