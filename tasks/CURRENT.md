@@ -33,6 +33,11 @@ les connecteurs disponibles ; aucune clé ni fonction distante n'a été modifi�
 
 ## Reste à faire
 
+Le 11 novembre, le frontend, Auth Admin et PostgreSQL ont répondu sur la
+cible exacte. Le workspace attendu par le harnais réseau n'a pas été retrouvé
+et sa paire de comptes manque dans le coffre. La rotation fournisseur reste à faire.
+[Requalification et relais Claude Code](../docs/security/incident-20261006-runtime-secrets.md#requalification-du-11-novembre-2026).
+
 - [x] Inventorier les consommateurs VPS et préparer dans le code une coexistence nouvelle clé serveur / service_role avec rollback.
 - [ ] Obtenir l'accès fournisseur à `xucmfdggetwxmpquqjvj`, inventorier les secrets Edge, puis appliquer la rotation préparée.
 - [ ] Vérifier SQL, Auth Admin, `notify-email`, santé orchestrateur et refus des anciennes valeurs après rotation.
