@@ -2,11 +2,12 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SynapseLaunchView } from './SynapseLaunchView';
 
-const encode = (value: string) => btoa(value).replace(/=/g, '').replace(/\\+/g, '-').replace(/\\//g, '_');
+const encode = (value: string) => btoa(value).replaceAll('=', '').replaceAll('+', '-').replaceAll('/', '_');
 const signedShape = (header: Record<string, unknown>) =>
     `${encode(JSON.stringify(header))}.${encode('{}')}.${'A'.repeat(86)}`;
 const SYNAPSE_JWS_SHAPE = signedShape({ alg: 'EdDSA', typ: 'synapse-launch+jws' });
-\nconst mocks = vi.hoisted(() => ({ setActive: vi.fn(), fetch: vi.fn() }));
+
+const mocks = vi.hoisted(() => ({ setActive: vi.fn(), fetch: vi.fn() }));
 vi.mock('../../hooks/useSession', () => ({ useSession: () => ({ loading: false, session: { access_token: 'human-token', user: { id: 'user-a' } } }) }));
 vi.mock('../../contexts/WorkspaceContext', () => ({ useWorkspaceContext: () => ({
     userId: 'user-a', activeId: 'ws-a', activeWorkspace: { id: 'ws-a', name: 'Espace A', role: 'owner' },
