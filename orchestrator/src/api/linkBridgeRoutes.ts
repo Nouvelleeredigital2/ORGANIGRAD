@@ -70,6 +70,8 @@ export interface LinkBridgeRouteDeps {
     fetchLookup?: SafeFetchDeps['lookup'];
     /** Horloge en secondes Unix (tests). */
     now?: () => number;
+    /** Garde anti-rejeu partagée avec le pont des circuits (un `requestId`, une seule route). */
+    replays?: ReplayGuard;
 }
 
 const DECISION_PATH_PREFIX = '/api/link-bridge/';
@@ -141,7 +143,7 @@ function canonicalUrlMatches(appUrl: string | undefined, project: ActorAssertion
 }
 
 export function registerLinkBridgeRoutes(app: FastifyInstance, deps: LinkBridgeRouteDeps): void {
-    const replays = new ReplayGuard();
+    const replays = deps.replays ?? new ReplayGuard();
     const nowSeconds = () => deps.now?.() ?? Math.floor(Date.now() / 1000);
 
     // ── 1. Décision relayée par LINK, authentifiée par l'assertion du hub ──────

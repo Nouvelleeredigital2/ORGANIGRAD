@@ -5,7 +5,7 @@ import { ArtifactReferenceSchema, CircuitDecisionSchema, CircuitDefinitionSchema
 export class CircuitError extends Error {
     constructor(readonly code: string, readonly status = 409) { super(code); }
 }
-export type ExecutionStatus = 'ready' | 'waiting_approval' | 'paused' | 'cancelled' | 'ready_to_publish' | 'blocked';
+export type ExecutionStatus = 'ready' | 'waiting_approval' | 'waiting_engine' | 'paused' | 'cancelled' | 'ready_to_publish' | 'blocked';
 export interface CircuitExecution {
     id: string;
     scheduleOrigin?: { occurrenceId: string; scheduledFor: string; recoveredBy: string };
@@ -16,7 +16,7 @@ export interface CircuitExecution {
     suspendedStatus?: Exclude<ExecutionStatus,'paused'|'cancelled'|'ready_to_publish'>;
     currentStepId: string;
     outputs: Record<string, ArtifactReference[]>;
-    history: Array<{ stepId: string; version: number; kind: 'completed' | 'approved' | 'revised' | 'paused' | 'resumed' | 'cancelled'; outputs?: ArtifactReference[]; actorId?: string; feedback?: string; channel?: string }>;
+    history: Array<{ stepId: string; version: number; kind: 'completed' | 'approved' | 'revised' | 'paused' | 'resumed' | 'cancelled' | 'waiting_engine' | 'engine_resumed'; outputs?: ArtifactReference[]; actorId?: string; feedback?: string; channel?: string }>;
     decisions: Record<string, string>;
 }
 function stepOf(run: CircuitExecution) {
@@ -57,11 +57,35 @@ export function completeStep(run: CircuitExecution, stepId: string, version: num
     const kind=stepOf(run).kind;
     const required:Partial<Record<typeof kind,ArtifactReference['kind']>>={watch:'watch',writing:'article',visual_brief:'visual_prompt',generation:'image',control:'review'};
     const expected=required[kind];
-    if(!expected || !parsed.some(ref=>ref.kind===expected) || parsed.some(ref=>ref.kind!==expected && !(kind==='watch'&&ref.kind==='subject')))throw new CircuitError('INVALID_STEP_OUTPUT',400);
+    // Livrables d'accompagnement tolérés : un sujet avec la veille, un brief avec le prompt graphique.
+    // Le genre REQUIS reste obligatoire : un brief seul ne remplace jamais un visual_prompt.
+    const companion:Partial<Record<typeof kind,ArtifactReference['kind']>>={watch:'subject',visual_brief:'brief'};
+    if(!expected || !parsed.some(ref=>ref.kind===expected) || parsed.some(ref=>ref.kind!==expected && ref.kind!==companion[kind]))throw new CircuitError('INVALID_STEP_OUTPUT',400);
     const next=structuredClone(run);
     Object.defineProperty(next.outputs,stepId,{value:parsed,enumerable:true,writable:true,configurable:true});
     next.history.push({stepId,version,kind:'completed',outputs:parsed});
     next.version++;advance(next);return next;
+}
+/** Engine indisponible : état durable de l'exécution, jamais un visuel de remplacement. Le prompt reste
+ * chez son propriétaire (référence `visual_prompt` déjà dans `outputs`). */
+export function waitForEngine(run: CircuitExecution, stepId: string, version: number): CircuitExecution {
+    assertCurrent(run,stepId,version);
+    if(run.status!=='ready' || stepOf(run).kind!=='generation')throw new CircuitError('ENGINE_WAIT_NOT_ALLOWED');
+    const next=structuredClone(run);
+    next.status='waiting_engine';
+    next.history.push({stepId,version,kind:'waiting_engine'});
+    next.version++;
+    return next;
+}
+/** Reprise explicite (humain admin) de l'étape de génération inchangée : même étape, même dossier. */
+export function resumeEngine(run: CircuitExecution, stepId: string, version: number, actorId?: string): CircuitExecution {
+    if(run.version!==version || run.currentStepId!==stepId)throw new CircuitError('STALE_EXECUTION');
+    if(run.status!=='waiting_engine' || stepOf(run).kind!=='generation')throw new CircuitError('ENGINE_NOT_WAITING');
+    const next=structuredClone(run);
+    next.status='ready';
+    next.history.push({stepId,version,kind:'engine_resumed',...(actorId?{actorId}:{})});
+    next.version++;
+    return next;
 }
 export function decideStep(run: CircuitExecution, input: CircuitDecision, actor: { id: string; kind: 'human' | 'bot' }): CircuitExecution {
     const decision=CircuitDecisionSchema.parse(input);
@@ -96,7 +120,8 @@ export function decideStep(run: CircuitExecution, input: CircuitDecision, actor:
     next.history.push({stepId:step.id,version:run.version,kind:decision.choice==='approve'?'approved':'revised',actorId:actor.id,feedback:decision.feedback,channel:decision.channel});
     next.decisions[decision.idempotencyKey]=fingerprint;next.version++;return next;
 }
-export function controlExecution(run:CircuitExecution, action:'pause'|'resume'|'cancel', expectedVersion:number, actorId:string):CircuitExecution {
+export function controlExecution(run:CircuitExecution, action:'pause'|'resume'|'cancel'|'retry_engine', expectedVersion:number, actorId:string):CircuitExecution {
+    if(action==='retry_engine')return resumeEngine(run,run.currentStepId,expectedVersion,actorId);
     if(run.version!==expectedVersion)throw new CircuitError('STALE_EXECUTION');
     if(run.status==='cancelled'||run.status==='ready_to_publish')throw new CircuitError('EXECUTION_TERMINAL');
     const next=structuredClone(run);
