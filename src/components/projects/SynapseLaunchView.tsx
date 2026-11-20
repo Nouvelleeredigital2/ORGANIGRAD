@@ -2,7 +2,28 @@ import { useMemo, useState } from 'react';
 import { useWorkspaceContext } from '../../contexts/WorkspaceContext';
 import { useSession } from '../../hooks/useSession';
 
-const CODE = /^[A-Za-z0-9_-]{43}$/;
+const LEGACY_CODE = /^[A-Za-z0-9_-]{43}$/;
+const SIGNED_CODE = /^[A-Za-z0-9_-]{1,512}\.[A-Za-z0-9_-]{1,3072}\.[A-Za-z0-9_-]{64,128}$/;
+const MAX_LAUNCH_CODE_LENGTH = 4096;
+
+function isValidLaunchCode(code: string): boolean {
+    if (LEGACY_CODE.test(code)) return true;
+    if (code.length > MAX_LAUNCH_CODE_LENGTH || !SIGNED_CODE.test(code)) return false;
+
+    try {
+        const encodedHeader = code.split('.')[0]!;
+        const base64Header = encodedHeader.replaceAll('-', '+').replaceAll('_', '/');
+        const paddedHeader = base64Header.padEnd(Math.ceil(base64Header.length / 4) * 4, '=');
+        const header = JSON.parse(atob(paddedHeader)) as unknown;
+        return Boolean(
+            header && typeof header === 'object' && !Array.isArray(header) &&
+            (header as Record<string, unknown>).alg === 'EdDSA' &&
+            (header as Record<string, unknown>).typ === 'synapse-launch+jws',
+        );
+    } catch {
+        return false;
+    }
+}
 
 interface Props {
     fetcher?: typeof fetch;
@@ -15,10 +36,10 @@ export function SynapseLaunchView({ fetcher = fetch, navigate = url => window.lo
     const code = useMemo(() => new URLSearchParams(window.location.search).get('code') ?? '', []);
     const [selected, setSelected] = useState(workspace.workspaces.length === 1 ? workspace.workspaces[0]!.id : '');
     const [busy, setBusy] = useState(false);
-    const [error, setError] = useState<string | null>(CODE.test(code) ? null : 'Le code de lancement Synapse est invalide ou absent.');
+    const [error, setError] = useState<string | null>(isValidLaunchCode(code) ? null : 'Le code de lancement Synapse est invalide ou absent.');
 
     const submit = async () => {
-        if (!session?.access_token || !selected || !CODE.test(code)) return;
+        if (!session?.access_token || !selected || !isValidLaunchCode(code)) return;
         setBusy(true); setError(null);
         try {
             const base = String(import.meta.env.VITE_ORCHESTRATOR_URL ?? '').replace(/\/$/, '');
