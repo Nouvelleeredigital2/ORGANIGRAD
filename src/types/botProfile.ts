@@ -149,9 +149,9 @@ export function validateBotProfile(p: BotProfile): string[] {
         errors.push('Nom de fichier : lettres, chiffres, points, tirets, termine par .txt.');
     }
     if (!BOT_FAMILIES.includes(p.family)) errors.push('Famille inconnue.');
-    if (p.family === 'redacteur' && !p.network) errors.push('Un redacteur doit avoir un reseau.');
+    if (p.family === 'redacteur' && !p.network) errors.push('Un rédacteur doit avoir un réseau.');
     if (p.brand && p.brand.length > BOT_FIELD_MAX.brand) errors.push('Marque : 120 caracteres maximum.');
-    if (p.network && p.network.length > BOT_FIELD_MAX.network) errors.push('Reseau : 40 caracteres maximum.');
+    if (p.network && p.network.length > BOT_FIELD_MAX.network) errors.push('Réseau : 40 caractères maximum.');
     if (p.telegramUsername && !TELEGRAM_USERNAME_PATTERN.test(p.telegramUsername)) {
         errors.push('Nom Telegram : lettres, chiffres et tirets bas uniquement, sans @.');
     }

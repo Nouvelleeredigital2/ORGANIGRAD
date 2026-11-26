@@ -282,7 +282,7 @@ function MainAppContent() {
                         poleDirectory={poleDirectory}
                         selectedPoleKey={selectedPoleKey}
                         setSelectedPoleKey={setSelectedPoleKey}
-                        batchExportLabel="Export par lots A3 (tous les poles)"
+                        batchExportLabel="Export par lots A3 (tous les pôles)"
                     />
                 }
                 header={
@@ -425,7 +425,7 @@ function MainAppContent() {
                                 <button
                                     onClick={handleResetData}
                                     className="flex items-center gap-2 px-4 py-2 bg-white/80 backdrop-blur-md rounded-xl text-[10px] font-black uppercase tracking-widest text-red-500 border border-red-100 hover:bg-red-50 transition-all shadow-lg shadow-slate-200/20"
-                                    title="Reinitialiser toutes les modifications"
+                                    title="Réinitialiser toutes les modifications"
                                 >
                                     <RefreshCw className="w-3.5 h-3.5" />
                                     Reset

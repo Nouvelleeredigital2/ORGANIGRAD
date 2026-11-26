@@ -27,7 +27,7 @@ export const useGoogleSheets = (url?: string) => {
         } catch (err) {
             if (requestIdRef.current !== requestId) return;
             console.error(err);
-            setError("Erreur lors de la recuperation des donnees.");
+            setError("Erreur lors de la récupération des données.");
         } finally {
             if (requestIdRef.current === requestId) setLoading(false);
         }

@@ -39,7 +39,7 @@ export const PoleOrgChartView: React.FC<PoleOrgChartViewProps> = ({
         return (
             <div className="flex h-full w-full items-center justify-center">
                 <div className="rounded-[2rem] border border-dashed border-slate-300 bg-white/70 px-10 py-12 text-center text-slate-500">
-                    Selectionnez un pole dans la barre laterale pour afficher son organigramme.
+                    Sélectionnez un pôle dans la barre latérale pour afficher son organigramme.
                 </div>
             </div>
         );

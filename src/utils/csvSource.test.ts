@@ -7,8 +7,8 @@ describe('resolveCsvSource', () => {
             inputUrl: '',
             effectiveUrl: '/data.csv',
             isRemote: false,
-            label: 'Jeu local embarque',
-            helperText: "Aucune URL distante configuree. L'application utilise le CSV local integre.",
+            label: 'Jeu local embarqué',
+            helperText: "Aucune URL distante configurée. L'application utilise le CSV local intégré.",
         });
     });
 
@@ -18,7 +18,7 @@ describe('resolveCsvSource', () => {
             effectiveUrl: 'https://example.com/org.csv',
             isRemote: true,
             label: 'Source distante',
-            helperText: "CSV distant configure. La synchronisation utilise l'URL fournie.",
+            helperText: "CSV distant configuré. La synchronisation utilise l'URL fournie.",
         });
     });
 });

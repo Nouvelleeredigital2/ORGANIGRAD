@@ -106,7 +106,7 @@ export const OrgChart = forwardRef<OrgChartRef, OrgChartProps>(({
                             <button
                                 onClick={() => resetTransform()}
                                 className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/80 bg-white/92 text-slate-600 shadow-[0_16px_40px_rgba(148,163,184,0.18)] backdrop-blur-xl transition-all hover:-translate-y-0.5 hover:bg-white"
-                                title="Reinitialiser la vue"
+                                title="Réinitialiser la vue"
                             >
                                 <Maximize className="h-5 w-5" />
                             </button>

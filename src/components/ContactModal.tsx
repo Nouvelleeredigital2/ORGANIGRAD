@@ -67,7 +67,7 @@ export const ContactModal: React.FC<ContactModalProps> = ({ isOpen, onClose, age
     const officeDisplay = agent.service?.trim() || 'Non renseigne';
 
     return (
-        <BaseModal isOpen={isOpen} onClose={onClose} title={isEditMode ? 'Modifier le Contact' : 'Contact & Reseau'}>
+        <BaseModal isOpen={isOpen} onClose={onClose} title={isEditMode ? 'Modifier le Contact' : 'Contact & Réseau'}>
             <div className="space-y-8">
                 <div className="flex items-center gap-4 rounded-2xl border border-slate-100 bg-slate-50 p-4">
                     <div className="flex h-12 w-12 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg shadow-blue-200">
