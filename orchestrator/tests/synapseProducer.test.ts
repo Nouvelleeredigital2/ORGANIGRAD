@@ -75,6 +75,24 @@ describe('createSynapseProducer', () => {
         vi.unstubAllGlobals();
     });
 
+    it('actionUrl ouvre la vue Orchestration sur le nœud, dans le format lu par la SPA', async () => {
+        const fetchSpy = vi.fn(async () => ({ ok: true, json: async () => ({}) }));
+        vi.stubGlobal('fetch', fetchSpy);
+        const producer = createSynapseProducer({
+            synapseUrl: 'http://synapse.test/',
+            appUrl: 'https://organigrad.app',
+        });
+        await producer.onHumanGate(humanNode);
+        const [, init] = fetchSpy.mock.calls[0] as unknown as [string, { body: string }];
+        const body = JSON.parse(init.body);
+        const params = new URL(body.payload.actionUrl).searchParams;
+        expect(params.get('v')).toBe('orchestration');
+        expect(params.get('node')).toBe('node-approval-1');
+        expect(params.has('view')).toBe(false);
+        expect(params.has('nodeId')).toBe(false);
+        vi.unstubAllGlobals();
+    });
+
     it('ne lève pas si le bus est injoignable (best-effort)', async () => {
         vi.stubGlobal('fetch', vi.fn(async () => {
             throw new Error('ECONNREFUSED');

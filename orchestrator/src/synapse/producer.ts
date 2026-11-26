@@ -13,6 +13,7 @@
  */
 import { createEvent, type SynapseEvent } from "@apps2026/contracts";
 import { log } from "../lib/logger.js";
+import { buildValidationLink } from "../lib/validationLink.js";
 import { synapseAuthHeaders } from "./serviceAuth.js";
 
 /** Forme minimale d'un nœud HUMAN (structurellement compatible avec HybridNode). */
@@ -181,7 +182,7 @@ export function createSynapseProducer(opts: {
     async onHumanGate(node: HumanGateNode): Promise<void> {
       const correlationId = `val-${node.id}`;
       log('info', 'validation.requested', { correlationId, nodeId: node.id });
-      const actionUrl = appUrl ? `${appUrl}?view=orchestration&nodeId=${node.id}` : undefined;
+      const actionUrl = appUrl ? buildValidationLink(appUrl, node.id) : undefined;
       await post(buildValidationRequestedEvent(node, { actionUrl }));
     },
     async onDecision(

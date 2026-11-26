@@ -3,6 +3,7 @@ import type { TransitionEvent } from '../state/graphStore.js';
 import { safeFetch, type SsrfPolicy } from '../net/ssrfGuard.js';
 import { parseEmailNotification, type EmailNotification } from './notificationContract.js';
 import { FixedWindowRateLimiter, type RateLimiter } from './rateLimiter.js';
+import { buildValidationLink } from '../lib/validationLink.js';
 
 /**
  * Interface minimale requise par le Notifier — compatible GraphStore et PgGraphStore.
@@ -182,7 +183,7 @@ export function buildValidationBlocks(
                         text: '📋 Ouvrir le Centre de validation',
                         emoji: true,
                     },
-                    url: `${appUrl}?view=orchestration&nodeId=${encodeURIComponent(nodeId)}`,
+                    url: buildValidationLink(appUrl, nodeId),
                     style: 'primary',
                 },
             ],

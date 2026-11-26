@@ -94,15 +94,32 @@ function codeBadge(text: string): string {
     return `<code style="background:rgba(0,0,0,0.06);border-radius:4px;padding:2px 6px;font-size:12px;font-family:ui-monospace,monospace;">${escHtml(text)}</code>`;
 }
 
+/**
+ * Lien vers le Centre de validation (vue Orchestration), au format lu par la
+ * SPA : `v` et `node` (src/routing/appUrl.ts). Copie de
+ * orchestrator/src/lib/validationLink.ts — runtimes séparés.
+ */
+function validationLink(appUrl: string, nodeId: string): string {
+    try {
+        const url = new URL(appUrl);
+        url.searchParams.set('v', 'orchestration');
+        url.searchParams.set('node', nodeId);
+        return url.toString();
+    } catch {
+        return `${appUrl}?v=orchestration&node=${encodeURIComponent(nodeId)}`;
+    }
+}
+
 /** Email HITL — envoyé quand un nœud passe en WAITING_HUMAN_APPROVAL */
 export function buildHitlEmail(data: HitlEmailData): { subject: string; html: string; text: string } {
     const subject = `🔒 Validation requise · ${data.nodeName}`;
     const ts = data.generatedAt ?? new Date().toISOString();
+    const link = data.appUrl ? validationLink(data.appUrl, data.nodeId) : null;
 
-    const buttonHtml = data.appUrl
+    const buttonHtml = link
         ? `
       <tr><td style="padding-top:28px;">
-        <a href="${escHtml(data.appUrl)}?view=orchestration&nodeId=${encodeURIComponent(data.nodeId)}"
+        <a href="${escHtml(link)}"
            style="display:inline-block;background:${COLORS.accent};color:#fff;font-size:14px;font-weight:600;padding:12px 24px;border-radius:10px;text-decoration:none;letter-spacing:-0.01em;">
           Ouvrir le Centre de validation →
         </a>
@@ -133,9 +150,7 @@ export function buildHitlEmail(data: HitlEmailData): { subject: string; html: st
         `Transition : ${data.fromStatus} → ${data.toStatus}`,
         `ID : ${data.nodeId}`,
         `Date : ${ts}`,
-        ...(data.appUrl
-            ? ['', `Lien : ${data.appUrl}?view=orchestration&nodeId=${encodeURIComponent(data.nodeId)}`]
-            : []),
+        ...(link ? ['', `Lien : ${link}`] : []),
         '',
         '---',
         'Organigrad — notification automatique',
