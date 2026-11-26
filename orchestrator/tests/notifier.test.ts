@@ -161,6 +161,25 @@ describe('Block Kit — buildValidationBlocks', () => {
         expect(hasActions).toBe(true);
     });
 
+    it('le bouton ouvre la vue Orchestration sur le nœud, dans le format lu par la SPA', () => {
+        const blocks = buildValidationBlocks(
+            'nœud 1', 'Alice', 'DGA', 'EXECUTING', 'WAITING_HUMAN_APPROVAL',
+            'https://organigrad.app',
+        );
+        const actions = blocks.find((b) => (b as { type: string }).type === 'actions') as
+            | { elements: Array<{ url: string }> }
+            | undefined;
+        // La SPA lit `v` et `node` (src/routing/appUrl.ts). L'ancien lien
+        // `?view=…&nodeId=…` retombait sur l'organigramme.
+        const url = actions?.elements[0]?.url;
+        expect(url).toBeDefined();
+        const params = new URL(url ?? '').searchParams;
+        expect(params.get('v')).toBe('orchestration');
+        expect(params.get('node')).toBe('nœud 1');
+        expect(params.has('view')).toBe(false);
+        expect(params.has('nodeId')).toBe(false);
+    });
+
     it('n\'inclut PAS de bouton "actions" sans appUrl', () => {
         const blocks = buildValidationBlocks('n1', 'Alice', 'DGA', 'EXECUTING', 'WAITING_HUMAN_APPROVAL');
         const hasActions = blocks.some((b) => (b as { type: string }).type === 'actions');
