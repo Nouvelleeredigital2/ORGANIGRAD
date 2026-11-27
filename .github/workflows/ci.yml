@@ -50,6 +50,13 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run test:e2e
+      # Parcours « Projets » (bureau + mobile) contre une fixture HTTP en
+      # mémoire, sans Supabase ni secret. Vert en local, lancé nulle part
+      # jusqu'ici. `if: success() || failure()` : il tourne même si la suite
+      # principale échoue, pour ne pas masquer un second problème.
+      - name: E2E Projets (fixture locale)
+        if: success() || failure()
+        run: npx playwright test --config playwright.projects.config.ts
       - name: Rapport en cas d'échec
         if: failure()
         uses: actions/upload-artifact@v4
@@ -60,7 +67,10 @@ jobs:
           # L'ancien chemin ne matchait jamais rien : 0 artefact remonté
           # sur un échec, aucun moyen de diagnostiquer après coup.
           name: playwright-report
-          path: test-results/
+          path: |
+            test-results/
+            e2e-projects/test-results/
+            e2e-projects/playwright-report/
           if-no-files-found: warn
           retention-days: 7
 
@@ -121,6 +131,15 @@ jobs:
         options: >-
           --health-cmd pg_isready --health-interval 5s
           --health-timeout 5s --health-retries 10
+      # Troisième base, VIERGE, pour l'intégration PgGraphStore (même raison).
+      postgres-graphe:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: test
+        ports: ['5434:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 10
     defaults:
       run:
         working-directory: orchestrator
@@ -144,6 +163,13 @@ jobs:
         run: npm test -- concurrentWrites
         env:
           TEST_DATABASE_URL: postgres://postgres:test@localhost:5433/postgres
+      # Store de graphe réel (PgGraphStore) : lectures/écritures de nœuds et
+      # transitions sur un vrai moteur. Suite verte en local mais lancée nulle
+      # part jusqu'ici. Base vierge dédiée : elle crée son propre schéma minimal.
+      - name: Store de graphe — intégration PostgreSQL
+        run: npm test -- pgGraphStore.integration
+        env:
+          TEST_DATABASE_URL: postgres://postgres:test@localhost:5434/postgres
 
   # Suite connectée à un vrai Supabase (P1-7). Uniquement sur déclenchement
   # MANUEL : elle crée puis supprime des données, et exige un projet de test.
