@@ -82,7 +82,7 @@ export const Topbar: React.FC<TopbarProps> = ({
                     className="origin-button flex items-center gap-2 text-xs font-extrabold uppercase tracking-widest"
                     onClick={handleExportCSV}
                     disabled={loading || isImporting || !canExport}
-                    title="Exporter les donnees modifiees au format CSV"
+                    title="Exporter les données modifiées au format CSV"
                 >
                     <CloudDownload className="w-4 h-4" />
                     Export CSV

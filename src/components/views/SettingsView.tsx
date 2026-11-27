@@ -362,7 +362,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         className="flex items-center gap-2 px-6 py-3 bg-white text-red-600 font-black uppercase tracking-widest text-xs rounded-xl border border-red-200 shadow-lg shadow-red-200/20 hover:bg-red-50 transition-all"
                     >
                         <RefreshCw className="w-4 h-4" />
-                        Reinitialiser les donnees locales
+                        Réinitialiser les données locales
                     </button>
                 </section>
             </div>
